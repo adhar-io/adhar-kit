@@ -1,0 +1,76 @@
+# Adhar Kit Logging Configuration Sample
+# Add this to your application.yml or application.properties
+
+adhar:
+  logging:
+    # Enable/disable the entire logging framework
+    enabled: true
+
+    # AOP-based logging aspects configuration
+    aspects:
+      enabled: true                    # Enable declarative logging annotations
+
+    # Sensitive data masking configuration
+    masking:
+      enabled: true                    # Enable automatic data masking
+      additional-keys:                 # Additional field names to mask beyond defaults
+        - customSecret
+        - apiKey
+        - internalToken
+        - clientSecret
+
+    # MDC (Mapped Diagnostic Context) configuration
+    mdc:
+      enabled: true                    # Enable MDC context management
+      include-correlation-id: true     # Include correlation IDs in logs
+      include-user-info: true          # Include user information in logs
+      correlation-id-field: correlationId
+      user-id-field: userId
+      session-id-field: sessionId
+
+    # Distributed tracing integration
+    tracing:
+      enabled: true                    # Enable tracing integration
+      include-trace-id: true           # Include trace IDs in logs
+      include-span-id: true            # Include span IDs in logs
+      include-parent-id: true          # Include parent span IDs in logs
+      trace-id-field: traceId
+      span-id-field: spanId
+      parent-id-field: parentId
+
+    # JSON encoder configuration
+    json-encoder:
+      include-mdc: true                # Include MDC in JSON logs
+      custom-fields:                   # Custom fields to add to all logs
+        application: "${spring.application.name}"
+        version: "@project.version@"
+        environment: "${spring.profiles.active}"
+
+# Standard Spring Boot logging configuration
+logging:
+  level:
+    # Set debug level for Adhar logging framework
+    com.adhar.adharkit.logging: DEBUG
+
+    # Set levels for your application packages
+    com.yourcompany.yourapp: INFO
+
+    # Audit and metrics loggers
+    AUDIT: INFO
+    METRICS: INFO
+
+    # Root level
+    root: INFO
+
+  # Structured logging configuration
+  pattern:
+    # Console pattern for development
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{correlationId:-}] %logger{36} - %msg%n"
+
+    # File pattern for production (JSON format recommended)
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{correlationId:-},%X{traceId:-},%X{spanId:-}] %logger{36} - %msg%n"
+
+# Example: Production-ready JSON logging with Logstash
+# Uncomment and customize for production use
+#logging:
+#  config: classpath:logback-spring.xml

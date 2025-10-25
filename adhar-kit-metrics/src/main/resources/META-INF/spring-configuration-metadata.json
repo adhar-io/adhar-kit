@@ -1,0 +1,343 @@
+{
+  "groups": [
+    {
+      "name": "adhar.metrics",
+      "type": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties",
+      "description": "Configuration properties for Adhar Metrics Starter."
+    },
+    {
+      "name": "adhar.metrics.prometheus",
+      "type": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$PrometheusProperties",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties",
+      "description": "Configuration properties for Prometheus metrics."
+    },
+    {
+      "name": "adhar.metrics.open-telemetry",
+      "type": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$OpenTelemetryProperties",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties",
+      "description": "Configuration properties for OpenTelemetry metrics."
+    },
+    {
+      "name": "adhar.metrics.web",
+      "type": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$WebMetricsProperties",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties",
+      "description": "Configuration properties for web metrics."
+    },
+    {
+      "name": "adhar.metrics.jvm",
+      "type": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$JvmMetricsProperties",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties",
+      "description": "Configuration properties for JVM metrics."
+    },
+    {
+      "name": "adhar.metrics.system",
+      "type": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$SystemMetricsProperties",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties",
+      "description": "Configuration properties for system metrics."
+    },
+    {
+      "name": "adhar.metrics.application",
+      "type": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$ApplicationMetricsProperties",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties",
+      "description": "Configuration properties for application-specific metrics."
+    },
+    {
+      "name": "adhar.metrics.kubernetes",
+      "type": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$KubernetesProperties",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties",
+      "description": "Configuration properties for Kubernetes-specific metrics."
+    }
+  ],
+  "properties": [
+    {
+      "name": "adhar.metrics.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties",
+      "description": "Whether metrics collection is enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.common-tags",
+      "type": "java.util.Map<java.lang.String,java.lang.String>",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties",
+      "description": "Common tags to be applied to all metrics."
+    },
+    {
+      "name": "adhar.metrics.prometheus.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$PrometheusProperties",
+      "description": "Whether Prometheus metrics are enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.prometheus.endpoint",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$PrometheusProperties",
+      "description": "Prometheus metrics endpoint path.",
+      "defaultValue": "/actuator/prometheus"
+    },
+    {
+      "name": "adhar.metrics.prometheus.descriptions",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$PrometheusProperties",
+      "description": "Whether to include description in metrics output.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.prometheus.step",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$PrometheusProperties",
+      "description": "Step size for Prometheus metrics (duration between pushes).",
+      "defaultValue": "PT1M"
+    },
+    {
+      "name": "adhar.metrics.open-telemetry.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$OpenTelemetryProperties",
+      "description": "Whether OpenTelemetry metrics are enabled.",
+      "defaultValue": false
+    },
+    {
+      "name": "adhar.metrics.open-telemetry.endpoint",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$OpenTelemetryProperties",
+      "description": "OpenTelemetry endpoint URL.",
+      "defaultValue": "http://localhost:4318/v1/metrics"
+    },
+    {
+      "name": "adhar.metrics.open-telemetry.timeout",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$OpenTelemetryProperties",
+      "description": "Export timeout for metrics.",
+      "defaultValue": "PT30S"
+    },
+    {
+      "name": "adhar.metrics.open-telemetry.interval",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$OpenTelemetryProperties",
+      "description": "Export interval for metrics.",
+      "defaultValue": "PT30S"
+    },
+    {
+      "name": "adhar.metrics.web.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$WebMetricsProperties",
+      "description": "Whether web metrics are enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.web.record-request-size",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$WebMetricsProperties",
+      "description": "Whether to record request size metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.web.record-response-size",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$WebMetricsProperties",
+      "description": "Whether to record response size metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.web.max-uri-tags",
+      "type": "java.lang.Integer",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$WebMetricsProperties",
+      "description": "Maximum number of URI tags to create.",
+      "defaultValue": 100
+    },
+    {
+      "name": "adhar.metrics.jvm.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$JvmMetricsProperties",
+      "description": "Whether JVM metrics are enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.jvm.memory",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$JvmMetricsProperties",
+      "description": "Whether to collect memory metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.jvm.gc",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$JvmMetricsProperties",
+      "description": "Whether to collect GC metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.jvm.threads",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$JvmMetricsProperties",
+      "description": "Whether to collect thread metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.jvm.class-loader",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$JvmMetricsProperties",
+      "description": "Whether to collect class loader metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.system.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$SystemMetricsProperties",
+      "description": "Whether system metrics are enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.system.processor",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$SystemMetricsProperties",
+      "description": "Whether to collect CPU metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.system.file-descriptor",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$SystemMetricsProperties",
+      "description": "Whether to collect file descriptor metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.system.uptime",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$SystemMetricsProperties",
+      "description": "Whether to collect uptime metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.system.disk-space",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$SystemMetricsProperties",
+      "description": "Whether to collect disk space metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.application.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$ApplicationMetricsProperties",
+      "description": "Whether application metrics are enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.application.method-timing",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$ApplicationMetricsProperties",
+      "description": "Whether to enable method-level timing metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.application.exception-counting",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$ApplicationMetricsProperties",
+      "description": "Whether to enable exception counting metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.application.cache",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$ApplicationMetricsProperties",
+      "description": "Whether to enable cache metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.application.database",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$ApplicationMetricsProperties",
+      "description": "Whether to enable database metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.kubernetes.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$KubernetesProperties",
+      "description": "Whether Kubernetes metrics are enabled.",
+      "defaultValue": false
+    },
+    {
+      "name": "adhar.metrics.kubernetes.include-pod-info",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$KubernetesProperties",
+      "description": "Whether to include pod information in metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.kubernetes.include-namespace",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$KubernetesProperties",
+      "description": "Whether to include namespace information in metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.kubernetes.include-node-info",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$KubernetesProperties",
+      "description": "Whether to include node information in metrics.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.kubernetes.custom-labels",
+      "type": "java.lang.String[]",
+      "sourceType": "com.adhar.adharkit.metrics.properties.AdharMetricsProperties$KubernetesProperties",
+      "description": "Custom Kubernetes labels to include as tags."
+    }
+  ],
+  "hints": [
+    {
+      "name": "adhar.metrics.prometheus.step",
+      "values": [
+        {
+          "value": "PT1M",
+          "description": "1 minute"
+        },
+        {
+          "value": "PT30S",
+          "description": "30 seconds"
+        },
+        {
+          "value": "PT10S",
+          "description": "10 seconds"
+        }
+      ]
+    },
+    {
+      "name": "adhar.metrics.open-telemetry.timeout",
+      "values": [
+        {
+          "value": "PT30S",
+          "description": "30 seconds"
+        },
+        {
+          "value": "PT10S",
+          "description": "10 seconds"
+        },
+        {
+          "value": "PT5S",
+          "description": "5 seconds"
+        }
+      ]
+    },
+    {
+      "name": "adhar.metrics.open-telemetry.interval",
+      "values": [
+        {
+          "value": "PT30S",
+          "description": "30 seconds"
+        },
+        {
+          "value": "PT1M",
+          "description": "1 minute"
+        },
+        {
+          "value": "PT5M",
+          "description": "5 minutes"
+        }
+      ]
+    }
+  ]
+}
+

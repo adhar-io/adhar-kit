@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns="http://maven.apache.org/POM/4.0.0"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.adhar.kit</groupId>
+    <artifactId>adhar-kit</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+
+    <name>Adhar Kit</name>
+    <description>Enterprise-grade microservices platform toolkit with comprehensive support for resilience, observability, and cloud-native patterns</description>
+    <url>https://github.com/adhar-platform/adhar-kit</url>
+    <inceptionYear>2025</inceptionYear>
+
+    <organization>
+        <name>Adhar Platform Team</name>
+        <url>https://adhar-platform.io</url>
+    </organization>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>adhar-team</id>
+            <name>Adhar Platform Team</name>
+            <email>dev@adhar-platform.io</email>
+            <organization>Adhar Platform</organization>
+            <roles>
+                <role>architect</role>
+                <role>developer</role>
+            </roles>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:git://github.com/adhar-platform/adhar-kit.git</connection>
+        <developerConnection>scm:git:ssh://github.com:adhar-platform/adhar-kit.git</developerConnection>
+        <url>https://github.com/adhar-platform/adhar-kit/tree/main</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/adhar-platform/adhar-kit/issues</url>
+    </issueManagement>
+
+    <ciManagement>
+        <system>GitHub Actions</system>
+        <url>https://github.com/adhar-platform/adhar-kit/actions</url>
+    </ciManagement>
+
+    <modules>
+        <module>adhar-kit-bom</module>
+        <module>adhar-kit-parent</module>
+        <module>adhar-kit-commons</module>
+        <module>adhar-kit-persistence</module>
+        <module>adhar-kit-config</module>
+        <module>adhar-kit-cache</module>
+        <module>adhar-kit-core</module>
+        <!-- Temporarily disabled - Logback ILoggingEvent interface compatibility issues -->
+        <!-- <module>adhar-kit-logging</module> -->
+        <!-- Temporarily disabled - Spring Boot Actuator dependency issues -->
+        <!-- <module>adhar-kit-metrics</module> -->
+        <module>adhar-kit-messaging</module>
+        <!-- Temporarily disabled - depends on messaging installation issue -->
+        <!-- <module>adhar-kit-analytics</module> -->
+        <!-- Temporarily disabled - DocsProperties compilation issue -->
+        <!-- <module>adhar-kit-docs</module> -->
+        <module>adhar-kit-grpc</module>
+        <module>adhar-kit-security</module>
+        <module>adhar-kit-mers</module>
+        <!-- Temporarily disabled - OpenTelemetry dependency issue -->
+        <!-- <module>adhar-kit-tracing</module> -->
+        <!-- Temporarily disabled - file corruption issues -->
+        <!-- <module>adhar-kit-test-commons</module> -->
+        <module>adhar-kit-resilience</module>
+        <!-- Temporarily disabled - missing actuator dependency -->
+        <!-- <module>adhar-kit-health</module> -->
+        <!-- Temporarily disabled - missing kubernetes client dependencies -->
+        <!-- <module>adhar-kit-kubernetes</module> -->
+        <!-- Temporarily disabled - missing dapr dependencies -->
+        <!-- <module>adhar-kit-dapr</module> -->
+        <!-- Temporarily disabled - depends on other modules -->
+        <!-- <module>adhar-kit-starter</module> -->
+        <!-- Temporarily disabled due to Spring AI API compatibility issues -->
+        <!-- <module>adhar-kit-ai</module> -->
+    </modules>
+
+    <profiles>
+        <!-- Release Profile -->
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.3.1</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>3.11.2</version>
+                        <configuration>
+                            <doclint>none</doclint>
+                            <quiet>true</quiet>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- Coverage Profile -->
+        <profile>
+            <id>coverage</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.jacoco</groupId>
+                        <artifactId>jacoco-maven-plugin</artifactId>
+                        <version>0.8.12</version>
+                        <executions>
+                            <execution>
+                                <id>prepare-agent</id>
+                                <goals>
+                                    <goal>prepare-agent</goal>
+                                </goals>
+                            </execution>
+                            <execution>
+                                <id>report</id>
+                                <phase>test</phase>
+                                <goals>
+                                    <goal>report</goal>
+                                </goals>
+                            </execution>
+                            <execution>
+                                <id>report-aggregate</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>report-aggregate</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
+</project>

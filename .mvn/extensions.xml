@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<extensions>
+    <!-- Maven Build Cache Extension for faster builds -->
+    <extension>
+        <groupId>org.apache.maven.extensions</groupId>
+        <artifactId>maven-build-cache-extension</artifactId>
+        <version>1.2.0</version>
+    </extension>
+</extensions>
+

@@ -1,0 +1,368 @@
+{
+  "groups": [
+    {
+      "name": "adhar.tracing",
+      "type": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Configuration properties for Adhar Tracing Starter."
+    },
+    {
+      "name": "adhar.tracing.open-telemetry",
+      "type": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$OpenTelemetryProperties",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Configuration properties for OpenTelemetry tracing."
+    },
+    {
+      "name": "adhar.tracing.zipkin",
+      "type": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$ZipkinProperties",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Configuration properties for Zipkin tracing."
+    },
+    {
+      "name": "adhar.tracing.jaeger",
+      "type": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$JaegerProperties",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Configuration properties for Jaeger tracing."
+    },
+    {
+      "name": "adhar.tracing.web",
+      "type": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$WebTracingProperties",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Configuration properties for web tracing."
+    },
+    {
+      "name": "adhar.tracing.database",
+      "type": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$DatabaseTracingProperties",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Configuration properties for database tracing."
+    },
+    {
+      "name": "adhar.tracing.messaging",
+      "type": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$MessagingTracingProperties",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Configuration properties for messaging tracing."
+    },
+    {
+      "name": "adhar.tracing.sampling",
+      "type": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$SamplingProperties",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Configuration properties for sampling."
+    },
+    {
+      "name": "adhar.tracing.propagation",
+      "type": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$PropagationProperties",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Configuration properties for propagation."
+    },
+    {
+      "name": "adhar.tracing.baggage",
+      "type": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$BaggageProperties",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Configuration properties for baggage."
+    },
+    {
+      "name": "adhar.tracing.resource",
+      "type": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$ResourceProperties",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Configuration properties for resource attributes."
+    }
+  ],
+  "properties": [
+    {
+      "name": "adhar.tracing.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Whether tracing is enabled globally.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.tags",
+      "type": "java.util.Map<java.lang.String,java.lang.String>",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties",
+      "description": "Common tags to be added to all spans."
+    },
+    {
+      "name": "adhar.tracing.open-telemetry.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$OpenTelemetryProperties",
+      "description": "Whether OpenTelemetry tracing is enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.open-telemetry.endpoint",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$OpenTelemetryProperties",
+      "description": "OTLP endpoint URL.",
+      "defaultValue": "http://localhost:4317"
+    },
+    {
+      "name": "adhar.tracing.open-telemetry.timeout",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$OpenTelemetryProperties",
+      "description": "Export timeout.",
+      "defaultValue": "PT30S"
+    },
+    {
+      "name": "adhar.tracing.open-telemetry.interval",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$OpenTelemetryProperties",
+      "description": "Export interval.",
+      "defaultValue": "PT30S"
+    },
+    {
+      "name": "adhar.tracing.open-telemetry.use-grpc",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$OpenTelemetryProperties",
+      "description": "Whether to use gRPC (true) or HTTP (false).",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.open-telemetry.compression",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$OpenTelemetryProperties",
+      "description": "Compression type (gzip, none).",
+      "defaultValue": "gzip"
+    },
+    {
+      "name": "adhar.tracing.zipkin.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$ZipkinProperties",
+      "description": "Whether Zipkin tracing is enabled.",
+      "defaultValue": false
+    },
+    {
+      "name": "adhar.tracing.zipkin.base-url",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$ZipkinProperties",
+      "description": "Zipkin base URL.",
+      "defaultValue": "http://localhost:9411"
+    },
+    {
+      "name": "adhar.tracing.zipkin.api-path",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$ZipkinProperties",
+      "description": "API endpoint path.",
+      "defaultValue": "/api/v2/spans"
+    },
+    {
+      "name": "adhar.tracing.zipkin.sender-type",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$ZipkinProperties",
+      "description": "Sender type (http, kafka).",
+      "defaultValue": "http"
+    },
+    {
+      "name": "adhar.tracing.jaeger.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$JaegerProperties",
+      "description": "Whether Jaeger tracing is enabled.",
+      "defaultValue": false
+    },
+    {
+      "name": "adhar.tracing.jaeger.grpc-endpoint",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$JaegerProperties",
+      "description": "Jaeger gRPC endpoint.",
+      "defaultValue": "http://localhost:14250"
+    },
+    {
+      "name": "adhar.tracing.jaeger.http-endpoint",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$JaegerProperties",
+      "description": "Jaeger HTTP endpoint.",
+      "defaultValue": "http://localhost:14268/api/traces"
+    },
+    {
+      "name": "adhar.tracing.jaeger.use-grpc",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$JaegerProperties",
+      "description": "Whether to use gRPC (true) or HTTP (false).",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.web.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$WebTracingProperties",
+      "description": "Whether web tracing is enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.web.trace-http-clients",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$WebTracingProperties",
+      "description": "Whether to trace HTTP client requests.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.web.trace-http-servers",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$WebTracingProperties",
+      "description": "Whether to trace HTTP server requests.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.web.include-request-headers",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$WebTracingProperties",
+      "description": "Whether to include request headers in spans.",
+      "defaultValue": false
+    },
+    {
+      "name": "adhar.tracing.web.include-response-headers",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$WebTracingProperties",
+      "description": "Whether to include response headers in spans.",
+      "defaultValue": false
+    },
+    {
+      "name": "adhar.tracing.database.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$DatabaseTracingProperties",
+      "description": "Whether database tracing is enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.database.include-sql-statements",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$DatabaseTracingProperties",
+      "description": "Whether to include SQL statements in spans.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.database.include-sql-parameters",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$DatabaseTracingProperties",
+      "description": "Whether to include SQL parameters in spans.",
+      "defaultValue": false
+    },
+    {
+      "name": "adhar.tracing.messaging.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$MessagingTracingProperties",
+      "description": "Whether messaging tracing is enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.messaging.trace-kafka",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$MessagingTracingProperties",
+      "description": "Whether to trace Kafka operations.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.messaging.include-payloads",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$MessagingTracingProperties",
+      "description": "Whether to include message payloads in spans.",
+      "defaultValue": false
+    },
+    {
+      "name": "adhar.tracing.sampling.probability",
+      "type": "java.lang.Double",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$SamplingProperties",
+      "description": "Default sampling probability (0.0 to 1.0).",
+      "defaultValue": 0.1
+    },
+    {
+      "name": "adhar.tracing.sampling.rate-limit",
+      "type": "java.lang.Integer",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$SamplingProperties",
+      "description": "Rate limiting samples per second.",
+      "defaultValue": 100
+    },
+    {
+      "name": "adhar.tracing.propagation.type",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$PropagationProperties",
+      "description": "Propagation type (tracecontext, b3, jaeger, ottrace).",
+      "defaultValue": "tracecontext"
+    },
+    {
+      "name": "adhar.tracing.propagation.b3-single-header",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$PropagationProperties",
+      "description": "Whether to produce B3 single header.",
+      "defaultValue": false
+    },
+    {
+      "name": "adhar.tracing.baggage.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$BaggageProperties",
+      "description": "Whether baggage is enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.tracing.baggage.max-entries",
+      "type": "java.lang.Integer",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$BaggageProperties",
+      "description": "Maximum number of baggage entries.",
+      "defaultValue": 100
+    },
+    {
+      "name": "adhar.tracing.resource.service-name",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$ResourceProperties",
+      "description": "Service name.",
+      "defaultValue": "${spring.application.name:unknown-service}"
+    },
+    {
+      "name": "adhar.tracing.resource.service-version",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$ResourceProperties",
+      "description": "Service version.",
+      "defaultValue": "unknown"
+    },
+    {
+      "name": "adhar.tracing.resource.service-namespace",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.adharkit.tracing.properties.AdharTracingProperties$ResourceProperties",
+      "description": "Service namespace.",
+      "defaultValue": "default"
+    }
+  ],
+  "hints": [
+    {
+      "name": "adhar.tracing.open-telemetry.compression",
+      "values": [
+        {
+          "value": "gzip",
+          "description": "GZIP compression"
+        },
+        {
+          "value": "none",
+          "description": "No compression"
+        }
+      ]
+    },
+    {
+      "name": "adhar.tracing.zipkin.sender-type",
+      "values": [
+        {
+          "value": "http",
+          "description": "HTTP sender"
+        },
+        {
+          "value": "kafka",
+          "description": "Kafka sender"
+        }
+      ]
+    },
+    {
+      "name": "adhar.tracing.propagation.type",
+      "values": [
+        {
+          "value": "tracecontext",
+          "description": "W3C Trace Context propagation"
+        },
+        {
+          "value": "b3",
+          "description": "B3 propagation"
+        },
+        {
+          "value": "jaeger",
+          "description": "Jaeger propagation"
+        }
+      ]
+    }
+  ]
+}
+

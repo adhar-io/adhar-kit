@@ -1,0 +1,3 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+com.adhar.kit.config.autoconfigure.ConfigAutoConfiguration
+

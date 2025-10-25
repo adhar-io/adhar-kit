@@ -1,0 +1,123 @@
+spring:
+  application:
+    name: adhar-kit-ai
+  profiles:
+    active: development
+
+# Adhar AI Configuration
+adhar:
+  ai:
+    # OpenAI Configuration
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+      model: gpt-3.5-turbo
+      base-url: https://api.openai.com
+      timeout: 60s
+      max-tokens: 1000
+      temperature: 0.7
+      max-retries: 3
+
+    # Azure OpenAI Configuration
+    azure:
+      api-key: ${AZURE_OPENAI_API_KEY:}
+      endpoint: ${AZURE_OPENAI_ENDPOINT:}
+      deployment-name: ${AZURE_OPENAI_DEPLOYMENT:}
+      model: gpt-35-turbo
+      timeout: 60s
+      max-tokens: 1000
+      temperature: 0.7
+
+    # Ollama Configuration
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      model: llama2
+      timeout: 120s
+      max-tokens: 2000
+      temperature: 0.7
+
+    # Vector Store Configuration
+    vector-store:
+      type: redis
+      connection-string: ${REDIS_URL:redis://localhost:6379}
+      index-name: adhar-vectors
+      dimensions: 1536
+      similarity-function: cosine
+
+    # Rate Limiting Configuration
+    rate-limiting:
+      enabled: true
+      requests-per-minute: 60
+      requests-per-hour: 1000
+      requests-per-day: 10000
+      window-size: 1m
+
+    # Caching Configuration
+    caching:
+      enabled: true
+      ttl: 30m
+      max-size: 1000
+      provider: caffeine
+
+    # Security Configuration
+    security:
+      enabled: true
+      validate-api-keys: true
+      log-requests: false
+      audit-enabled: true
+      allowed-models:
+        - gpt-3.5-turbo
+        - gpt-4
+        - gpt-35-turbo
+        - llama2
+        - codellama
+
+# Spring AI Configuration
+spring:
+  ai:
+    openai:
+      api-key: ${adhar.ai.openai.api-key}
+      chat:
+        options:
+          model: ${adhar.ai.openai.model}
+          temperature: ${adhar.ai.openai.temperature}
+          max-tokens: ${adhar.ai.openai.max-tokens}
+      embedding:
+        options:
+          model: text-embedding-ada-002
+
+# Actuator Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+# Logging Configuration
+logging:
+  level:
+    com.adhar.adharkit.ai: DEBUG
+    org.springframework.ai: INFO
+    org.springframework.web: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# Server Configuration
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+# Cache Configuration
+spring:
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=1000,expireAfterWrite=30m

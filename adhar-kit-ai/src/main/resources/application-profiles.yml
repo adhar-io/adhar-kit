@@ -1,0 +1,89 @@
+# Development Profile
+spring:
+  config:
+    activate:
+      on-profile: development
+
+adhar:
+  ai:
+    openai:
+      api-key: sk-test-dev-key
+      model: gpt-3.5-turbo
+      max-tokens: 500
+      temperature: 0.8
+
+    rate-limiting:
+      requests-per-minute: 100
+      requests-per-hour: 2000
+
+    security:
+      enabled: false  # Relaxed for development
+      log-requests: true
+
+    caching:
+      enabled: true
+      ttl: 10m
+
+logging:
+  level:
+    com.adhar.adharkit.ai: TRACE
+    org.springframework.ai: DEBUG
+
+---
+# Production Profile
+spring:
+  config:
+    activate:
+      on-profile: production
+
+adhar:
+  ai:
+    openai:
+      max-tokens: 1000
+      temperature: 0.7
+
+    rate-limiting:
+      requests-per-minute: 60
+      requests-per-hour: 1000
+      requests-per-day: 5000
+
+    security:
+      enabled: true
+      validate-api-keys: true
+      log-requests: false
+      audit-enabled: true
+
+    caching:
+      enabled: true
+      ttl: 30m
+
+logging:
+  level:
+    com.adhar.adharkit.ai: INFO
+    org.springframework.ai: WARN
+
+---
+# Testing Profile
+spring:
+  config:
+    activate:
+      on-profile: test
+
+adhar:
+  ai:
+    openai:
+      api-key: test-key
+      model: gpt-3.5-turbo
+
+    rate-limiting:
+      enabled: false
+
+    security:
+      enabled: false
+
+    caching:
+      enabled: false
+
+logging:
+  level:
+    com.adhar.adharkit.ai: DEBUG

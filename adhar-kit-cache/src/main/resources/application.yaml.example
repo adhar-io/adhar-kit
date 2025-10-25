@@ -1,0 +1,87 @@
+# Adhar Cache Starter Configuration Example
+# This file demonstrates how to configure the Adhar Cache Starter in your application.
+
+adhar:
+  cache:
+    # Enable or disable the cache features
+    enabled: true
+    
+    # Default time-to-live for cache entries (in milliseconds, seconds, minutes, hours, or days)
+    time-to-live: 30m
+    
+    # Default maximum size of the cache
+    max-size: 1000
+    
+    # Whether to allow null values in the cache
+    allow-null-values: true
+    
+    # Kafka-based distributed caching configuration
+    kafka:
+      # Enable or disable Kafka-based distributed caching
+      enabled: true
+      
+      # Bootstrap servers for Kafka
+      bootstrap-servers: localhost:9092
+      
+      # Group ID for the Kafka consumer
+      group-id: adhar-cache-group
+      
+      # Prefix for Kafka topics used for cache operations
+      topic-prefix: adhar-cache
+      
+      # Number of partitions for Kafka topics
+      partitions: 3
+      
+      # Replication factor for Kafka topics
+      replication-factor: 1
+      
+      # Whether to automatically create Kafka topics
+      auto-create-topics: true
+      
+      # Additional properties for Kafka client
+      properties:
+        # Example: Set the max poll interval
+        max.poll.interval.ms: 300000
+    
+    # Redis-based distributed caching configuration
+    redis:
+      # Enable or disable Redis-based distributed caching
+      enabled: true
+      
+      # Redis host
+      host: localhost
+      
+      # Redis port
+      port: 6379
+      
+      # Redis password (optional)
+      # password: your-password
+      
+      # Redis database index
+      database: 0
+      
+      # Whether to use SSL for Redis connection
+      ssl: false
+      
+      # Connection timeout for Redis (in milliseconds)
+      connect-timeout: 5000
+      
+      # Read timeout for Redis (in milliseconds)
+      read-timeout: 5000
+      
+      # Key prefix for Redis cache keys
+      key-prefix: "adhar-cache:"
+      
+      # Whether to use Redis key expiration events for cache synchronization
+      use-key-expiration-events: true
+      
+      # Additional properties for Redis client
+      properties:
+        # Example: Set the max wait time for connection pool
+        max-wait: 5000
+
+# Spring Cache Configuration (optional, for advanced configuration)
+spring:
+  cache:
+    type: redis  # Use 'redis' for Redis-based caching or 'simple' for in-memory caching
+    cache-names: users, products, orders  # Pre-define cache names (optional)

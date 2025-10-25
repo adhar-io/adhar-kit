@@ -1,0 +1,283 @@
+package com.adhar.adharkit.metrics.config;
+
+import com.adhar.adharkit.metrics.aspect.EnhancedMetricsAspect;
+import com.adhar.adharkit.metrics.properties.AdharMetricsProperties;
+import com.adhar.adharkit.metrics.util.KubernetesMetricsUtils;
+import com.adhar.adharkit.metrics.util.MetricsUtils;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tag;
+import io.micrometer.core.instrument.binder.jvm.ClassLoaderMetrics;
+import io.micrometer.core.instrument.binder.jvm.JvmGcMetrics;
+import io.micrometer.core.instrument.binder.jvm.JvmMemoryMetrics;
+import io.micrometer.core.instrument.binder.jvm.JvmThreadMetrics;
+import io.micrometer.core.instrument.binder.system.ProcessorMetrics;
+import io.micrometer.core.instrument.binder.system.FileDescriptorMetrics;
+import io.micrometer.core.instrument.binder.system.UptimeMetrics;
+import io.micrometer.core.instrument.binder.system.DiskSpaceMetrics;
+import io.micrometer.core.instrument.config.MeterFilter;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.actuate.autoconfigure.metrics.MeterRegistryCustomizer;
+import org.springframework.boot.actuate.autoconfigure.metrics.export.prometheus.PrometheusMetricsExportAutoConfiguration;
+import org.springframework.boot.actuate.metrics.export.prometheus.PrometheusScrapeEndpoint;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Auto-configuration for Adhar Metrics.
+ * <p>
+ * This class sets up the metrics infrastructure based on the properties defined in {@link AdharMetricsProperties}.
+ * It configures both Prometheus and OpenTelemetry metrics and provides the necessary beans for automated instrumentation.
+ * </p>
+ */
+@Slf4j
+@Configuration
+@EnableConfigurationProperties(AdharMetricsProperties.class)
+@ConditionalOnProperty(prefix = "adhar.metrics", name = "enabled", havingValue = "true", matchIfMissing = true)
+public class AdharMetricsAutoConfiguration {
+
+    private final AdharMetricsProperties properties;
+    private final Environment environment;
+
+    /**
+     * Constructor for AdharMetricsAutoConfiguration.
+     *
+     * @param properties The metrics properties
+     * @param environment The Spring environment
+     */
+    @Autowired
+    public AdharMetricsAutoConfiguration(AdharMetricsProperties properties, Environment environment) {
+        this.properties = properties;
+        this.environment = environment;
+        log.info("Initializing Adhar Metrics with Prometheus and OpenTelemetry support");
+    }
+
+    /**
+     * Customizes the meter registry with common tags and other settings.
+     *
+     * @return A customizer for the meter registry
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public MeterRegistryCustomizer<MeterRegistry> metricsCommonTags() {
+        return registry -> {
+            // Add application name tag
+            String applicationName = environment.getProperty("spring.application.name", "unknown-application");
+            registry.config().commonTags("application", applicationName);
+
+            // Add environment tag
+            String activeProfiles = String.join(",", environment.getActiveProfiles());
+            if (activeProfiles.isEmpty()) {
+                activeProfiles = environment.getProperty("spring.profiles.active", "default");
+            }
+            registry.config().commonTags("environment", activeProfiles);
+
+            // Add custom common tags from properties
+            List<Tag> tags = new ArrayList<>();
+            for (Map.Entry<String, String> entry : properties.getCommonTags().entrySet()) {
+                tags.add(Tag.of(entry.getKey(), entry.getValue()));
+            }
+
+            if (!tags.isEmpty()) {
+                registry.config().commonTags(tags);
+            }
+
+            log.debug("Configured meter registry with common tags: application={}, environment={}, customTags={}",
+                    applicationName, activeProfiles, properties.getCommonTags());
+        };
+    }
+
+    /**
+     * Configures Prometheus-specific settings.
+     *
+     * @return A customizer for the Prometheus meter registry
+     */
+    @Bean
+    @ConditionalOnClass(PrometheusMeterRegistry.class)
+    @ConditionalOnProperty(prefix = "adhar.metrics.prometheus", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public MeterRegistryCustomizer<PrometheusMeterRegistry> prometheusMetricsCustomizer() {
+        return registry -> {
+            if (properties.getPrometheus().isDescriptions()) {
+                registry.config().meterFilter(MeterFilter.enableMetrics());
+            }
+
+            log.debug("Configured Prometheus metrics with descriptions: {}",
+                    properties.getPrometheus().isDescriptions());
+        };
+    }
+
+    /**
+     * Provides JVM memory metrics if enabled.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.jvm", name = "memory", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public JvmMemoryMetrics jvmMemoryMetrics() {
+        log.debug("Registering JVM memory metrics");
+        return new JvmMemoryMetrics();
+    }
+
+    /**
+     * Provides JVM GC metrics if enabled.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.jvm", name = "gc", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public JvmGcMetrics jvmGcMetrics() {
+        log.debug("Registering JVM GC metrics");
+        return new JvmGcMetrics();
+    }
+
+    /**
+     * Provides JVM thread metrics if enabled.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.jvm", name = "threads", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public JvmThreadMetrics jvmThreadMetrics() {
+        log.debug("Registering JVM thread metrics");
+        return new JvmThreadMetrics();
+    }
+
+    /**
+     * Provides JVM class loader metrics if enabled.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.jvm", name = "classLoader", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public ClassLoaderMetrics classLoaderMetrics() {
+        log.debug("Registering JVM class loader metrics");
+        return new ClassLoaderMetrics();
+    }
+
+    /**
+     * Provides processor (CPU) metrics if enabled.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.system", name = "processor", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public ProcessorMetrics processorMetrics() {
+        log.debug("Registering processor metrics");
+        return new ProcessorMetrics();
+    }
+
+    /**
+     * Provides file descriptor metrics if enabled.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.system", name = "fileDescriptor", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public FileDescriptorMetrics fileDescriptorMetrics() {
+        log.debug("Registering file descriptor metrics");
+        return new FileDescriptorMetrics();
+    }
+
+    /**
+     * Provides uptime metrics if enabled.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.system", name = "uptime", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public UptimeMetrics uptimeMetrics() {
+        log.debug("Registering uptime metrics");
+        return new UptimeMetrics();
+    }
+
+    /**
+     * Provides disk space metrics if enabled.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.system", name = "diskSpace", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public DiskSpaceMetrics diskSpaceMetrics() {
+        log.debug("Registering disk space metrics");
+        return new DiskSpaceMetrics(new File("."));
+    }
+
+    /**
+     * Creates the AdharMetrics utility bean for manual metrics management.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public AdharMetrics adharMetrics(MeterRegistry meterRegistry, MetricsUtils metricsUtils,
+                                   @Autowired(required = false) KubernetesMetricsUtils kubernetesMetricsUtils) {
+        log.debug("Initializing AdharMetrics utility");
+        AdharMetrics.initialize(meterRegistry, properties, metricsUtils, kubernetesMetricsUtils);
+        return new AdharMetrics();
+    }
+
+    /**
+     * Creates an enhanced metrics aspect with support for all annotation types.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.application", name = "methodTiming", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean(name = "enhancedMetricsAspect")
+    public EnhancedMetricsAspect enhancedMetricsAspectBean(MeterRegistry meterRegistry) {
+        log.debug("Registering enhanced metrics aspect with support for all annotations");
+        return new EnhancedMetricsAspect(meterRegistry);
+    }
+
+    /**
+     * Creates the metrics utility bean.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public MetricsUtils metricsUtils(MeterRegistry meterRegistry) {
+        log.debug("Registering metrics utils");
+        return new MetricsUtils(meterRegistry, properties);
+    }
+
+    /**
+     * Creates the Kubernetes metrics utility bean if Kubernetes support is enabled.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.kubernetes", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public KubernetesMetricsUtils kubernetesMetricsUtils(MeterRegistry meterRegistry) {
+        log.debug("Registering Kubernetes metrics utils");
+        return new KubernetesMetricsUtils(meterRegistry, properties);
+    }
+
+    /**
+     * Configures web request size recording filter.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.web", name = "recordRequestSize", havingValue = "false")
+    public MeterFilter disableRequestSizeFilter() {
+        return MeterFilter.deny(id -> id.getName().equals("http.server.requests") &&
+                                     id.getTags().stream().anyMatch(tag -> "request.size".equals(tag.getKey())));
+    }
+
+    /**
+     * Configures web response size recording filter.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.web", name = "recordResponseSize", havingValue = "false")
+    public MeterFilter disableResponseSizeFilter() {
+        return MeterFilter.deny(id -> id.getName().equals("http.server.requests") &&
+                                     id.getTags().stream().anyMatch(tag -> "response.size".equals(tag.getKey())));
+    }
+
+    /**
+     * Configures URI tag limiting filter for web metrics.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.web", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public MeterFilter uriTagLimitFilter() {
+        return MeterFilter.maximumAllowableTags("http.server.requests", "uri",
+                properties.getWeb().getMaxUriTags(), MeterFilter.deny());
+    }
+}

@@ -1,0 +1,284 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <include resource="org/springframework/boot/logging/logback/base.xml"/>
+
+    <!-- Application properties -->
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="unknown-app"/>
+    <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="logs"/>
+    <springProperty scope="context" name="ROOT_LOG_LEVEL" source="logging.level.root" defaultValue="INFO"/>
+    <springProperty scope="context" name="SPRING_PROFILES_ACTIVE" source="spring.profiles.active" defaultValue="default"/>
+
+    <!-- Console logging properties -->
+    <springProperty scope="context" name="CONSOLE_ENABLED" source="adhar.logging.console.enabled" defaultValue="true"/>
+    <springProperty scope="context" name="CONSOLE_JSON" source="adhar.logging.console.json" defaultValue="true"/>
+    <springProperty scope="context" name="CONSOLE_CALLER_DATA" source="adhar.logging.console.include-caller-data" defaultValue="false"/>
+
+    <!-- File logging properties -->
+    <springProperty scope="context" name="FILE_ENABLED" source="adhar.logging.file.enabled" defaultValue="true"/>
+    <springProperty scope="context" name="FILE_JSON" source="adhar.logging.file.json" defaultValue="true"/>
+    <springProperty scope="context" name="FILE_MAX_SIZE" source="adhar.logging.file.max-size" defaultValue="100MB"/>
+    <springProperty scope="context" name="FILE_MAX_HISTORY" source="adhar.logging.file.max-history" defaultValue="7"/>
+    <springProperty scope="context" name="FILE_TOTAL_SIZE_CAP" source="adhar.logging.file.total-size-cap" defaultValue="1GB"/>
+    <springProperty scope="context" name="FILE_CLEAN_HISTORY" source="adhar.logging.file.clean-history-on-start" defaultValue="true"/>
+    <springProperty scope="context" name="FILE_CALLER_DATA" source="adhar.logging.file.include-caller-data" defaultValue="false"/>
+
+    <!-- Async logging properties -->
+    <springProperty scope="context" name="ASYNC_QUEUE_SIZE" source="adhar.logging.async.queue-size" defaultValue="1024"/>
+    <springProperty scope="context" name="ASYNC_DISCARD_THRESHOLD" source="adhar.logging.async.discarding-threshold" defaultValue="0"/>
+    <springProperty scope="context" name="ASYNC_MAX_FLUSH_TIME" source="adhar.logging.async.max-flush-time" defaultValue="1000"/>
+
+    <!-- JSON encoder properties -->
+    <springProperty scope="context" name="JSON_INCLUDE_TIMESTAMP" source="adhar.logging.json-encoder.include-timestamp" defaultValue="true"/>
+    <springProperty scope="context" name="JSON_TIMESTAMP_FIELD" source="adhar.logging.json-encoder.timestamp-field-name" defaultValue="timestamp"/>
+    <springProperty scope="context" name="JSON_INCLUDE_LEVEL" source="adhar.logging.json-encoder.include-level" defaultValue="true"/>
+    <springProperty scope="context" name="JSON_LEVEL_FIELD" source="adhar.logging.json-encoder.level-field-name" defaultValue="level"/>
+    <springProperty scope="context" name="JSON_INCLUDE_LOGGER" source="adhar.logging.json-encoder.include-logger-name" defaultValue="true"/>
+    <springProperty scope="context" name="JSON_LOGGER_FIELD" source="adhar.logging.json-encoder.logger-field-name" defaultValue="logger"/>
+    <springProperty scope="context" name="JSON_INCLUDE_THREAD" source="adhar.logging.json-encoder.include-thread-name" defaultValue="true"/>
+    <springProperty scope="context" name="JSON_THREAD_FIELD" source="adhar.logging.json-encoder.thread-field-name" defaultValue="thread"/>
+    <springProperty scope="context" name="JSON_INCLUDE_MESSAGE" source="adhar.logging.json-encoder.include-message" defaultValue="true"/>
+    <springProperty scope="context" name="JSON_MESSAGE_FIELD" source="adhar.logging.json-encoder.message-field-name" defaultValue="message"/>
+    <springProperty scope="context" name="JSON_INCLUDE_STACKTRACE" source="adhar.logging.json-encoder.include-stack-trace" defaultValue="true"/>
+    <springProperty scope="context" name="JSON_STACKTRACE_FIELD" source="adhar.logging.json-encoder.stack-trace-field-name" defaultValue="exception"/>
+    <springProperty scope="context" name="JSON_INCLUDE_MDC" source="adhar.logging.json-encoder.include-mdc" defaultValue="true"/>
+
+    <!-- Logstash properties -->
+    <springProperty scope="context" name="LOGSTASH_ENABLED" source="adhar.logging.logstash.enabled" defaultValue="false"/>
+    <springProperty scope="context" name="LOGSTASH_HOST" source="adhar.logging.logstash.host" defaultValue="localhost"/>
+    <springProperty scope="context" name="LOGSTASH_PORT" source="adhar.logging.logstash.port" defaultValue="5000"/>
+    <springProperty scope="context" name="LOGSTASH_CONNECTION_TIMEOUT" source="adhar.logging.logstash.connection-timeout" defaultValue="2000"/>
+    <springProperty scope="context" name="LOGSTASH_TCP" source="adhar.logging.logstash.tcp" defaultValue="true"/>
+    <springProperty scope="context" name="LOGSTASH_QUEUE_SIZE" source="adhar.logging.logstash.queue-size" defaultValue="512"/>
+
+    <!-- Janino is required for conditional processing in logback -->
+    <springProperty scope="context" name="JANINO_AVAILABLE" source="adhar.logging.janino-available" defaultValue="false"/>
+
+    <!-- Syslog properties -->
+    <springProperty scope="context" name="SYSLOG_ENABLED" source="adhar.logging.syslog.enabled" defaultValue="false"/>
+    <springProperty scope="context" name="SYSLOG_HOST" source="adhar.logging.syslog.host" defaultValue="localhost"/>
+    <springProperty scope="context" name="SYSLOG_PORT" source="adhar.logging.syslog.port" defaultValue="514"/>
+    <springProperty scope="context" name="SYSLOG_FACILITY" source="adhar.logging.syslog.facility" defaultValue="LOCAL0"/>
+    <springProperty scope="context" name="SYSLOG_PROTOCOL" source="adhar.logging.syslog.protocol" defaultValue="RFC5424"/>
+    <springProperty scope="context" name="SYSLOG_TCP" source="adhar.logging.syslog.tcp" defaultValue="false"/>
+    <springProperty scope="context" name="SYSLOG_MAX_MESSAGE_LENGTH" source="adhar.logging.syslog.max-message-length" defaultValue="8192"/>
+
+    <!-- Log level properties -->
+    <springProperty scope="context" name="USE_ENV_SPECIFIC_LEVELS" source="adhar.logging.levels.use-environment-specific" defaultValue="true"/>
+    <springProperty scope="context" name="DEV_SPRING_LEVEL" source="adhar.logging.levels.development.spring" defaultValue="INFO"/>
+    <springProperty scope="context" name="DEV_HIBERNATE_LEVEL" source="adhar.logging.levels.development.hibernate" defaultValue="INFO"/>
+    <springProperty scope="context" name="DEV_ADHAR_LEVEL" source="adhar.logging.levels.development.adhar" defaultValue="DEBUG"/>
+    <springProperty scope="context" name="TEST_SPRING_LEVEL" source="adhar.logging.levels.test.spring" defaultValue="WARN"/>
+    <springProperty scope="context" name="TEST_HIBERNATE_LEVEL" source="adhar.logging.levels.test.hibernate" defaultValue="WARN"/>
+    <springProperty scope="context" name="TEST_ADHAR_LEVEL" source="adhar.logging.levels.test.adhar" defaultValue="INFO"/>
+    <springProperty scope="context" name="PROD_SPRING_LEVEL" source="adhar.logging.levels.production.spring" defaultValue="WARN"/>
+    <springProperty scope="context" name="PROD_HIBERNATE_LEVEL" source="adhar.logging.levels.production.hibernate" defaultValue="WARN"/>
+    <springProperty scope="context" name="PROD_ADHAR_LEVEL" source="adhar.logging.levels.production.adhar" defaultValue="INFO"/>
+
+    <!-- JSON encoder with masking -->
+    <encoder class="com.adhar.adharkit.logging.encoder.MaskingJsonEncoder" name="JSON_MASKING_ENCODER">
+        <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${SPRING_PROFILES_ACTIVE:-default}"}</customFields>
+        <includeMdc>${JSON_INCLUDE_MDC}</includeMdc>
+        <fieldNames>
+            <timestamp>${JSON_TIMESTAMP_FIELD}</timestamp>
+            <level>${JSON_LEVEL_FIELD}</level>
+            <logger>${JSON_LOGGER_FIELD}</logger>
+            <thread>${JSON_THREAD_FIELD}</thread>
+            <message>${JSON_MESSAGE_FIELD}</message>
+            <stackTrace>${JSON_STACKTRACE_FIELD}</stackTrace>
+            <version>[ignore]</version>
+            <levelValue>[ignore]</levelValue>
+        </fieldNames>
+        <start>true</start>
+    </encoder>
+
+    <!-- Console appender -->
+    <if condition='property("CONSOLE_ENABLED").equalsIgnoreCase("true")'>
+        <then>
+            <if condition='property("CONSOLE_JSON").equalsIgnoreCase("true")'>
+                <then>
+                    <appender name="CONSOLE_JSON" class="ch.qos.logback.core.ConsoleAppender">
+                        <encoder ref="JSON_MASKING_ENCODER" />
+                        <includeCallerData>${CONSOLE_CALLER_DATA}</includeCallerData>
+                    </appender>
+                </then>
+                <else>
+                    <appender name="CONSOLE_TEXT" class="ch.qos.logback.core.ConsoleAppender">
+                        <encoder>
+                            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSX} %-5level [%thread] %logger - %msg%n</pattern>
+                        </encoder>
+                        <includeCallerData>${CONSOLE_CALLER_DATA}</includeCallerData>
+                    </appender>
+                </else>
+            </if>
+        </then>
+    </if>
+
+    <!-- File appender -->
+    <if condition='property("FILE_ENABLED").equalsIgnoreCase("true")'>
+        <then>
+            <if condition='property("FILE_JSON").equalsIgnoreCase("true")'>
+                <then>
+                    <appender name="FILE_JSON" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                        <file>${LOG_PATH}/${APP_NAME}.json.log</file>
+                        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                            <fileNamePattern>${LOG_PATH}/${APP_NAME}.json.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+                            <maxFileSize>${FILE_MAX_SIZE}</maxFileSize>
+                            <maxHistory>${FILE_MAX_HISTORY}</maxHistory>
+                            <totalSizeCap>${FILE_TOTAL_SIZE_CAP}</totalSizeCap>
+                            <cleanHistoryOnStart>${FILE_CLEAN_HISTORY}</cleanHistoryOnStart>
+                        </rollingPolicy>
+                        <encoder ref="JSON_MASKING_ENCODER" />
+                        <includeCallerData>${FILE_CALLER_DATA}</includeCallerData>
+                    </appender>
+
+                    <!-- Async file appender (JSON) -->
+                    <appender name="ASYNC_FILE_JSON" class="ch.qos.logback.classic.AsyncAppender">
+                        <appender-ref ref="FILE_JSON"/>
+                        <queueSize>${ASYNC_QUEUE_SIZE}</queueSize>
+                        <discardingThreshold>${ASYNC_DISCARD_THRESHOLD}</discardingThreshold>
+                        <includeCallerData>${FILE_CALLER_DATA}</includeCallerData>
+                        <maxFlushTime>${ASYNC_MAX_FLUSH_TIME}</maxFlushTime>
+                    </appender>
+                </then>
+                <else>
+                    <appender name="FILE_TEXT" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                        <file>${LOG_PATH}/${APP_NAME}.log</file>
+                        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                            <fileNamePattern>${LOG_PATH}/${APP_NAME}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+                            <maxFileSize>${FILE_MAX_SIZE}</maxFileSize>
+                            <maxHistory>${FILE_MAX_HISTORY}</maxHistory>
+                            <totalSizeCap>${FILE_TOTAL_SIZE_CAP}</totalSizeCap>
+                            <cleanHistoryOnStart>${FILE_CLEAN_HISTORY}</cleanHistoryOnStart>
+                        </rollingPolicy>
+                        <encoder>
+                            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSX} %-5level [%thread] %logger - %msg%n</pattern>
+                        </encoder>
+                        <includeCallerData>${FILE_CALLER_DATA}</includeCallerData>
+                    </appender>
+
+                    <!-- Async file appender (TEXT) -->
+                    <appender name="ASYNC_FILE_TEXT" class="ch.qos.logback.classic.AsyncAppender">
+                        <appender-ref ref="FILE_TEXT"/>
+                        <queueSize>${ASYNC_QUEUE_SIZE}</queueSize>
+                        <discardingThreshold>${ASYNC_DISCARD_THRESHOLD}</discardingThreshold>
+                        <includeCallerData>${FILE_CALLER_DATA}</includeCallerData>
+                        <maxFlushTime>${ASYNC_MAX_FLUSH_TIME}</maxFlushTime>
+                    </appender>
+                </else>
+            </if>
+        </then>
+    </if>
+
+    <!-- Logstash appender -->
+    <if condition='property("LOGSTASH_ENABLED").equalsIgnoreCase("true")'>
+        <then>
+            <if condition='property("LOGSTASH_TCP").equalsIgnoreCase("true")'>
+                <then>
+                    <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
+                        <destination>${LOGSTASH_HOST}:${LOGSTASH_PORT}</destination>
+                        <connectionTimeout>${LOGSTASH_CONNECTION_TIMEOUT}</connectionTimeout>
+                        <keepAliveDuration>5 minutes</keepAliveDuration>
+                        <encoder ref="JSON_MASKING_ENCODER" />
+                        <queueSize>${LOGSTASH_QUEUE_SIZE}</queueSize>
+                    </appender>
+                </then>
+                <else>
+                    <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashSocketAppender">
+                        <host>${LOGSTASH_HOST}</host>
+                        <port>${LOGSTASH_PORT}</port>
+                        <encoder ref="JSON_MASKING_ENCODER" />
+                        <queueSize>${LOGSTASH_QUEUE_SIZE}</queueSize>
+                    </appender>
+                </else>
+            </if>
+        </then>
+    </if>
+
+    <!-- Note: Graylog appender is not included in this version -->
+
+    <!-- Syslog appender -->
+    <if condition='property("SYSLOG_ENABLED").equalsIgnoreCase("true")'>
+        <then>
+            <appender name="SYSLOG" class="ch.qos.logback.classic.net.SyslogAppender">
+                <syslogHost>${SYSLOG_HOST}</syslogHost>
+                <port>${SYSLOG_PORT}</port>
+                <facility>${SYSLOG_FACILITY}</facility>
+                <suffixPattern>[%thread] %logger %msg</suffixPattern>
+                <throwableExcluded>false</throwableExcluded>
+                <stackTracePattern>\t</stackTracePattern>
+            </appender>
+        </then>
+    </if>
+
+    <!-- Root logger configuration -->
+    <root level="${ROOT_LOG_LEVEL}">
+        <!-- Console appender reference (if enabled) -->
+        <if condition='property("CONSOLE_ENABLED").equalsIgnoreCase("true")'>
+            <then>
+                <if condition='property("CONSOLE_JSON").equalsIgnoreCase("true")'>
+                    <then>
+                        <appender-ref ref="CONSOLE_JSON" />
+                    </then>
+                    <else>
+                        <appender-ref ref="CONSOLE_TEXT" />
+                    </else>
+                </if>
+            </then>
+        </if>
+
+        <!-- File appender reference (if enabled) -->
+        <if condition='property("FILE_ENABLED").equalsIgnoreCase("true")'>
+            <then>
+                <if condition='property("FILE_JSON").equalsIgnoreCase("true")'>
+                    <then>
+                        <appender-ref ref="ASYNC_FILE_JSON" />
+                    </then>
+                    <else>
+                        <appender-ref ref="ASYNC_FILE_TEXT" />
+                    </else>
+                </if>
+            </then>
+        </if>
+
+        <!-- Logstash appender reference (if enabled) -->
+        <if condition='property("LOGSTASH_ENABLED").equalsIgnoreCase("true")'>
+            <then>
+                <appender-ref ref="LOGSTASH" />
+            </then>
+        </if>
+
+        <!-- Syslog appender reference (if enabled) -->
+        <if condition='property("SYSLOG_ENABLED").equalsIgnoreCase("true")'>
+            <then>
+                <appender-ref ref="SYSLOG" />
+            </then>
+        </if>
+    </root>
+
+    <!-- Environment-specific configurations -->
+    <if condition='property("USE_ENV_SPECIFIC_LEVELS").equalsIgnoreCase("true")'>
+        <then>
+            <springProfile name="dev,default">
+                <logger name="org.springframework" level="${DEV_SPRING_LEVEL}"/>
+                <logger name="org.hibernate" level="${DEV_HIBERNATE_LEVEL}"/>
+                <logger name="com.adhar.adharkit" level="${DEV_ADHAR_LEVEL}"/>
+            </springProfile>
+
+            <springProfile name="test">
+                <logger name="org.springframework" level="${TEST_SPRING_LEVEL}"/>
+                <logger name="org.hibernate" level="${TEST_HIBERNATE_LEVEL}"/>
+                <logger name="com.adhar.adharkit" level="${TEST_ADHAR_LEVEL}"/>
+            </springProfile>
+
+            <springProfile name="prod,staging">
+                <logger name="org.springframework" level="${PROD_SPRING_LEVEL}"/>
+                <logger name="org.hibernate" level="${PROD_HIBERNATE_LEVEL}"/>
+                <logger name="com.adhar.adharkit" level="${PROD_ADHAR_LEVEL}"/>
+            </springProfile>
+        </then>
+    </if>
+
+    <!-- Note: Package-specific log levels can be configured using Spring Boot's standard logging.level.* properties -->
+    <!-- For example: logging.level.com.example=DEBUG -->
+</configuration>
