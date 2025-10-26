@@ -167,7 +167,7 @@ public class AdharLoggingAutoConfiguration {
     }
 
     /**
-     * Creates a MdcLoggingFilter bean for web applications if MDC logging is enabled.
+     * Creates a MdcLoggingFilter bean for controller applications if MDC logging is enabled.
      */
     @Bean
     @ConditionalOnWebApplication

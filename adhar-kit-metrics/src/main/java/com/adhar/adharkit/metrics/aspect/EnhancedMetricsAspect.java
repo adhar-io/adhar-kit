@@ -53,7 +53,7 @@ public class EnhancedMetricsAspect {
         String metricName = getMetricName(joinPoint, timed.name());
         Timer timer = getOrCreateTimer(metricName, timed);
 
-        Timer.Sample sample = Timer.Sample.start(registry);
+        Timer.Sample sample = Timer.start(registry);
         boolean success = false;
         try {
             Object result = joinPoint.proceed();
@@ -116,11 +116,10 @@ public class EnhancedMetricsAspect {
             if (!gaugeCache.containsKey(cacheKey)) {
                 GaugeValue gaugeValue = new GaugeValue();
 
-                Gauge gauge = Gauge.builder(metricName)
+                Gauge gauge = Gauge.builder(metricName, gaugeValue, GaugeValue::getValue)
                         .description(StringUtils.hasText(gauged.description()) ? gauged.description() : null)
-                        .baseUnit(StringUtils.hasText(gauged.baseUnit()) ? gauged.baseUnit() : null)
                         .tags(gauged.tags())
-                        .register(registry, gaugeValue, GaugeValue::getValue);
+                        .register(registry);
 
                 gaugeCache.put(cacheKey, gauge);
             }
@@ -141,7 +140,7 @@ public class EnhancedMetricsAspect {
         if (histogram.recordTiming()) {
             // Record execution time as histogram
             Timer timer = getOrCreateHistogramTimer(metricName, histogram);
-            Timer.Sample sample = Timer.Sample.start(registry);
+            Timer.Sample sample = Timer.start(registry);
 
             boolean success = false;
             try {
@@ -192,7 +191,7 @@ public class EnhancedMetricsAspect {
 
         Timer.Sample sample = null;
         if (cacheMetrics.recordLoadTime()) {
-            sample = Timer.Sample.start(registry);
+            sample = Timer.start(registry);
         }
 
         boolean hit = false;
@@ -231,7 +230,7 @@ public class EnhancedMetricsAspect {
 
         Timer.Sample sample = null;
         if (dbMetrics.recordExecutionTime()) {
-            sample = Timer.Sample.start(registry);
+            sample = Timer.start(registry);
         }
 
         boolean success = false;
@@ -253,7 +252,8 @@ public class EnhancedMetricsAspect {
         } finally {
             if (sample != null) {
                 Timer timer = Timer.builder("database.query.time").tags(allTags).register(registry);
-                long durationMs = sample.stop(timer).toMillis();
+                long durationNanos = sample.stop(timer);
+                long durationMs = durationNanos / 1_000_000;
 
                 if (dbMetrics.alertOnSlowQuery() && durationMs > dbMetrics.slowQueryThresholdMs()) {
                     AdharMetrics.increment("database.slow_queries", allTags);
@@ -272,7 +272,7 @@ public class EnhancedMetricsAspect {
         String[] baseTags = {"endpoint", endpoint, "method", method, "version", version};
         String[] allTags = combineTags(baseTags, apiMetrics.tags());
 
-        Timer.Sample sample = Timer.Sample.start(registry);
+        Timer.Sample sample = Timer.start(registry);
         String statusCode = "200"; // Default success
 
         try {
@@ -309,16 +309,7 @@ public class EnhancedMetricsAspect {
                 builder.description(histogram.description());
             }
 
-            if (StringUtils.hasText(histogram.baseUnit())) {
-                builder.baseUnit(histogram.baseUnit());
-            }
 
-            if (histogram.buckets().length > 0) {
-                builder.distributionStatisticConfig(
-                    DistributionStatisticConfig.builder()
-                        .serviceLevelObjectives(histogram.buckets())
-                        .build());
-            }
 
             return builder.register(registry);
         });
@@ -334,16 +325,7 @@ public class EnhancedMetricsAspect {
                 builder.description(histogram.description());
             }
 
-            if (StringUtils.hasText(histogram.baseUnit())) {
-                builder.baseUnit(histogram.baseUnit());
-            }
 
-            if (histogram.buckets().length > 0) {
-                builder.distributionStatisticConfig(
-                    DistributionStatisticConfig.builder()
-                        .serviceLevelObjectives(histogram.buckets())
-                        .build());
-            }
 
             return builder.register(registry);
         });
@@ -440,9 +422,6 @@ public class EnhancedMetricsAspect {
                 builder.description(summary.description());
             }
 
-            if (StringUtils.hasText(summary.baseUnit())) {
-                builder.baseUnit(summary.baseUnit());
-            }
 
             if (summary.percentiles().length > 0) {
                 builder.publishPercentiles(summary.percentiles());
@@ -543,11 +522,13 @@ public class EnhancedMetricsAspect {
     }
 
     private static class PerformanceMetrics {
+        private final MeterRegistry registry;
         private final Timer timer;
         private final Counter totalCounter;
         private final Counter errorCounter;
 
         public PerformanceMetrics(String baseName, MonitorPerformance config, MeterRegistry registry) {
+            this.registry = registry;
             Timer.Builder timerBuilder = Timer.builder(baseName + ".duration");
             if (config.recordPercentiles()) {
                 timerBuilder.publishPercentiles(config.percentiles());
@@ -562,7 +543,7 @@ public class EnhancedMetricsAspect {
         }
 
         public <T> T execute(java.util.function.Supplier<T> operation) {
-            Timer.Sample sample = Timer.Sample.start();
+            Timer.Sample sample = Timer.start(registry);
             boolean success = false;
 
             try {

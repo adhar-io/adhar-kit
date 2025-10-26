@@ -160,7 +160,7 @@ class AdharMetricsPropertiesTest {
         props.getOpenTelemetry().setResourceAttributes(resourceAttributes);
         assertThat(props.getOpenTelemetry().getResourceAttributes()).isEqualTo(resourceAttributes);
 
-        // Test web ignore patterns
+        // Test controller ignore patterns
         String[] ignorePatterns = {"/health", "/metrics", "/actuator/**"};
         props.getWeb().setIgnorePatterns(ignorePatterns);
         assertThat(props.getWeb().getIgnorePatterns()).isEqualTo(ignorePatterns);

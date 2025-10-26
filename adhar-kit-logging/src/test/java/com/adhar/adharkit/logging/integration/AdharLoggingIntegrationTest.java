@@ -4,7 +4,7 @@ import com.adhar.adharkit.logging.config.AdharLoggingAutoConfiguration;
 import com.adhar.adharkit.logging.encoder.MaskingJsonEncoder;
 import com.adhar.adharkit.logging.filter.MdcLoggingFilter;
 import com.adhar.adharkit.logging.properties.AdharLoggingProperties;
-import com.adhar.adharkit.logging.util.LoggingUtils;
+import com.adhar.adharkit.logging.util.AdharLogger;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +43,7 @@ class AdharLoggingIntegrationTest {
                 .withPropertyValues("adhar.logging.enabled=true")
                 .run(context -> {
                     assertThat(context).hasSingleBean(AdharLoggingAutoConfiguration.class);
-                    assertThat(context).hasSingleBean(LoggingUtils.class);
+                    assertThat(context).hasSingleBean(AdharLogger.class);
                     assertThat(context).hasSingleBean(MaskingJsonEncoder.class);
                 });
     }
@@ -54,7 +54,7 @@ class AdharLoggingIntegrationTest {
                 .withPropertyValues("adhar.logging.enabled=false")
                 .run(context -> {
                     assertThat(context).doesNotHaveBean(AdharLoggingAutoConfiguration.class);
-                    assertThat(context).doesNotHaveBean(LoggingUtils.class);
+                    assertThat(context).doesNotHaveBean(AdharLogger.class);
                     assertThat(context).doesNotHaveBean(MaskingJsonEncoder.class);
                 });
     }
@@ -158,7 +158,7 @@ class AdharLoggingIntegrationTest {
                     
                     try {
                         // Get the logging utils
-                        LoggingUtils loggingUtils = context.getBean(LoggingUtils.class);
+                        LoggingUtils loggingUtils = context.getBean(AdharLogger.class);
                         
                         // Set correlation ID and other MDC values
                         loggingUtils.setCorrelationId("test-correlation-id");

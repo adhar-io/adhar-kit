@@ -660,14 +660,26 @@ mvn spring-boot:run
 ## 💻 Development
 
 ### Building from Source
+
 ```bash
 git clone https://github.com/adhar-platform/adhar-kit.git
 cd adhar-kit
+
+# Recommended: Use the clean build script (suppresses Java 25 warnings)
+./build.sh clean install
+
+# Alternative: Use Maven directly
 mvn clean install
 ```
 
+> **Note**: When building with Java 25, you may see warnings from Maven's internal Guava library about `sun.misc.Unsafe`. These warnings are harmless and from Maven itself, not our code. Use `./build.sh` for a clean output.
+
 ### Running Tests
 ```bash
+./build.sh test
+./build.sh verify
+
+# Or with Maven
 mvn test
 mvn verify
 ```

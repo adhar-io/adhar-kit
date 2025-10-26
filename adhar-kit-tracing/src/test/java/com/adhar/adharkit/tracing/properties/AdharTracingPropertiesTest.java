@@ -237,7 +237,7 @@ class AdharTracingPropertiesTest {
         props.getResource().setAttributes(attributes);
         assertThat(props.getResource().getAttributes()).isEqualTo(attributes);
 
-        // Test web skip patterns
+        // Test controller skip patterns
         String[] skipPatterns = {"/health", "/metrics", "/actuator/**"};
         props.getWeb().setSkipPatterns(skipPatterns);
         assertThat(props.getWeb().getSkipPatterns()).isEqualTo(skipPatterns);

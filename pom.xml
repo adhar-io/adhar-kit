@@ -65,33 +65,22 @@
         <module>adhar-kit-config</module>
         <module>adhar-kit-cache</module>
         <module>adhar-kit-core</module>
-        <!-- Temporarily disabled - Logback ILoggingEvent interface compatibility issues -->
-        <!-- <module>adhar-kit-logging</module> -->
-        <!-- Temporarily disabled - Spring Boot Actuator dependency issues -->
-        <!-- <module>adhar-kit-metrics</module> -->
+        <module>adhar-kit-logging</module>
+        <module>adhar-kit-metrics</module>
         <module>adhar-kit-messaging</module>
-        <!-- Temporarily disabled - depends on messaging installation issue -->
-        <!-- <module>adhar-kit-analytics</module> -->
-        <!-- Temporarily disabled - DocsProperties compilation issue -->
-        <!-- <module>adhar-kit-docs</module> -->
+        <module>adhar-kit-analytics</module>
+        <module>adhar-kit-docs</module>
         <module>adhar-kit-grpc</module>
         <module>adhar-kit-security</module>
         <module>adhar-kit-mers</module>
-        <!-- Temporarily disabled - OpenTelemetry dependency issue -->
-        <!-- <module>adhar-kit-tracing</module> -->
-        <!-- Temporarily disabled - file corruption issues -->
-        <!-- <module>adhar-kit-test-commons</module> -->
+        <module>adhar-kit-tracing</module>
+        <module>adhar-kit-test-commons</module>
         <module>adhar-kit-resilience</module>
-        <!-- Temporarily disabled - missing actuator dependency -->
-        <!-- <module>adhar-kit-health</module> -->
-        <!-- Temporarily disabled - missing kubernetes client dependencies -->
-        <!-- <module>adhar-kit-kubernetes</module> -->
-        <!-- Temporarily disabled - missing dapr dependencies -->
-        <!-- <module>adhar-kit-dapr</module> -->
-        <!-- Temporarily disabled - depends on other modules -->
-        <!-- <module>adhar-kit-starter</module> -->
-        <!-- Temporarily disabled due to Spring AI API compatibility issues -->
-        <!-- <module>adhar-kit-ai</module> -->
+        <module>adhar-kit-health</module>
+        <module>adhar-kit-kubernetes</module>
+        <module>adhar-kit-dapr</module>
+        <module>adhar-kit-starter</module>
+        <module>adhar-kit-ai</module>
     </modules>
 
     <profiles>

@@ -3,7 +3,6 @@ package com.adhar.adharkit.ai.component;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -16,50 +15,75 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class AiMetricsCollector {
 
     private final MeterRegistry meterRegistry;
 
     // Request metrics
-    private final Counter chatRequestsTotal = Counter.builder("ai.chat.requests.total")
-            .description("Total number of chat requests")
-            .register(meterRegistry);
-
-    private final Counter embeddingRequestsTotal = Counter.builder("ai.embedding.requests.total")
-            .description("Total number of embedding requests")
-            .register(meterRegistry);
-
-    private final Counter ragRequestsTotal = Counter.builder("ai.rag.requests.total")
-            .description("Total number of RAG requests")
-            .register(meterRegistry);
+    private final Counter chatRequestsTotal;
+    private final Counter embeddingRequestsTotal;
+    private final Counter ragRequestsTotal;
 
     // Error metrics
-    private final Counter errorsTotal = Counter.builder("ai.errors.total")
-            .description("Total number of AI errors")
-            .register(meterRegistry);
-
-    private final Counter rateLimitExceeded = Counter.builder("ai.rate_limit.exceeded")
-            .description("Total number of rate limit exceeded errors")
-            .register(meterRegistry);
+    private final Counter errorsTotal;
+    private final Counter rateLimitExceeded;
 
     // Performance metrics
-    private final Timer chatResponseTime = Timer.builder("ai.chat.response.time")
-            .description("AI chat response time")
-            .register(meterRegistry);
-
-    private final Timer embeddingResponseTime = Timer.builder("ai.embedding.response.time")
-            .description("AI embedding response time")
-            .register(meterRegistry);
+    private final Timer chatResponseTime;
+    private final Timer embeddingResponseTime;
+    private final Timer ragResponseTime;
 
     // Usage metrics
-    private final AtomicLong totalTokensUsed = new AtomicLong(0);
-    private final AtomicLong totalCostUsd = new AtomicLong(0);
+    private final AtomicLong totalTokensUsed;
+    private final AtomicLong totalCostUsd;
+
+    public AiMetricsCollector(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+
+        // Initialize request metrics
+        this.chatRequestsTotal = Counter.builder("ai.chat.requests.total")
+                .description("Total number of chat requests")
+                .register(meterRegistry);
+
+        this.embeddingRequestsTotal = Counter.builder("ai.embedding.requests.total")
+                .description("Total number of embedding requests")
+                .register(meterRegistry);
+
+        this.ragRequestsTotal = Counter.builder("ai.rag.requests.total")
+                .description("Total number of RAG requests")
+                .register(meterRegistry);
+
+        // Initialize error metrics
+        this.errorsTotal = Counter.builder("ai.errors.total")
+                .description("Total number of AI errors")
+                .register(meterRegistry);
+
+        this.rateLimitExceeded = Counter.builder("ai.rate_limit.exceeded")
+                .description("Total number of rate limit exceeded errors")
+                .register(meterRegistry);
+
+        // Initialize performance metrics
+        this.chatResponseTime = Timer.builder("ai.chat.response.time")
+                .description("AI chat response time")
+                .register(meterRegistry);
+
+        this.embeddingResponseTime = Timer.builder("ai.embedding.response.time")
+                .description("AI embedding response time")
+                .register(meterRegistry);
+
+        this.ragResponseTime = Timer.builder("ai.rag.response.time")
+                .description("AI RAG response time")
+                .register(meterRegistry);
+
+        // Initialize usage metrics
+        this.totalTokensUsed = new AtomicLong(0);
+        this.totalCostUsd = new AtomicLong(0);
+    }
 
     /**
      * Records a successful chat request.
      */
-    public void recordChatRequest(String provider, String model, Duration duration, int tokens) {
+    public void recordChatRequest(String provider, String model, Duration duration, long tokens) {
         chatRequestsTotal.increment();
         chatResponseTime.record(duration);
         totalTokensUsed.addAndGet(tokens);

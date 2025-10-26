@@ -1,7 +1,7 @@
 package com.adhar.adharkit.logging.filter;
 
 import com.adhar.adharkit.logging.properties.AdharLoggingProperties;
-import com.adhar.adharkit.logging.util.LoggingUtils;
+import com.adhar.adharkit.logging.util.AdharLogger;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,7 +33,7 @@ class MdcLoggingFilterTest {
     private AdharLoggingProperties.TracingProperties tracingProperties;
 
     @Mock
-    private LoggingUtils loggingUtils;
+    private AdharLogger adharLogger;
 
     @Mock
     private HttpServletRequest request;
@@ -66,7 +66,7 @@ class MdcLoggingFilterTest {
         when(tracingProperties.isIncludeSpanId()).thenReturn(true);
         when(tracingProperties.getSpanIdField()).thenReturn("spanId");
 
-        filter = new MdcLoggingFilter(properties, loggingUtils);
+        filter = new MdcLoggingFilter(properties, adharLogger);
     }
 
     @Test
@@ -74,16 +74,16 @@ class MdcLoggingFilterTest {
         // Given
         String correlationId = "test-correlation-id";
         when(request.getHeader("correlationId")).thenReturn(correlationId);
-        when(loggingUtils.setCorrelationId(correlationId)).thenReturn(correlationId);
+        when(adharLogger.setCorrelationId(correlationId)).thenReturn(correlationId);
 
         // When
         filter.doFilterInternal(request, response, filterChain);
 
         // Then
-        verify(loggingUtils).setCorrelationId(correlationId);
+        verify(adharLogger).setCorrelationId(correlationId);
         verify(response).setHeader("correlationId", correlationId);
         verify(filterChain).doFilter(request, response);
-        verify(loggingUtils).clearMdc();
+        verify(adharLogger).clearMdc();
     }
 
     @Test
@@ -91,16 +91,16 @@ class MdcLoggingFilterTest {
         // Given
         String generatedId = "generated-id";
         when(request.getHeader("correlationId")).thenReturn(null);
-        when(loggingUtils.setCorrelationId(null)).thenReturn(generatedId);
+        when(adharLogger.setCorrelationId(null)).thenReturn(generatedId);
 
         // When
         filter.doFilterInternal(request, response, filterChain);
 
         // Then
-        verify(loggingUtils).setCorrelationId(null);
+        verify(adharLogger).setCorrelationId(null);
         verify(response).setHeader("correlationId", generatedId);
         verify(filterChain).doFilter(request, response);
-        verify(loggingUtils).clearMdc();
+        verify(adharLogger).clearMdc();
     }
 
     @Test
@@ -108,16 +108,16 @@ class MdcLoggingFilterTest {
         // Given
         String traceId = "test-trace-id";
         when(request.getHeader("traceId")).thenReturn(traceId);
-        when(loggingUtils.setTraceId(traceId)).thenReturn(traceId);
+        when(adharLogger.setTraceId(traceId)).thenReturn(traceId);
 
         // When
         filter.doFilterInternal(request, response, filterChain);
 
         // Then
-        verify(loggingUtils).setTraceId(traceId);
+        verify(adharLogger).setTraceId(traceId);
         verify(response).setHeader("traceId", traceId);
         verify(filterChain).doFilter(request, response);
-        verify(loggingUtils).clearMdc();
+        verify(adharLogger).clearMdc();
     }
 
     @Test
@@ -125,16 +125,16 @@ class MdcLoggingFilterTest {
         // Given
         String spanId = "test-span-id";
         when(request.getHeader("spanId")).thenReturn(spanId);
-        when(loggingUtils.setSpanId(spanId)).thenReturn(spanId);
+        when(adharLogger.setSpanId(spanId)).thenReturn(spanId);
 
         // When
         filter.doFilterInternal(request, response, filterChain);
 
         // Then
-        verify(loggingUtils).setSpanId(spanId);
+        verify(adharLogger).setSpanId(spanId);
         verify(response).setHeader("spanId", spanId);
         verify(filterChain).doFilter(request, response);
-        verify(loggingUtils).clearMdc();
+        verify(adharLogger).clearMdc();
     }
 
     @Test
@@ -147,19 +147,19 @@ class MdcLoggingFilterTest {
         when(request.getHeader("traceparent")).thenReturn(traceparent);
         when(request.getHeader("traceId")).thenReturn(null);
         when(request.getHeader("spanId")).thenReturn(null);
-        when(loggingUtils.setTraceId(traceId)).thenReturn(traceId);
-        when(loggingUtils.setSpanId(spanId)).thenReturn(spanId);
+        when(adharLogger.setTraceId(traceId)).thenReturn(traceId);
+        when(adharLogger.setSpanId(spanId)).thenReturn(spanId);
 
         // When
         filter.doFilterInternal(request, response, filterChain);
 
         // Then
-        verify(loggingUtils).setTraceId(traceId);
-        verify(loggingUtils).setSpanId(spanId);
+        verify(adharLogger).setTraceId(traceId);
+        verify(adharLogger).setSpanId(spanId);
         verify(response).setHeader("traceId", traceId);
         verify(response).setHeader("spanId", spanId);
         verify(filterChain).doFilter(request, response);
-        verify(loggingUtils).clearMdc();
+        verify(adharLogger).clearMdc();
     }
 
     @Test
@@ -172,19 +172,19 @@ class MdcLoggingFilterTest {
         when(request.getHeader("X-B3-SpanId")).thenReturn(spanId);
         when(request.getHeader("traceId")).thenReturn(null);
         when(request.getHeader("spanId")).thenReturn(null);
-        when(loggingUtils.setTraceId(traceId)).thenReturn(traceId);
-        when(loggingUtils.setSpanId(spanId)).thenReturn(spanId);
+        when(adharLogger.setTraceId(traceId)).thenReturn(traceId);
+        when(adharLogger.setSpanId(spanId)).thenReturn(spanId);
 
         // When
         filter.doFilterInternal(request, response, filterChain);
 
         // Then
-        verify(loggingUtils).setTraceId(traceId);
-        verify(loggingUtils).setSpanId(spanId);
+        verify(adharLogger).setTraceId(traceId);
+        verify(adharLogger).setSpanId(spanId);
         verify(response).setHeader("traceId", traceId);
         verify(response).setHeader("spanId", spanId);
         verify(filterChain).doFilter(request, response);
-        verify(loggingUtils).clearMdc();
+        verify(adharLogger).clearMdc();
     }
 
     // Security-related test removed as Spring Security is not a required dependency
@@ -206,12 +206,12 @@ class MdcLoggingFilterTest {
         filter.doFilterInternal(request, response, filterChain);
 
         // Then
-        verify(loggingUtils).putMdc("requestMethod", method);
-        verify(loggingUtils).putMdc("requestUri", uri);
-        verify(loggingUtils).putMdc("clientIp", remoteAddr);
-        verify(loggingUtils).putMdc("userAgent", userAgent);
+        verify(adharLogger).putMdc("requestMethod", method);
+        verify(adharLogger).putMdc("requestUri", uri);
+        verify(adharLogger).putMdc("clientIp", remoteAddr);
+        verify(adharLogger).putMdc("userAgent", userAgent);
         verify(filterChain).doFilter(request, response);
-        verify(loggingUtils).clearMdc();
+        verify(adharLogger).clearMdc();
     }
 
     @Test
@@ -227,6 +227,6 @@ class MdcLoggingFilterTest {
         }
 
         // Verify MDC is cleared even when exception occurs
-        verify(loggingUtils).clearMdc();
+        verify(adharLogger).clearMdc();
     }
 }

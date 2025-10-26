@@ -61,24 +61,25 @@ public class TracingAspect {
         // Add custom tags
         addTags(span, newSpan.tags(), joinPoint);
 
-        try (Tracer.SpanInScope spanInScope = tracer.withSpanInScope(span.start())) {
+        Span startedSpan = span.start();
+        try (Tracer.SpanInScope spanInScope = tracer.withSpan(startedSpan)) {
             Object result = joinPoint.proceed();
 
             // Handle async results
             if (result instanceof Future<?>) {
-                return handleAsyncResult(span, (Future<?>) result);
+                return handleAsyncResult(startedSpan, (Future<?>) result);
             }
 
-            span.tag("success", "true");
+            startedSpan.tag("success", "true");
             return result;
 
         } catch (Throwable throwable) {
-            span.tag("success", "false")
+            startedSpan.tag("success", "false")
                 .tag("error.class", throwable.getClass().getSimpleName())
                 .tag("error.message", throwable.getMessage());
             throw throwable;
         } finally {
-            span.end();
+            startedSpan.end();
         }
     }
 
@@ -153,18 +154,19 @@ public class TracingAspect {
         // Add custom tags
         addTags(span, databaseSpan.tags(), joinPoint);
 
-        try (Tracer.SpanInScope spanInScope = tracer.withSpanInScope(span.start())) {
+        Span startedSpan = span.start();
+        try (Tracer.SpanInScope spanInScope = tracer.withSpan(startedSpan)) {
             Object result = joinPoint.proceed();
-            span.tag("success", "true");
+            startedSpan.tag("success", "true");
             return result;
 
         } catch (Throwable throwable) {
-            span.tag("success", "false")
+            startedSpan.tag("success", "false")
                 .tag("error.class", throwable.getClass().getSimpleName())
                 .tag("error.message", throwable.getMessage());
             throw throwable;
         } finally {
-            span.end();
+            startedSpan.end();
         }
     }
 
@@ -195,18 +197,19 @@ public class TracingAspect {
         // Add custom tags
         addTags(span, httpClientSpan.tags(), joinPoint);
 
-        try (Tracer.SpanInScope spanInScope = tracer.withSpanInScope(span.start())) {
+        Span startedSpan = span.start();
+        try (Tracer.SpanInScope spanInScope = tracer.withSpan(startedSpan)) {
             Object result = joinPoint.proceed();
-            span.tag("success", "true");
+            startedSpan.tag("success", "true");
             return result;
 
         } catch (Throwable throwable) {
-            span.tag("success", "false")
+            startedSpan.tag("success", "false")
                 .tag("error.class", throwable.getClass().getSimpleName())
                 .tag("error.message", throwable.getMessage());
             throw throwable;
         } finally {
-            span.end();
+            startedSpan.end();
         }
     }
 
@@ -242,18 +245,19 @@ public class TracingAspect {
         // Add custom tags
         addTags(span, messagingSpan.tags(), joinPoint);
 
-        try (Tracer.SpanInScope spanInScope = tracer.withSpanInScope(span.start())) {
+        Span startedSpan = span.start();
+        try (Tracer.SpanInScope spanInScope = tracer.withSpan(startedSpan)) {
             Object result = joinPoint.proceed();
-            span.tag("success", "true");
+            startedSpan.tag("success", "true");
             return result;
 
         } catch (Throwable throwable) {
-            span.tag("success", "false")
+            startedSpan.tag("success", "false")
                 .tag("error.class", throwable.getClass().getSimpleName())
                 .tag("error.message", throwable.getMessage());
             throw throwable;
         } finally {
-            span.end();
+            startedSpan.end();
         }
     }
 
@@ -276,27 +280,28 @@ public class TracingAspect {
         // Capture current trace context for propagation
         TraceContext traceContext = asyncSpan.propagateContext() ? span.context() : null;
 
-        try (Tracer.SpanInScope spanInScope = tracer.withSpanInScope(span.start())) {
+        Span startedSpan = span.start();
+        try (Tracer.SpanInScope spanInScope = tracer.withSpan(startedSpan)) {
             Object result = joinPoint.proceed();
 
             // Handle async results with context propagation
             if (result instanceof CompletableFuture<?>) {
-                return handleAsyncCompletableFuture(span, (CompletableFuture<?>) result, traceContext);
+                return handleAsyncCompletableFuture(startedSpan, (CompletableFuture<?>) result, traceContext);
             } else if (result instanceof Future<?>) {
-                return handleAsyncResult(span, (Future<?>) result);
+                return handleAsyncResult(startedSpan, (Future<?>) result);
             }
 
-            span.tag("success", "true");
+            startedSpan.tag("success", "true");
             return result;
 
         } catch (Throwable throwable) {
-            span.tag("success", "false")
+            startedSpan.tag("success", "false")
                 .tag("error.class", throwable.getClass().getSimpleName())
                 .tag("error.message", throwable.getMessage());
             throw throwable;
         } finally {
             if (!(joinPoint.proceed() instanceof Future<?>)) {
-                span.end();
+                startedSpan.end();
             }
         }
     }
@@ -389,7 +394,7 @@ public class TracingAspect {
             try {
                 if (traceContext != null) {
                     // Restore trace context in async callback
-                    try (Tracer.SpanInScope ignored = tracer.withSpanInScope(span)) {
+                    try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
                         if (throwable != null) {
                             span.tag("success", "false")
                                 .tag("error.class", throwable.getClass().getSimpleName())

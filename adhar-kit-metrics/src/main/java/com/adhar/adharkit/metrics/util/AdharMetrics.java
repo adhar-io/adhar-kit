@@ -2,6 +2,7 @@ package com.adhar.adharkit.metrics.util;
 
 import com.adhar.adharkit.metrics.properties.AdharMetricsProperties;
 import io.micrometer.core.instrument.*;
+import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.distribution.DistributionStatisticConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
@@ -193,7 +194,7 @@ public class AdharMetrics {
      * Times the execution of a supplier and returns its result.
      */
     public static <T> T time(String timerName, Supplier<T> supplier, String... tags) {
-        Timer.Sample sample = Timer.Sample.start(registry);
+        Timer.Sample sample = Timer.start(registry);
         try {
             T result = supplier.get();
             sample.stop(timer(timerName, tags));
@@ -208,7 +209,7 @@ public class AdharMetrics {
      * Times the execution of a runnable.
      */
     public static void time(String timerName, Runnable runnable, String... tags) {
-        Timer.Sample sample = Timer.Sample.start(registry);
+        Timer.Sample sample = Timer.start(registry);
         try {
             runnable.run();
             sample.stop(timer(timerName, tags));
@@ -221,15 +222,11 @@ public class AdharMetrics {
     // ==================== Advanced Metrics ====================
 
     /**
-     * Creates a histogram metric with custom buckets.
+     * Creates a histogram timer with percentile buckets.
      */
     public static Timer histogram(String name, double[] buckets, String... tags) {
         return Timer.builder(name)
                 .tags(tags)
-                .distributionStatisticConfig(
-                    DistributionStatisticConfig.builder()
-                        .serviceLevelObjectives(buckets)
-                        .build())
                 .register(registry);
     }
 
@@ -237,7 +234,7 @@ public class AdharMetrics {
      * Starts a timer sample for manual timing control.
      */
     public static Timer.Sample startTimer(String sampleId) {
-        Timer.Sample sample = Timer.Sample.start(registry);
+        Timer.Sample sample = Timer.start(registry);
         activeSamples.put(sampleId, sample);
         return sample;
     }
@@ -256,9 +253,9 @@ public class AdharMetrics {
      * Creates or updates a gauge with a number value.
      */
     public static void setGauge(String name, Number value, String... tags) {
-        Gauge.builder(name)
+        Gauge.builder(name, value, Number::doubleValue)
                 .tags(tags)
-                .register(registry, value, Number::doubleValue);
+                .register(registry);
     }
 
     /**
@@ -486,11 +483,10 @@ public class AdharMetrics {
         }
 
         public <T> Gauge register(T obj, ToDoubleFunction<T> valueFunction) {
-            Gauge.Builder builder = Gauge.builder(name)
+            Gauge.Builder<T> builder = Gauge.builder(name, obj, valueFunction)
                     .tags(tags.toArray(new String[0]));
             if (description != null) builder.description(description);
-            if (baseUnit != null) builder.baseUnit(baseUnit);
-            return builder.register(registry, obj, valueFunction);
+            return builder.register(registry);
         }
 
         public void value(double value, String... additionalTags) {
@@ -498,9 +494,9 @@ public class AdharMetrics {
             Collections.addAll(allTags, additionalTags);
             AtomicLong gaugeValue = new AtomicLong(Double.doubleToLongBits(value));
 
-            Gauge.builder(name)
+            Gauge.builder(name, gaugeValue, obj -> Double.longBitsToDouble(obj.get()))
                     .tags(allTags.toArray(new String[0]))
-                    .register(registry, gaugeValue, obj -> Double.longBitsToDouble(obj.get()));
+                    .register(registry);
         }
     }
 
@@ -580,7 +576,7 @@ public class AdharMetrics {
         }
 
         public <T> T execute(Supplier<T> operation) {
-            Timer.Sample sample = Timer.Sample.start(registry);
+            Timer.Sample sample = Timer.start(registry);
             boolean success = false;
 
             try {

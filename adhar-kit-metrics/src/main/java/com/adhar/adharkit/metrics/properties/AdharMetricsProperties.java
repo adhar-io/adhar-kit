@@ -38,7 +38,7 @@ public class AdharMetricsProperties {
     private OpenTelemetryProperties openTelemetry = new OpenTelemetryProperties();
 
     /**
-     * Configuration for web metrics (HTTP requests, etc.).
+     * Configuration for controller metrics (HTTP requests, etc.).
      */
     private WebMetricsProperties web = new WebMetricsProperties();
 
@@ -127,13 +127,13 @@ public class AdharMetricsProperties {
     }
 
     /**
-     * Configuration properties for web metrics.
+     * Configuration properties for controller metrics.
      */
     @Data
     public static class WebMetricsProperties {
 
         /**
-         * Whether web metrics are enabled.
+         * Whether controller metrics are enabled.
          */
         private boolean enabled = true;
 

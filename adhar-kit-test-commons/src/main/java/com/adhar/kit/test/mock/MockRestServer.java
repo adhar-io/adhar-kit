@@ -1,4 +1,4 @@
-nd no java files are emmptynpackage com.adhar.kit.test.mock;
+package com.adhar.kit.test.mock;
 
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;

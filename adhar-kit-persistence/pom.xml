@@ -93,12 +93,6 @@
             <version>0.0.1-SNAPSHOT</version>
         </dependency>
 
-        <!-- Utilities -->
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-            <scope>provided</scope>
-        </dependency>
 
         <!-- Validation -->
         <dependency>
@@ -131,6 +125,9 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
             </plugin>
         </plugins>
     </build>

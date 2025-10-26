@@ -29,13 +29,13 @@ class AdharLoggerTest {
     private AdharLoggingProperties properties;
 
     @Mock
-    private AdharLoggingProperties.Mdc mdcProperties;
+    private AdharLoggingProperties.MdcLoggingProperties mdcProperties;
 
     @Mock
-    private AdharLoggingProperties.Tracing tracingProperties;
+    private AdharLoggingProperties.TracingProperties tracingProperties;
 
     @Mock
-    private AdharLoggingProperties.Masking maskingProperties;
+    private AdharLoggingProperties.MaskingProperties maskingProperties;
 
     @Mock
     private Tracer tracer;

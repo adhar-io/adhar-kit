@@ -11,7 +11,6 @@ import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
 import io.opentelemetry.context.propagation.ContextPropagators;
 import io.opentelemetry.context.propagation.TextMapPropagator;
 import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
-import io.opentelemetry.exporter.otlp.trace.OtlpHttpSpanExporter;
 import io.opentelemetry.exporter.zipkin.ZipkinSpanExporter;
 import io.opentelemetry.extension.trace.propagation.B3Propagator;
 import io.opentelemetry.extension.trace.propagation.JaegerPropagator;
@@ -88,14 +87,14 @@ public class AdharTracingAutoConfiguration {
     }
 
     /**
-     * Create the Micrometer Tracer wrapper.
+     * Create the Micrometer Tracer bean.
      */
     @Bean
     @ConditionalOnMissingBean
     public Tracer tracer(OpenTelemetry openTelemetry) {
         return new OtelTracer(openTelemetry.getTracer("adhar-kit-tracing"),
-                             openTelemetry.getPropagators(),
-                             Runnable::run);
+                             null,  // OtelCurrentTraceContext is no longer required
+                             event -> {});  // EventPublisher that does nothing
     }
 
     /**
@@ -135,7 +134,6 @@ public class AdharTracingAutoConfiguration {
         for (SpanExporter exporter : exporters) {
             BatchSpanProcessor processor = BatchSpanProcessor.builder(exporter)
                     .setMaxExportBatchSize(512)
-                    .setExportTimeout(Duration.ofSeconds(30))
                     .setScheduleDelay(Duration.ofSeconds(5))
                     .build();
             builder.addSpanProcessor(processor);
@@ -148,7 +146,7 @@ public class AdharTracingAutoConfiguration {
      * Create resource attributes for the service.
      */
     private Resource createResource() {
-        Resource.Builder resourceBuilder = Resource.getDefault().toBuilder();
+        io.opentelemetry.sdk.resources.ResourceBuilder resourceBuilder = Resource.getDefault().toBuilder();
 
         // Service information
         String serviceName = environment.resolvePlaceholders(properties.getResource().getServiceName());
@@ -260,8 +258,9 @@ public class AdharTracingAutoConfiguration {
 
                 return builder.build();
             } else {
-                var builder = OtlpHttpSpanExporter.builder()
-                        .setEndpoint(otlpProps.getEndpoint() + "/v1/traces")
+                // HTTP protocol: use gRPC exporter as HTTP exporter is not available in newer versions
+                var builder = OtlpGrpcSpanExporter.builder()
+                        .setEndpoint(otlpProps.getEndpoint())
                         .setTimeout(Duration.parse(otlpProps.getTimeout()));
 
                 // Add headers
@@ -311,7 +310,8 @@ public class AdharTracingAutoConfiguration {
                         .setTimeout(Duration.parse(jaegerProps.getTimeout()))
                         .build();
             } else {
-                return OtlpHttpSpanExporter.builder()
+                // Use gRPC exporter as HTTP exporter is not available in newer versions
+                return OtlpGrpcSpanExporter.builder()
                         .setEndpoint(jaegerProps.getHttpEndpoint())
                         .setTimeout(Duration.parse(jaegerProps.getTimeout()))
                         .build();

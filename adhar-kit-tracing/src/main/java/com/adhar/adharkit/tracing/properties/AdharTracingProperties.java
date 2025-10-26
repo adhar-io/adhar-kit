@@ -43,7 +43,7 @@ public class AdharTracingProperties {
     private JaegerProperties jaeger = new JaegerProperties();
 
     /**
-     * Configuration properties for web tracing.
+     * Configuration properties for controller tracing.
      */
     private WebTracingProperties web = new WebTracingProperties();
 
@@ -199,13 +199,13 @@ public class AdharTracingProperties {
     }
 
     /**
-     * Configuration properties for web tracing.
+     * Configuration properties for controller tracing.
      */
     @Data
     public static class WebTracingProperties {
 
         /**
-         * Whether web tracing is enabled.
+         * Whether controller tracing is enabled.
          */
         private boolean enabled = true;
 

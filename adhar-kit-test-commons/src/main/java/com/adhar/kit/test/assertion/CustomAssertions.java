@@ -1,6 +1,12 @@
 package com.adhar.kit.test.assertion;
 
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.client.WireMock;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import lombok.extern.slf4j.Slf4j;
 import org.assertj.core.api.AbstractAssert;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -74,9 +80,14 @@ public class CustomAssertions {
             .ignoringFields(excludeFields)
             .isEqualTo(expected);
     }
-}@Slf4j
-public class MockRestServer {
+}
 
+/**
+ * Mock REST server utilities using WireMock.
+ */
+class MockRestServer {
+
+    private static final Logger log = LoggerFactory.getLogger(MockRestServer.class);
     private static WireMockServer wireMockServer;
 
     /**

@@ -1,4 +1,4 @@
-package com.adhar.adharkit.ai.web;
+package com.adhar.adharkit.ai.controller;
 
 import com.adhar.adharkit.ai.model.AiChatRequest;
 import com.adhar.adharkit.ai.model.AiChatResponse;
@@ -47,7 +47,11 @@ public class AiController extends BaseController {
             return success(response, "Chat completed successfully");
         } catch (Exception e) {
             log.error("Chat request failed: {}", e.getMessage(), e);
-            return internalServerError("Failed to process chat request");
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.<AiChatResponse>builder()
+                            .success(false)
+                            .message("Failed to process chat request")
+                            .build());
         }
     }
 
@@ -66,7 +70,11 @@ public class AiController extends BaseController {
                 .map(response -> success(response, "Async chat completed successfully").getBody())
                 .map(ResponseEntity::ok)
                 .doOnError(error -> log.error("Async chat failed: {}", error.getMessage()))
-                .onErrorReturn(internalServerError("Failed to process async chat request"));
+                .onErrorReturn(ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(ApiResponse.<AiChatResponse>builder()
+                                .success(false)
+                                .message("Failed to process async chat request")
+                                .build()));
     }
 
     /**
@@ -99,7 +107,11 @@ public class AiController extends BaseController {
 
         String text = request.get("text");
         if (text == null || text.trim().isEmpty()) {
-            return badRequest("Text parameter is required");
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.<List<Float>>builder()
+                            .success(false)
+                            .message("Text parameter is required")
+                            .build());
         }
 
         try {
@@ -107,7 +119,11 @@ public class AiController extends BaseController {
             return success(embeddings, "Embeddings generated successfully");
         } catch (Exception e) {
             log.error("Embedding generation failed: {}", e.getMessage(), e);
-            return internalServerError("Failed to generate embeddings");
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.<List<Float>>builder()
+                            .success(false)
+                            .message("Failed to generate embeddings")
+                            .build());
         }
     }
 
@@ -126,7 +142,11 @@ public class AiController extends BaseController {
         Integer limit = (Integer) request.getOrDefault("limit", 10);
 
         if (query == null || query.trim().isEmpty()) {
-            return badRequest("Query parameter is required");
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.<List<AiService.SimilarityResult>>builder()
+                            .success(false)
+                            .message("Query parameter is required")
+                            .build());
         }
 
         try {
@@ -134,7 +154,11 @@ public class AiController extends BaseController {
             return success(results, "Search completed successfully");
         } catch (Exception e) {
             log.error("Search failed: {}", e.getMessage(), e);
-            return internalServerError("Failed to perform search");
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.<List<AiService.SimilarityResult>>builder()
+                            .success(false)
+                            .message("Failed to perform search")
+                            .build());
         }
     }
 
@@ -155,7 +179,11 @@ public class AiController extends BaseController {
             return success(response, "RAG chat completed successfully");
         } catch (Exception e) {
             log.error("RAG chat failed: {}", e.getMessage(), e);
-            return internalServerError("Failed to process RAG chat request");
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.<AiChatResponse>builder()
+                            .success(false)
+                            .message("Failed to process RAG chat request")
+                            .build());
         }
     }
 
@@ -172,7 +200,11 @@ public class AiController extends BaseController {
         logRequest(httpRequest, "addDocuments");
 
         if (documents == null || documents.isEmpty()) {
-            return badRequest("Documents cannot be empty");
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.<Void>builder()
+                            .success(false)
+                            .message("Documents cannot be empty")
+                            .build());
         }
 
         try {
@@ -180,7 +212,11 @@ public class AiController extends BaseController {
             return success("Documents added successfully to knowledge base: " + knowledgeBase);
         } catch (Exception e) {
             log.error("Document ingestion failed: {}", e.getMessage(), e);
-            return internalServerError("Failed to add documents to knowledge base");
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.<Void>builder()
+                            .success(false)
+                            .message("Failed to add documents to knowledge base")
+                            .build());
         }
     }
 
@@ -196,7 +232,11 @@ public class AiController extends BaseController {
             return success(models, "Available models retrieved successfully");
         } catch (Exception e) {
             log.error("Failed to retrieve models: {}", e.getMessage(), e);
-            return internalServerError("Failed to retrieve available models");
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.<List<String>>builder()
+                            .success(false)
+                            .message("Failed to retrieve available models")
+                            .build());
         }
     }
 
@@ -217,12 +257,19 @@ public class AiController extends BaseController {
 
             return isHealthy ?
                 success(healthStatus, "AI services are healthy") :
-                error(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
-                      "AI_UNHEALTHY", "AI services are not responding");
+                ResponseEntity.status(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE)
+                        .body(ApiResponse.<Map<String, Object>>builder()
+                                .success(false)
+                                .message("AI services are not responding")
+                                .build());
 
         } catch (Exception e) {
             log.error("Health check failed: {}", e.getMessage(), e);
-            return internalServerError("Health check failed");
+            return ResponseEntity.status(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.<Map<String, Object>>builder()
+                            .success(false)
+                            .message("Health check failed")
+                            .build());
         }
     }
 }

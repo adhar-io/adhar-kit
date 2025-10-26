@@ -1,6 +1,8 @@
 package com.adhar.kit.test.container;
 
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -11,9 +13,9 @@ import org.testcontainers.utility.DockerImageName;
  * @author Adhar Platform Team
  * @since 1.0.0
  */
-@Slf4j
 public class PostgresTestContainer {
 
+    private static final Logger log = LoggerFactory.getLogger(PostgresTestContainer.class);
     private static final String POSTGRES_IMAGE = "postgres:15-alpine";
     private static final String DEFAULT_DATABASE = "testdb";
     private static final String DEFAULT_USERNAME = "test";

@@ -1,7 +1,9 @@
 package com.adhar.kit.test.container;
 
 import lombok.extern.slf4j.Slf4j;
-import org.testcontainers.kafka.KafkaContainer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
@@ -11,10 +13,10 @@ import org.testcontainers.utility.DockerImageName;
  * @author Adhar Platform Team
  * @since 1.0.0
  */
-@Slf4j
 public class KafkaTestContainer {
 
-    private static final String KAFKA_IMAGE = "apache/kafka:latest";
+    private static final Logger log = LoggerFactory.getLogger(KafkaTestContainer.class);
+    private static final String KAFKA_IMAGE = "confluentinc/cp-kafka:7.5.0";
 
     private static KafkaContainer container;
 

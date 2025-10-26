@@ -51,7 +51,7 @@ public class AnalyticsEvent {
     private String sessionId;
 
     /**
-     * Source of the event (e.g., "web", "mobile", "api").
+     * Source of the event (e.g., "controller", "mobile", "api").
      */
     private String source;
 

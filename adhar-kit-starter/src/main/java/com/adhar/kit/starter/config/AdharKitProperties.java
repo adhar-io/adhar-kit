@@ -29,6 +29,11 @@ public class AdharKitProperties {
     private String applicationVersion;
 
     /**
+     * Application profile/environment.
+     */
+    private String profile = "default";
+
+    /**
      * Enable auto-configuration for all modules.
      */
     private boolean autoConfigureAll = true;
@@ -41,6 +46,7 @@ public class AdharKitProperties {
     @Data
     public static class Modules {
         private boolean persistence = true;
+        private boolean cache = true;
         private boolean caching = true;
         private boolean messaging = true;
         private boolean security = true;
@@ -49,6 +55,13 @@ public class AdharKitProperties {
         private boolean metrics = true;
         private boolean logging = true;
         private boolean health = true;
+        private boolean config = true;
+        private boolean docs = true;
+        private boolean ai = false;
+        private boolean analytics = false;
+        private boolean kubernetes = false;
+        private boolean dapr = false;
+        private boolean grpc = false;
     }
 }
 

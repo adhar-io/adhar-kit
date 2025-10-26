@@ -9,12 +9,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.chat.ChatClient;
-import org.springframework.ai.chat.ChatResponse;
-import org.springframework.ai.embedding.EmbeddingClient;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -28,10 +29,10 @@ import static org.mockito.Mockito.*;
 class AiServiceImplTest {
 
     @Mock
-    private ChatClient chatClient;
+    private ChatModel chatModel;
 
     @Mock
-    private EmbeddingClient embeddingClient;
+    private EmbeddingModel embeddingModel;
 
     @Mock
     private VectorStore vectorStore;
@@ -47,7 +48,7 @@ class AiServiceImplTest {
         when(aiProperties.getSecurity()).thenReturn(createSecurityProperties());
         when(aiProperties.getOpenAi()).thenReturn(createOpenAiProperties());
 
-        aiService = new AiServiceImpl(chatClient, embeddingClient, vectorStore, aiProperties);
+        aiService = new AiServiceImpl(chatModel, embeddingModel, vectorStore, aiProperties);
     }
 
     @Test
@@ -59,7 +60,7 @@ class AiServiceImplTest {
                 .build();
 
         ChatResponse mockResponse = mock(ChatResponse.class);
-        when(chatClient.call(any())).thenReturn(mockResponse);
+        when(chatModel.call(any())).thenReturn(mockResponse);
         when(mockResponse.getResults()).thenReturn(List.of(createMockResult("I'm doing well, thank you!")));
 
         // When
@@ -69,7 +70,7 @@ class AiServiceImplTest {
         assertThat(response).isNotNull();
         assertThat(response.getContent()).isEqualTo("I'm doing well, thank you!");
         assertThat(response.getModel()).isEqualTo("gpt-3.5-turbo");
-        verify(chatClient).call(any());
+        verify(chatModel).call(any());
     }
 
     @Test
@@ -92,9 +93,9 @@ class AiServiceImplTest {
         var mockEmbeddingResponse = mock(org.springframework.ai.embedding.EmbeddingResponse.class);
         var mockResult = mock(org.springframework.ai.embedding.Embedding.class);
 
-        when(embeddingClient.embedForResponse(any())).thenReturn(mockEmbeddingResponse);
+        when(embeddingModel.embedForResponse(any())).thenReturn(mockEmbeddingResponse);
         when(mockEmbeddingResponse.getResults()).thenReturn(List.of(mockResult));
-        when(mockResult.getOutput()).thenReturn(List.of(0.1f, 0.2f, 0.3f));
+        when(mockResult.getOutput()).thenReturn(new float[]{0.1f, 0.2f, 0.3f});
 
         // When
         List<Float> embeddings = aiService.embed(text);
@@ -103,7 +104,7 @@ class AiServiceImplTest {
         assertThat(embeddings).isNotNull();
         assertThat(embeddings).hasSize(3);
         assertThat(embeddings).containsExactly(0.1f, 0.2f, 0.3f);
-        verify(embeddingClient).embedForResponse(any());
+        verify(embeddingModel).embedForResponse(any());
     }
 
     @Test
@@ -116,7 +117,8 @@ class AiServiceImplTest {
                 .withContent("Sample document content")
                 .build();
 
-        when(vectorStore.similaritySearch(query, limit)).thenReturn(List.of(mockDocument));
+        when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class)))
+                .thenReturn(List.of(mockDocument));
 
         // When
         List<AiService.SimilarityResult> results = aiService.search(query, limit);
@@ -126,7 +128,7 @@ class AiServiceImplTest {
         assertThat(results).hasSize(1);
         assertThat(results.get(0).id()).isEqualTo("doc1");
         assertThat(results.get(0).content()).isEqualTo("Sample document content");
-        verify(vectorStore).similaritySearch(query, limit);
+        verify(vectorStore).similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class));
     }
 
     @Test
@@ -229,8 +231,8 @@ class AiServiceImplTest {
         return openAi;
     }
 
-    private org.springframework.ai.chat.Generation createMockResult(String content) {
-        var mockGeneration = mock(org.springframework.ai.chat.Generation.class);
+    private org.springframework.ai.chat.model.Generation createMockResult(String content) {
+        var mockGeneration = mock(org.springframework.ai.chat.model.Generation.class);
         var mockAssistantMessage = mock(org.springframework.ai.chat.messages.AssistantMessage.class);
 
         when(mockGeneration.getOutput()).thenReturn(mockAssistantMessage);

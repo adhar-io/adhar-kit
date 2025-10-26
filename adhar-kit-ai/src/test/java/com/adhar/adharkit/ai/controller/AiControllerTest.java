@@ -1,15 +1,17 @@
-package com.adhar.adharkit.ai.web;
+package com.adhar.adharkit.ai.controller;
 
 import com.adhar.adharkit.ai.model.AiChatRequest;
 import com.adhar.adharkit.ai.model.AiChatResponse;
 import com.adhar.adharkit.ai.service.AiService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -25,17 +27,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Integration tests for AI Controller endpoints.
  * Tests REST API functionality, validation, and error handling.
  */
-@WebMvcTest(AiController.class)
+@ExtendWith(MockitoExtension.class)
 class AiControllerTest {
 
-    @Autowired
     private MockMvc mockMvc;
 
-    @MockBean
+    @Mock
     private AiService aiService;
 
-    @Autowired
     private ObjectMapper objectMapper;
+
+    @BeforeEach
+    void setUp() {
+        objectMapper = new ObjectMapper();
+        AiController aiController = new AiController(aiService);
+        mockMvc = MockMvcBuilders.standaloneSetup(aiController).build();
+    }
 
     @Test
     void testChatEndpoint() throws Exception {

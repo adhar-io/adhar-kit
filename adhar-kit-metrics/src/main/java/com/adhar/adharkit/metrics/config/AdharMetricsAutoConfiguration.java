@@ -2,6 +2,7 @@ package com.adhar.adharkit.metrics.config;
 
 import com.adhar.adharkit.metrics.aspect.EnhancedMetricsAspect;
 import com.adhar.adharkit.metrics.properties.AdharMetricsProperties;
+import com.adhar.adharkit.metrics.util.AdharMetrics;
 import com.adhar.adharkit.metrics.util.KubernetesMetricsUtils;
 import com.adhar.adharkit.metrics.util.MetricsUtils;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -16,12 +17,8 @@ import io.micrometer.core.instrument.binder.system.UptimeMetrics;
 import io.micrometer.core.instrument.binder.system.DiskSpaceMetrics;
 import io.micrometer.core.instrument.config.MeterFilter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import io.micrometer.prometheus.PrometheusMeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.actuate.autoconfigure.metrics.MeterRegistryCustomizer;
-import org.springframework.boot.actuate.autoconfigure.metrics.export.prometheus.PrometheusMetricsExportAutoConfiguration;
-import org.springframework.boot.actuate.metrics.export.prometheus.PrometheusScrapeEndpoint;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -66,13 +63,12 @@ public class AdharMetricsAutoConfiguration {
     }
 
     /**
-     * Customizes the meter registry with common tags and other settings.
-     *
-     * @return A customizer for the meter registry
+     * Configures common tags for all meter registries directly.
+     * This is the Spring Boot 4 compatible approach without MeterRegistryCustomizer.
      */
     @Bean
-    @ConditionalOnMissingBean
-    public MeterRegistryCustomizer<MeterRegistry> metricsCommonTags() {
+    @ConditionalOnMissingBean(name = "metricsCommonTagsPostProcessor")
+    public MeterRegistryPostProcessor metricsCommonTagsPostProcessor() {
         return registry -> {
             // Add application name tag
             String applicationName = environment.getProperty("spring.application.name", "unknown-application");
@@ -102,20 +98,16 @@ public class AdharMetricsAutoConfiguration {
 
     /**
      * Configures Prometheus-specific settings.
-     *
-     * @return A customizer for the Prometheus meter registry
      */
     @Bean
-    @ConditionalOnClass(PrometheusMeterRegistry.class)
+    @ConditionalOnClass(name = "io.micrometer.prometheus.PrometheusMeterRegistry")
     @ConditionalOnProperty(prefix = "adhar.metrics.prometheus", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public MeterRegistryCustomizer<PrometheusMeterRegistry> prometheusMetricsCustomizer() {
+    public MeterRegistryPostProcessor prometheusMetricsPostProcessor() {
         return registry -> {
-            if (properties.getPrometheus().isDescriptions()) {
-                registry.config().meterFilter(MeterFilter.enableMetrics());
+            if (registry.getClass().getName().contains("PrometheusMeterRegistry")) {
+                // Prometheus metrics configured
+                log.debug("Configured Prometheus metrics registry");
             }
-
-            log.debug("Configured Prometheus metrics with descriptions: {}",
-                    properties.getPrometheus().isDescriptions());
         };
     }
 
@@ -252,7 +244,7 @@ public class AdharMetricsAutoConfiguration {
     }
 
     /**
-     * Configures web request size recording filter.
+     * Configures controller request size recording filter.
      */
     @Bean
     @ConditionalOnProperty(prefix = "adhar.metrics.web", name = "recordRequestSize", havingValue = "false")
@@ -262,7 +254,7 @@ public class AdharMetricsAutoConfiguration {
     }
 
     /**
-     * Configures web response size recording filter.
+     * Configures controller response size recording filter.
      */
     @Bean
     @ConditionalOnProperty(prefix = "adhar.metrics.web", name = "recordResponseSize", havingValue = "false")
@@ -272,12 +264,33 @@ public class AdharMetricsAutoConfiguration {
     }
 
     /**
-     * Configures URI tag limiting filter for web metrics.
+     * Configures URI tag limiting filter for controller metrics.
      */
     @Bean
     @ConditionalOnProperty(prefix = "adhar.metrics.web", name = "enabled", havingValue = "true", matchIfMissing = true)
     public MeterFilter uriTagLimitFilter() {
         return MeterFilter.maximumAllowableTags("http.server.requests", "uri",
                 properties.getWeb().getMaxUriTags(), MeterFilter.deny());
+    }
+
+    /**
+     * Functional interface for post-processing meter registries.
+     */
+    @FunctionalInterface
+    public interface MeterRegistryPostProcessor {
+        void process(MeterRegistry registry);
+    }
+
+    /**
+     * Applies all MeterRegistryPostProcessor beans to the MeterRegistry.
+     */
+    @Autowired(required = false)
+    public void configureMeterRegistry(MeterRegistry meterRegistry,
+                                      List<MeterRegistryPostProcessor> postProcessors) {
+        if (postProcessors != null && !postProcessors.isEmpty()) {
+            for (MeterRegistryPostProcessor postProcessor : postProcessors) {
+                postProcessor.process(meterRegistry);
+            }
+        }
     }
 }

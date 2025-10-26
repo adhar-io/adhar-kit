@@ -148,6 +148,13 @@ public class AdharLogger {
     }
 
     /**
+     * Put a single MDC key/value if enabled (alias for put).
+     */
+    public void putMdc(String key, String value) {
+        put(key, value);
+    }
+
+    /**
      * Get a single MDC value by key.
      */
     @Nullable
@@ -220,9 +227,9 @@ public class AdharLogger {
     /**
      * Sets the trace ID in the MDC context.
      */
-    public void setTraceId(@Nullable String traceId) {
+    public String setTraceId(@Nullable String traceId) {
         if (!properties.getTracing().isEnabled() || !properties.getTracing().isIncludeTraceId()) {
-            return;
+            return traceId;
         }
 
         String actualTraceId = traceId;
@@ -237,6 +244,7 @@ public class AdharLogger {
         if (StringUtils.hasText(actualTraceId)) {
             MDC.put(properties.getTracing().getTraceIdField(), actualTraceId);
         }
+        return actualTraceId;
     }
 
     /**
@@ -253,9 +261,9 @@ public class AdharLogger {
     /**
      * Sets the span ID in the MDC context.
      */
-    public void setSpanId(@Nullable String spanId) {
+    public String setSpanId(@Nullable String spanId) {
         if (!properties.getTracing().isEnabled() || !properties.getTracing().isIncludeSpanId()) {
-            return;
+            return spanId;
         }
 
         String actualSpanId = spanId;
@@ -270,6 +278,7 @@ public class AdharLogger {
         if (StringUtils.hasText(actualSpanId)) {
             MDC.put(properties.getTracing().getSpanIdField(), actualSpanId);
         }
+        return actualSpanId;
     }
 
     /**
@@ -521,5 +530,12 @@ public class AdharLogger {
      */
     public AdharLoggingProperties getProperties() {
         return properties;
+    }
+
+    /**
+     * Clear all MDC values.
+     */
+    public void clearMdc() {
+        MDC.clear();
     }
 }

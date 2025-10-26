@@ -94,9 +94,9 @@ class EnhancedAdharMetricsAutoConfigurationTest {
         contextRunner
                 .withPropertyValues(
                         "adhar.metrics.enabled=true",
-                        "adhar.metrics.web.enabled=true",
-                        "adhar.metrics.web.record-request-size=false",
-                        "adhar.metrics.web.max-uri-tags=50"
+                        "adhar.metrics.controller.enabled=true",
+                        "adhar.metrics.controller.record-request-size=false",
+                        "adhar.metrics.controller.max-uri-tags=50"
                 )
                 .run(context -> {
                     AdharMetricsProperties properties = context.getBean(AdharMetricsProperties.class);

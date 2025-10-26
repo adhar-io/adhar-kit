@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -106,8 +107,15 @@ public class AiServiceImpl implements AiService {
         try {
             log.debug("Generating embeddings for text length: {}", text.length());
 
-            var embeddingResponse = embeddingClient.embedForResponse(List.of(text));
-            return embeddingResponse.getResults().get(0).getOutput();
+            var embeddingResponse = embeddingModel.embedForResponse(List.of(text));
+            float[] output = embeddingResponse.getResults().get(0).getOutput();
+
+            // Convert float[] to List<Float>
+            List<Float> result = new java.util.ArrayList<>(output.length);
+            for (float f : output) {
+                result.add(f);
+            }
+            return result;
 
         } catch (Exception e) {
             log.error("Error generating embeddings: {}", e.getMessage(), e);
@@ -121,7 +129,9 @@ public class AiServiceImpl implements AiService {
             log.debug("Performing similarity search - Query length: {}, Limit: {}",
                     query.length(), limit);
 
-            var results = vectorStore.similaritySearch(query, limit);
+            var results = vectorStore.similaritySearch(
+                org.springframework.ai.vectorstore.SearchRequest.query(query).withTopK(limit)
+            );
 
             return results.stream()
                     .map(doc -> new SimilarityResult(

@@ -14,7 +14,7 @@
         <spring-boot.version>4.0.0-M1</spring-boot.version>
         <spring-framework.version>7.0.0-M7</spring-framework.version>
         <spring-cloud.version>2023.0.2</spring-cloud.version>
-        <lombok.version>1.18.32</lombok.version>
+        <lombok.version>1.18.40</lombok.version>
         <mapstruct.version>1.5.5.Final</mapstruct.version>
         <resilience4j.version>2.2.0</resilience4j.version>
         <micrometer.version>1.13.0</micrometer.version>

@@ -77,18 +77,15 @@ public class MetricsAspect {
     }
 
     /**
-     * Gets the metric name from the annotation, method, or join point.
-     *
+    /**
+     * Get the metric name from the annotation or method.
      * @param timed The timed annotation
      * @param method The method
      * @param joinPoint The join point
      * @return The metric name
      */
     private String getMetricName(Timed timed, Method method, ProceedingJoinPoint joinPoint) {
-        if (StringUtils.hasText(timed.value())) {
-            return timed.value();
-        }
-        
+
         if (StringUtils.hasText(timed.name())) {
             return timed.name();
         }

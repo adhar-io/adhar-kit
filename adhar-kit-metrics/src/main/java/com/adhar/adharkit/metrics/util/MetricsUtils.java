@@ -125,14 +125,20 @@ public class MetricsUtils {
      *
      * @param name The timer name
      * @param supplier The supplier to time
-     * @param tags The tags as key-value pairs
+     * @param tags Optional tags
      * @param <T> The return type
      * @return The supplier result
      */
     public <T> T timeSupplier(String name, Supplier<T> supplier, String... tags) {
-        return Timer.Sample.start(registry)
-                .stop(timer(name, tags))
-                .recordCallable(supplier::get);
+        Timer.Sample sample = Timer.start(registry);
+        try {
+            T result = supplier.get();
+            sample.stop(timer(name, tags));
+            return result;
+        } catch (Exception e) {
+            sample.stop(timer(name + ".error", tags));
+            throw e;
+        }
     }
 
     /**
@@ -143,9 +149,14 @@ public class MetricsUtils {
      * @param tags The tags as key-value pairs
      */
     public void timeRunnable(String name, Runnable runnable, String... tags) {
-        Timer.Sample.start(registry)
-                .stop(timer(name, tags))
-                .recordRunnable(runnable);
+        Timer.Sample sample = Timer.start(registry);
+        try {
+            runnable.run();
+            sample.stop(timer(name, tags));
+        } catch (Exception e) {
+            sample.stop(timer(name + ".error", tags));
+            throw e;
+        }
     }
 
     /**
@@ -173,9 +184,9 @@ public class MetricsUtils {
      */
     public <T> Gauge gauge(String name, T obj, ToDoubleFunction<T> valueFunction, String... tags) {
         validateNameAndTags(name, tags);
-        return Gauge.builder(name)
+        return Gauge.builder(name, obj, valueFunction)
                 .tags(tags)
-                .register(registry, obj, valueFunction);
+                .register(registry);
     }
 
     /**
@@ -191,10 +202,10 @@ public class MetricsUtils {
      */
     public <T> Gauge gauge(String name, String description, T obj, ToDoubleFunction<T> valueFunction, String... tags) {
         validateNameAndTags(name, tags);
-        return Gauge.builder(name)
+        return Gauge.builder(name, obj, valueFunction)
                 .description(description)
                 .tags(tags)
-                .register(registry, obj, valueFunction);
+                .register(registry);
     }
 
     /**

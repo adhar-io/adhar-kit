@@ -714,6 +714,36 @@ public class AdharLoggingProperties {
          */
         private String userIdField = "userId";
 
+        /**
+         * Whether to include tenant ID in MDC.
+         */
+        private boolean includeTenantId = true;
+
+        /**
+         * Name of the tenant ID field in MDC.
+         */
+        private String tenantIdField = "tenantId";
+
+        /**
+         * Whether to include session ID in MDC.
+         */
+        private boolean includeSessionId = true;
+
+        /**
+         * Name of the session ID field in MDC.
+         */
+        private String sessionIdField = "sessionId";
+
+        /**
+         * Whether to include request ID in MDC.
+         */
+        private boolean includeRequestId = true;
+
+        /**
+         * Name of the request ID field in MDC.
+         */
+        private String requestIdField = "requestId";
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -752,6 +782,54 @@ public class AdharLoggingProperties {
 
         public void setUserIdField(String userIdField) {
             this.userIdField = userIdField;
+        }
+
+        public boolean isIncludeTenantId() {
+            return includeTenantId;
+        }
+
+        public void setIncludeTenantId(boolean includeTenantId) {
+            this.includeTenantId = includeTenantId;
+        }
+
+        public String getTenantIdField() {
+            return tenantIdField;
+        }
+
+        public void setTenantIdField(String tenantIdField) {
+            this.tenantIdField = tenantIdField;
+        }
+
+        public boolean isIncludeSessionId() {
+            return includeSessionId;
+        }
+
+        public void setIncludeSessionId(boolean includeSessionId) {
+            this.includeSessionId = includeSessionId;
+        }
+
+        public String getSessionIdField() {
+            return sessionIdField;
+        }
+
+        public void setSessionIdField(String sessionIdField) {
+            this.sessionIdField = sessionIdField;
+        }
+
+        public boolean isIncludeRequestId() {
+            return includeRequestId;
+        }
+
+        public void setIncludeRequestId(boolean includeRequestId) {
+            this.includeRequestId = includeRequestId;
+        }
+
+        public String getRequestIdField() {
+            return requestIdField;
+        }
+
+        public void setRequestIdField(String requestIdField) {
+            this.requestIdField = requestIdField;
         }
     }
 
