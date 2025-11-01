@@ -33,6 +33,10 @@
         <jakarta-validation.version>3.0.2</jakarta-validation.version>
         <jakarta-persistence.version>3.1.0</jakarta-persistence.version>
         <springdoc-openapi.version>2.4.0</springdoc-openapi.version>
+
+        <!-- Testing - Java 25 compatible versions -->
+        <mockito.version>5.14.2</mockito.version>
+        <byte-buddy.version>1.15.14</byte-buddy.version>
     </properties>
 
     <dependencyManagement>
@@ -271,6 +275,33 @@
                 <groupId>org.springdoc</groupId>
                 <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
                 <version>${springdoc-openapi.version}</version>
+            </dependency>
+
+            <!-- Testing - Override Spring Boot versions for Java 25 compatibility -->
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-core</artifactId>
+                <version>${mockito.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-junit-jupiter</artifactId>
+                <version>${mockito.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-inline</artifactId>
+                <version>${mockito.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.bytebuddy</groupId>
+                <artifactId>byte-buddy</artifactId>
+                <version>${byte-buddy.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.bytebuddy</groupId>
+                <artifactId>byte-buddy-agent</artifactId>
+                <version>${byte-buddy.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.springdoc</groupId>
