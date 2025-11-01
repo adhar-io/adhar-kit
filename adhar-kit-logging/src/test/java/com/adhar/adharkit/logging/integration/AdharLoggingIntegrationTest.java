@@ -5,6 +5,7 @@ import com.adhar.adharkit.logging.encoder.MaskingJsonEncoder;
 import com.adhar.adharkit.logging.filter.MdcLoggingFilter;
 import com.adhar.adharkit.logging.properties.AdharLoggingProperties;
 import com.adhar.adharkit.logging.util.AdharLogger;
+import com.adhar.adharkit.logging.util.LoggingUtils;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -158,8 +159,8 @@ class AdharLoggingIntegrationTest {
                     
                     try {
                         // Get the logging utils
-                        LoggingUtils loggingUtils = context.getBean(AdharLogger.class);
-                        
+                        LoggingUtils loggingUtils = context.getBean(LoggingUtils.class);
+
                         // Set correlation ID and other MDC values
                         loggingUtils.setCorrelationId("test-correlation-id");
                         loggingUtils.putMdc("testKey", "testValue");
