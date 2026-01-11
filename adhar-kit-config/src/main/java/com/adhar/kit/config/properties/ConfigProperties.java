@@ -1,99 +1,191 @@
 package com.adhar.kit.config.properties;
 
 import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
+
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
- * Configuration properties for Adhar Config module.
+ * Configuration properties for centralized configuration management.
+ *
+ * <p>Supports multiple configuration sources:</p>
+ * <ul>
+ *   <li><b>File-based</b> - application.yml, application.properties</li>
+ *   <li><b>Environment</b> - Environment variables</li>
+ *   <li><b>Spring Cloud Config</b> - Centralized config server</li>
+ *   <li><b>Consul</b> - HashiCorp Consul KV store</li>
+ *   <li><b>Vault</b> - HashiCorp Vault for secrets</li>
+ *   <li><b>Kubernetes</b> - ConfigMaps and Secrets</li>
+ * </ul>
+ *
+ * <p><b>Example - application.yml:</b></p>
+ * <pre>{@code
+ * adhar:
+ *   config:
+ *     enabled: true
+ *     sources:
+ *       - type: file
+ *         location: classpath:config/
+ *       - type: consul
+ *         url: http://localhost:8500
+ *         prefix: config/myapp
+ *     refresh:
+ *       enabled: true
+ *       interval: 30s
+ *     encryption:
+ *       enabled: true
+ *       algorithm: AES
+ * }</pre>
  *
  * @author Adhar Platform Team
  * @since 1.0.0
  */
 @Data
-@ConfigurationProperties(prefix = "adhar.config")
 public class ConfigProperties {
 
     /**
-     * Enable/disable config features.
+     * Enable configuration management.
      */
     private boolean enabled = true;
 
     /**
-     * Spring Cloud Config settings.
+     * Application name for configuration namespacing.
      */
-    private CloudConfig cloudConfig = new CloudConfig();
+    private String applicationName;
 
     /**
-     * Vault settings.
+     * Active profiles.
      */
-    private Vault vault = new Vault();
+    private String[] profiles = new String[]{"default"};
 
     /**
-     * Encryption settings.
+     * Configuration sources.
      */
-    private Encryption encryption = new Encryption();
+    private Map<String, SourceConfig> sources = new HashMap<>();
 
     /**
-     * Refresh settings.
+     * Refresh configuration.
      */
-    private Refresh refresh = new Refresh();
+    private RefreshConfig refresh = new RefreshConfig();
 
-    // Manual getters for Java 25 compatibility (Lombok @Data not working properly)
-    public Encryption getEncryption() {
-        return encryption;
-    }
+    /**
+     * Encryption configuration.
+     */
+    private EncryptionConfig encryption = new EncryptionConfig();
 
+    /**
+     * Validation configuration.
+     */
+    private ValidationConfig validation = new ValidationConfig();
+
+    /**
+     * Configuration source settings.
+     */
     @Data
-    public static class CloudConfig {
-        private boolean enabled = false;
-        private String uri = "http://localhost:8888";
-        private String label = "master";
-        private String profile = "default";
-        private String username;
-        private String password;
-        private int connectTimeout = 5000;
-        private int readTimeout = 5000;
-        private boolean failFast = false;
-    }
+    public static class SourceConfig {
+        /**
+         * Source type (file, consul, vault, k8s, springcloud).
+         */
+        private String type;
 
-    @Data
-    public static class Vault {
-        private boolean enabled = false;
-        private String host = "localhost";
-        private int port = 8200;
-        private String scheme = "http";
-        private String token;
-        private String backend = "secret";
-        private String defaultContext = "application";
-        private int connectionTimeout = 5000;
-        private int readTimeout = 15000;
-    }
+        /**
+         * Source location/URL.
+         */
+        private String location;
 
-    @Data
-    public static class Encryption {
-        private boolean enabled = false;
-        private String password;
-        private String algorithm = "PBEWithMD5AndDES";
-        private String keyObtentionIterations = "1000";
-        private String poolSize = "1";
-        private String saltGeneratorClassName = "org.jasypt.salt.RandomSaltGenerator";
-        private String stringOutputType = "base64";
+        /**
+         * Key prefix for namespacing.
+         */
+        private String prefix;
 
-        // Manual getters for Java 25 compatibility
-        public boolean isEnabled() { return enabled; }
-        public String getPassword() { return password; }
-        public String getAlgorithm() { return algorithm; }
-        public String getKeyObtentionIterations() { return keyObtentionIterations; }
-        public String getPoolSize() { return poolSize; }
-        public String getSaltGeneratorClassName() { return saltGeneratorClassName; }
-        public String getStringOutputType() { return stringOutputType; }
-    }
+        /**
+         * Priority (higher = more important).
+         */
+        private int priority = 100;
 
-    @Data
-    public static class Refresh {
+        /**
+         * Enable source.
+         */
         private boolean enabled = true;
-        private boolean autoRefresh = false;
-        private long refreshInterval = 60000; // 1 minute
+
+        /**
+         * Authentication settings.
+         */
+        private Map<String, String> auth = new HashMap<>();
+    }
+
+    /**
+     * Refresh configuration.
+     */
+    @Data
+    public static class RefreshConfig {
+        /**
+         * Enable automatic refresh.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Refresh interval.
+         */
+        private Duration interval = Duration.ofSeconds(30);
+
+        /**
+         * Retry configuration.
+         */
+        private int maxRetries = 3;
+
+        /**
+         * Retry delay.
+         */
+        private Duration retryDelay = Duration.ofSeconds(5);
+    }
+
+    /**
+     * Encryption configuration.
+     */
+    @Data
+    public static class EncryptionConfig {
+        /**
+         * Enable encryption for sensitive properties.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Encryption algorithm (AES, RSA).
+         */
+        private String algorithm = "AES";
+
+        /**
+         * Key location.
+         */
+        private String keyLocation;
+
+        /**
+         * Key alias.
+         */
+        private String keyAlias;
+    }
+
+    /**
+     * Validation configuration.
+     */
+    @Data
+    public static class ValidationConfig {
+        /**
+         * Enable property validation.
+         */
+        private boolean enabled = true;
+
+        /**
+         * Fail on validation errors.
+         */
+        private boolean failOnError = true;
+
+        /**
+         * Log validation warnings.
+         */
+        private boolean logWarnings = true;
     }
 }
 

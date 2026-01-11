@@ -1,9 +1,9 @@
 package com.adhar.adharkit.messaging.core;
 
+import com.adhar.kit.messaging.core.Message;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
-import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 

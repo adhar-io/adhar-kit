@@ -6,7 +6,7 @@
 
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit</artifactId>
-    <version>1.0.0</version>
+    <version>0.0.1-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>Adhar Kit</name>
@@ -16,7 +16,7 @@
 
     <organization>
         <name>Adhar Platform Team</name>
-        <url>https://adhar-platform.io</url>
+        <url>https://adhar.io</url>
     </organization>
 
     <licenses>
@@ -72,7 +72,7 @@
         <module>adhar-kit-docs</module>
         <module>adhar-kit-grpc</module>
         <module>adhar-kit-security</module>
-        <module>adhar-kit-mers</module>
+        <module>adhar-kit-maven-plugin</module>
         <module>adhar-kit-tracing</module>
         <module>adhar-kit-test-commons</module>
         <module>adhar-kit-resilience</module>

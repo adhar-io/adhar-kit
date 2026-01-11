@@ -1,4 +1,4 @@
-package com.dbs.messaging;
+package com.adhar.kit.messaging;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

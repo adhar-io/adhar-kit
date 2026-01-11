@@ -1,6 +1,7 @@
 package com.adhar.adharkit.messaging.rabbitmq;
 
-import com.adhar.adharkit.messaging.properties.AdharMessagingProperties;
+import com.adhar.kit.messaging.properties.AdharMessagingProperties;
+import com.adhar.kit.messaging.rabbitmq.RabbitMQMessagePublisher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

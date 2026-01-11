@@ -1,7 +1,8 @@
 package com.adhar.adharkit.security.config;
 
-import com.adhar.adharkit.security.properties.AdharSecurityProperties;
-import com.adhar.adharkit.security.util.JwtUtils;
+import com.adhar.kit.security.config.AdharSecurityAutoConfiguration;
+import com.adhar.kit.security.properties.AdharSecurityProperties;
+import com.adhar.kit.security.util.JwtUtils;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.AutoConfigurations;

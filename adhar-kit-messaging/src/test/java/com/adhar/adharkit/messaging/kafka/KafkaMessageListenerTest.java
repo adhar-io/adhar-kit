@@ -1,12 +1,12 @@
 package com.adhar.adharkit.messaging.kafka;
 
-import com.adhar.adharkit.messaging.core.MessageHandler;
-import com.adhar.adharkit.messaging.properties.AdharMessagingProperties;
+import com.adhar.kit.messaging.core.MessageHandler;
+import com.adhar.kit.messaging.kafka.KafkaMessageListener;
+import com.adhar.kit.messaging.properties.AdharMessagingProperties;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -15,7 +15,6 @@ import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.MessageListener;
 import org.springframework.kafka.listener.MessageListenerContainer;
-import org.springframework.kafka.support.Acknowledgment;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -117,7 +116,7 @@ class KafkaMessageListenerTest {
     @Test
     void testSubscribeWithHeaders() {
         // Set up a consumer
-        com.adhar.adharkit.messaging.core.MessageListener.BiConsumer<String, Map<String, Object>> consumer = (payload, headers) -> {
+        com.adhar.kit.messaging.core.MessageListener.BiConsumer<String, Map<String, Object>> consumer = (payload, headers) -> {
             // Do nothing
         };
 
@@ -137,7 +136,7 @@ class KafkaMessageListenerTest {
     @Test
     void testSubscribeWithHeadersAndGroup() {
         // Set up a consumer
-        com.adhar.adharkit.messaging.core.MessageListener.BiConsumer<String, Map<String, Object>> consumer = (payload, headers) -> {
+        com.adhar.kit.messaging.core.MessageListener.BiConsumer<String, Map<String, Object>> consumer = (payload, headers) -> {
             // Do nothing
         };
 
@@ -195,7 +194,7 @@ class KafkaMessageListenerTest {
     @Test
     void testSubscribeWithHeadersAndAck() {
         // Set up a consumer
-        com.adhar.adharkit.messaging.core.MessageListener.BiFunction<String, Map<String, Object>, Boolean> consumer = (payload, headers) -> true;
+        com.adhar.kit.messaging.core.MessageListener.BiFunction<String, Map<String, Object>, Boolean> consumer = (payload, headers) -> true;
 
         // Call the method
         String consumerId = listener.subscribeWithHeadersAndAck(testTopic, String.class, consumer);
@@ -213,7 +212,7 @@ class KafkaMessageListenerTest {
     @Test
     void testSubscribeWithHeadersAndAckAndGroup() {
         // Set up a consumer
-        com.adhar.adharkit.messaging.core.MessageListener.BiFunction<String, Map<String, Object>, Boolean> consumer = (payload, headers) -> true;
+        com.adhar.kit.messaging.core.MessageListener.BiFunction<String, Map<String, Object>, Boolean> consumer = (payload, headers) -> true;
 
         // Call the method
         String customGroup = "custom-group";
@@ -364,7 +363,7 @@ class KafkaMessageListenerTest {
         // Create the context using reflection
         Object context = null;
         try {
-            Class<?> contextClass = Class.forName("com.adhar.adharkit.messaging.kafka.KafkaMessageListener$KafkaMessageContext");
+            Class<?> contextClass = Class.forName("com.adhar.kit.messaging.kafka.KafkaMessageListener$KafkaMessageContext");
             java.lang.reflect.Constructor<?> constructor = contextClass.getDeclaredConstructor(
                     String.class, String.class, String.class, long.class, String.class, String.class, String.class);
             constructor.setAccessible(true);

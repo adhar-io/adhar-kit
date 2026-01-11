@@ -21,6 +21,13 @@
         <cloudevents.version>2.5.0</cloudevents.version>
     </properties>
     <dependencies>
+        <!-- Adhar Kit Commons -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-commons</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
         <!-- Spring Boot Starters -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

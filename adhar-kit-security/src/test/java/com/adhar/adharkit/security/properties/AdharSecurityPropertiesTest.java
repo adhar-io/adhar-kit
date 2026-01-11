@@ -1,5 +1,6 @@
 package com.adhar.adharkit.security.properties;
 
+import com.adhar.kit.security.properties.AdharSecurityProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

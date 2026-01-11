@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.0-M1</version>
+        <version>3.4.0</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.adhar.kit</groupId>
@@ -13,19 +13,117 @@
     <version>0.0.1-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>AdharKit Parent</name>
-    <description>Common parent POM for all Adhar Kit modules and services</description>
+    <description>Production-ready parent POM for all Adhar Kit modules - Enterprise microservices platform (Java 25 LTS + Spring Boot 3.4)</description>
+    <url>https://github.com/adhar-platform/adhar-kit</url>
+
+    <organization>
+        <name>Adhar Platform Team</name>
+        <url>https://adhar-platform.io</url>
+    </organization>
+
+    <licenses>
+        <license>
+            <name>Apache License 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>adhar-team</id>
+            <name>Adhar Platform Team</name>
+            <email>team@adhar-platform.io</email>
+            <organization>Adhar Platform</organization>
+            <organizationUrl>https://adhar-platform.io</organizationUrl>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:git://github.com/adhar-platform/adhar-kit.git</connection>
+        <developerConnection>scm:git:ssh://github.com:adhar-platform/adhar-kit.git</developerConnection>
+        <url>https://github.com/adhar-platform/adhar-kit/tree/main</url>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/adhar-platform/adhar-kit/issues</url>
+    </issueManagement>
 
     <properties>
+        <!-- ===================================================================== -->
+        <!-- Java & Encoding Configuration                                         -->
+        <!-- ===================================================================== -->
         <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
 
-        <!-- Lombok -->
+        <!-- ===================================================================== -->
+        <!-- Adhar Kit Version Management                                          -->
+        <!-- ===================================================================== -->
+        <adhar-kit.version>0.0.1-SNAPSHOT</adhar-kit.version>
+
+        <!-- ===================================================================== -->
+        <!-- Core Dependencies                                                      -->
+        <!-- ===================================================================== -->
+        <!-- Lombok - Java 25+ compatible version -->
         <lombok.version>1.18.40</lombok.version>
 
-        <!-- Maven Plugin Versions -->
+        <!-- ===================================================================== -->
+        <!-- AI & Machine Learning (v1.1.0+)                                       -->
+        <!-- ===================================================================== -->
+        <!-- Additional AI model providers beyond OpenAI -->
+        <anthropic.version>1.0.0</anthropic.version>
+        <google-ai.version>1.0.0</google-ai.version>
+        <llama.version>1.0.0</llama.version>
+
+        <!-- ===================================================================== -->
+        <!-- API Technologies (v1.1.0+)                                            -->
+        <!-- ===================================================================== -->
+        <!-- GraphQL support for flexible APIs -->
+        <graphql-spring-boot.version>15.0.0</graphql-spring-boot.version>
+        <graphql-java.version>21.0</graphql-java.version>
+
+        <!-- ===================================================================== -->
+        <!-- Native Compilation (v1.2.0+)                                          -->
+        <!-- ===================================================================== -->
+        <!-- GraalVM Native Image for fast startup and low memory -->
+        <native-maven-plugin.version>0.10.3</native-maven-plugin.version>
+
+        <!-- ===================================================================== -->
+        <!-- Cloud Provider SDKs (v1.2.0+)                                         -->
+        <!-- ===================================================================== -->
+        <!-- Multi-cloud support: AWS, Azure, GCP -->
+        <aws-sdk.version>2.28.0</aws-sdk.version>
+        <azure-sdk.version>1.14.0</azure-sdk.version>
+        <google-cloud.version>26.50.0</google-cloud.version>
+
+        <!-- ===================================================================== -->
+        <!-- Observability & Tracing (v1.2.0+)                                     -->
+        <!-- ===================================================================== -->
+        <!-- OpenTelemetry for vendor-neutral observability -->
+        <opentelemetry.version>1.43.0</opentelemetry.version>
+        <opentelemetry-instrumentation.version>2.9.0</opentelemetry-instrumentation.version>
+
+        <!-- ===================================================================== -->
+        <!-- Service Mesh (v2.0.0+)                                                -->
+        <!-- ===================================================================== -->
+        <!-- Istio and Linkerd support for advanced traffic management -->
+        <istio-client.version>1.20.0</istio-client.version>
+        <linkerd-client.version>2.14.0</linkerd-client.version>
+
+        <!-- ===================================================================== -->
+        <!-- Streaming & Analytics (v2.0.0+)                                       -->
+        <!-- ===================================================================== -->
+        <!-- Real-time data processing with Flink and Kafka Streams -->
+        <flink.version>1.19.0</flink.version>
+        <kafka-streams.version>3.8.0</kafka-streams.version>
+
+        <!-- ===================================================================== -->
+        <!-- Maven Plugin Versions                                                  -->
+        <!-- ===================================================================== -->
         <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
         <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
         <maven-failsafe-plugin.version>3.5.2</maven-failsafe-plugin.version>
@@ -37,39 +135,148 @@
         <jacoco-maven-plugin.version>0.8.13</jacoco-maven-plugin.version>
         <versions-maven-plugin.version>2.18.0</versions-maven-plugin.version>
 
-        <!-- Code Coverage -->
-        <jacoco.minimum.coverage>0.70</jacoco.minimum.coverage>
+        <!-- ===================================================================== -->
+        <!-- Quality & Testing Configuration                                        -->
+        <!-- ===================================================================== -->
+        <!-- Minimum 80% code coverage required -->
+        <jacoco.minimum.coverage>0.80</jacoco.minimum.coverage>
     </properties>
     
     <dependencyManagement>
         <dependencies>
-            <!-- Import the Adhar Kit BOM for version management of all internal libraries -->
+            <!-- ================================================================= -->
+            <!-- Adhar Kit BOM                                                     -->
+            <!-- ================================================================= -->
+            <!-- Centralized version management for all Adhar Kit modules          -->
+            <!-- Import this BOM to ensure consistent versions across all modules  -->
             <dependency>
                 <groupId>com.adhar.kit</groupId>
                 <artifactId>adhar-kit-bom</artifactId>
-                <version>0.0.1-SNAPSHOT</version>
+                <version>${adhar-kit.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
 
-            <!-- Lombok with explicit version for Java 25 compatibility -->
+            <!-- ================================================================= -->
+            <!-- Lombok                                                            -->
+            <!-- ================================================================= -->
+            <!-- Java 25+ compatible Lombok for reducing boilerplate code         -->
             <dependency>
                 <groupId>org.projectlombok</groupId>
                 <artifactId>lombok</artifactId>
                 <version>${lombok.version}</version>
             </dependency>
 
-            <!-- Spring Boot dependencies are inherited from spring-boot-starter-parent -->
+            <!-- ================================================================= -->
+            <!-- GraphQL Support (v1.1.0+)                                         -->
+            <!-- ================================================================= -->
+            <!-- Modern GraphQL API support as alternative to REST                -->
+            <dependency>
+                <groupId>com.graphql-java</groupId>
+                <artifactId>graphql-java</artifactId>
+                <version>${graphql-java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.graphql-java</groupId>
+                <artifactId>graphql-java-spring-boot-starter-webmvc</artifactId>
+                <version>${graphql-spring-boot.version}</version>
+            </dependency>
+
+            <!-- ================================================================= -->
+            <!-- Cloud Provider SDKs (v1.2.0+)                                     -->
+            <!-- ================================================================= -->
+
+            <!-- AWS SDK v2 - Comprehensive AWS services support -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws-sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Azure SDK - Microsoft Azure services support - Optional -->
+            <!--
+            <dependency>
+                <groupId>com.azure</groupId>
+                <artifactId>azure-sdk-bom</artifactId>
+                <version>${azure-sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            -->
+
+            <!-- Google Cloud SDK - GCP services support -->
+            <dependency>
+                <groupId>com.google.cloud</groupId>
+                <artifactId>libraries-bom</artifactId>
+                <version>${google-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- ================================================================= -->
+            <!-- OpenTelemetry (v1.2.0+)                                           -->
+            <!-- ================================================================= -->
+            <!-- Vendor-neutral observability framework for traces, metrics, logs -->
+
+            <!-- Core OpenTelemetry API and SDK -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- OpenTelemetry instrumentation libraries -->
+            <dependency>
+                <groupId>io.opentelemetry.instrumentation</groupId>
+                <artifactId>opentelemetry-instrumentation-bom-alpha</artifactId>
+                <version>${opentelemetry-instrumentation.version}-alpha</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- ================================================================= -->
+            <!-- Streaming & Analytics (v2.0.0+)                                   -->
+            <!-- ================================================================= -->
+
+            <!-- Apache Flink - Stateful stream processing -->
+            <dependency>
+                <groupId>org.apache.flink</groupId>
+                <artifactId>flink-streaming-java</artifactId>
+                <version>${flink.version}</version>
+            </dependency>
+
+            <!-- Kafka Streams - Stream processing on Kafka -->
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-streams</artifactId>
+                <version>${kafka-streams.version}</version>
+            </dependency>
+
+            <!-- ================================================================= -->
+            <!-- Spring Boot Dependencies                                          -->
+            <!-- ================================================================= -->
+            <!-- All Spring Boot dependencies are inherited from                   -->
+            <!-- spring-boot-starter-parent and managed by Spring Boot BOM        -->
         </dependencies>
     </dependencyManagement>
     
     <dependencies>
-        <!-- Common dependencies for all modules -->
+        <!-- ===================================================================== -->
+        <!-- Common Dependencies for All Child Modules                             -->
+        <!-- ===================================================================== -->
+        <!-- These dependencies are automatically inherited by all child modules   -->
+
+        <!-- Spring Boot Starter - Core Spring Boot functionality -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
         </dependency>
 
+        <!-- Spring Boot Test - Comprehensive testing support with JUnit 5 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
@@ -80,11 +287,15 @@
     <build>
         <pluginManagement>
             <plugins>
-                <!-- Spring Boot Plugin -->
+                <!-- ============================================================= -->
+                <!-- Spring Boot Maven Plugin                                      -->
+                <!-- ============================================================= -->
+                <!-- Packages executable JAR/WAR, manages classpath, runs app     -->
                 <plugin>
                     <groupId>org.springframework.boot</groupId>
                     <artifactId>spring-boot-maven-plugin</artifactId>
                     <configuration>
+                        <!-- Exclude Lombok from final JAR (compile-time only) -->
                         <excludes>
                             <exclude>
                                 <groupId>org.projectlombok</groupId>
@@ -94,7 +305,10 @@
                     </configuration>
                 </plugin>
 
-                <!-- Compiler Plugin -->
+                <!-- ============================================================= -->
+                <!-- Maven Compiler Plugin                                         -->
+                <!-- ============================================================= -->
+                <!-- Compiles Java source with Java 25 and Lombok support        -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
@@ -102,6 +316,7 @@
                     <configuration>
                         <source>${java.version}</source>
                         <target>${java.version}</target>
+                        <!-- Lombok annotation processor for code generation -->
                         <annotationProcessorPaths>
                             <path>
                                 <groupId>org.projectlombok</groupId>
@@ -109,19 +324,25 @@
                                 <version>${lombok.version}</version>
                             </path>
                         </annotationProcessorPaths>
+                        <!-- Preserve parameter names for better debugging -->
                         <compilerArgs>
                             <arg>-parameters</arg>
                         </compilerArgs>
                     </configuration>
                 </plugin>
 
-                <!-- Surefire Plugin for Unit Tests -->
+                <!-- ============================================================= -->
+                <!-- Maven Surefire Plugin - Unit Tests                           -->
+                <!-- ============================================================= -->
+                <!-- Executes unit tests during 'test' phase                      -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>${maven-surefire-plugin.version}</version>
                     <configuration>
+                        <!-- JaCoCo coverage + 1GB heap for tests -->
                         <argLine>@{argLine} -Xmx1024m</argLine>
+                        <!-- Include standard test file patterns -->
                         <includes>
                             <include>**/*Test.java</include>
                             <include>**/*Tests.java</include>
@@ -129,7 +350,10 @@
                     </configuration>
                 </plugin>
 
-                <!-- Failsafe Plugin for Integration Tests -->
+                <!-- ============================================================= -->
+                <!-- Maven Failsafe Plugin - Integration Tests                    -->
+                <!-- ============================================================= -->
+                <!-- Executes integration tests with proper lifecycle             -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-failsafe-plugin</artifactId>
@@ -137,25 +361,32 @@
                     <executions>
                         <execution>
                             <goals>
+                                <!-- Run integration tests -->
                                 <goal>integration-test</goal>
+                                <!-- Verify test results -->
                                 <goal>verify</goal>
                             </goals>
                         </execution>
                     </executions>
                 </plugin>
 
-                <!-- JaCoCo Code Coverage -->
+                <!-- ============================================================= -->
+                <!-- JaCoCo Code Coverage Plugin                                   -->
+                <!-- ============================================================= -->
+                <!-- Measures code coverage and enforces minimum threshold        -->
                 <plugin>
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
                     <version>${jacoco-maven-plugin.version}</version>
                     <executions>
+                        <!-- Prepare JaCoCo agent for test instrumentation -->
                         <execution>
                             <id>prepare-agent</id>
                             <goals>
                                 <goal>prepare-agent</goal>
                             </goals>
                         </execution>
+                        <!-- Generate coverage report after tests -->
                         <execution>
                             <id>report</id>
                             <phase>test</phase>
@@ -163,6 +394,7 @@
                                 <goal>report</goal>
                             </goals>
                         </execution>
+                        <!-- Enforce minimum coverage threshold -->
                         <execution>
                             <id>check</id>
                             <goals>
@@ -176,6 +408,7 @@
                                             <limit>
                                                 <counter>INSTRUCTION</counter>
                                                 <value>COVEREDRATIO</value>
+                                                <!-- Minimum 80% code coverage -->
                                                 <minimum>${jacoco.minimum.coverage}</minimum>
                                             </limit>
                                         </limits>
@@ -186,21 +419,29 @@
                     </executions>
                 </plugin>
 
-                <!-- Maven Release Plugin -->
+                <!-- ============================================================= -->
+                <!-- Maven Release Plugin                                          -->
+                <!-- ============================================================= -->
+                <!-- Automates versioning and release process                     -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-release-plugin</artifactId>
                     <version>${maven-release-plugin.version}</version>
                     <configuration>
+                        <!-- Sync version across all modules -->
                         <autoVersionSubmodules>true</autoVersionSubmodules>
                         <useReleaseProfile>false</useReleaseProfile>
                         <releaseProfiles>release</releaseProfiles>
                         <goals>deploy</goals>
+                        <!-- Tag format: v1.0.0 -->
                         <tagNameFormat>v@{project.version}</tagNameFormat>
                     </configuration>
                 </plugin>
 
-                <!-- Maven Enforcer Plugin -->
+                <!-- ============================================================= -->
+                <!-- Maven Enforcer Plugin                                         -->
+                <!-- ============================================================= -->
+                <!-- Enforces build environment requirements                       -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-enforcer-plugin</artifactId>
@@ -213,9 +454,11 @@
                             </goals>
                             <configuration>
                                 <rules>
+                                    <!-- Require Maven 3.8+ -->
                                     <requireMavenVersion>
                                         <version>[3.8,)</version>
                                     </requireMavenVersion>
+                                    <!-- Require Java 25+ -->
                                     <requireJavaVersion>
                                         <version>[25,)</version>
                                     </requireJavaVersion>
@@ -225,7 +468,10 @@
                     </executions>
                 </plugin>
 
-                <!-- Maven Source Plugin -->
+                <!-- ============================================================= -->
+                <!-- Maven Source Plugin                                           -->
+                <!-- ============================================================= -->
+                <!-- Generates source JAR for better IDE integration             -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-source-plugin</artifactId>
@@ -240,12 +486,16 @@
                     </executions>
                 </plugin>
 
-                <!-- Maven Javadoc Plugin -->
+                <!-- ============================================================= -->
+                <!-- Maven Javadoc Plugin                                          -->
+                <!-- ============================================================= -->
+                <!-- Generates API documentation from JavaDoc comments            -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-javadoc-plugin</artifactId>
                     <version>${maven-javadoc-plugin.version}</version>
                     <configuration>
+                        <!-- Disable strict doclint for flexible documentation -->
                         <doclint>none</doclint>
                         <quiet>true</quiet>
                     </configuration>
@@ -259,7 +509,11 @@
                     </executions>
                 </plugin>
 
-                <!-- Versions Maven Plugin -->
+                <!-- ============================================================= -->
+                <!-- Versions Maven Plugin                                         -->
+                <!-- ============================================================= -->
+                <!-- Helps manage dependency and plugin versions                  -->
+                <!-- Usage: mvn versions:display-dependency-updates              -->
                 <plugin>
                     <groupId>org.codehaus.mojo</groupId>
                     <artifactId>versions-maven-plugin</artifactId>
@@ -269,13 +523,17 @@
         </pluginManagement>
 
         <plugins>
-            <!-- Apply JaCoCo to all modules -->
+            <!-- ================================================================= -->
+            <!-- Plugins Applied to All Child Modules                             -->
+            <!-- ================================================================= -->
+
+            <!-- Apply JaCoCo code coverage to all modules -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
             </plugin>
 
-            <!-- Apply Enforcer to all modules -->
+            <!-- Apply Maven Enforcer to all modules -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>

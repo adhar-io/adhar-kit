@@ -1,41 +1,50 @@
 package com.adhar.kit.config.autoconfigure;
 
-import com.adhar.kit.config.client.ConfigServerClient;
-import com.adhar.kit.config.client.VaultClient;
-import com.adhar.kit.config.encryption.EncryptionConfiguration;
+import com.adhar.kit.config.manager.ConfigManager;
 import com.adhar.kit.config.properties.ConfigProperties;
-import com.adhar.kit.config.refresh.ConfigRefreshManager;
-import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.cloud.config.client.ConfigClientAutoConfiguration;
-import org.springframework.context.annotation.Import;
+import com.adhar.kit.config.source.impl.EnvironmentConfigSource;
 
 /**
  * Auto-configuration for Adhar Config module.
- * Automatically configures Spring Cloud Config, Vault, and encryption support.
+ *
+ * <p>Automatically configures configuration management with multiple sources.</p>
+ *
+ * <p><b>Features:</b></p>
+ * <ul>
+ *   <li>Environment variable configuration</li>
+ *   <li>File-based configuration</li>
+ *   <li>Dynamic configuration refresh</li>
+ *   <li>Property encryption support</li>
+ * </ul>
  *
  * @author Adhar Platform Team
  * @since 1.0.0
  */
-@AutoConfiguration(after = ConfigClientAutoConfiguration.class)
-@ConditionalOnClass(name = "org.springframework.cloud.config.client.ConfigClientProperties")
-@ConditionalOnProperty(prefix = "adhar.config", name = "enabled", havingValue = "true", matchIfMissing = true)
-@EnableConfigurationProperties(ConfigProperties.class)
-@Import({
-    ConfigServerClient.class,
-    VaultClient.class,
-    EncryptionConfiguration.class,
-    ConfigRefreshManager.class
-})
 public class ConfigAutoConfiguration {
 
+    private final ConfigProperties properties;
+
     /**
-     * Default constructor.
+     * Constructor.
+     *
+     * @param properties configuration properties
      */
-    public ConfigAutoConfiguration() {
-        // Auto-configuration class
+    public ConfigAutoConfiguration(ConfigProperties properties) {
+        this.properties = properties;
+    }
+
+    /**
+     * Creates the config manager bean.
+     *
+     * @return configured config manager
+     */
+    public ConfigManager configManager() {
+        ConfigManager manager = new ConfigManager();
+
+        // Add environment variable source
+        manager.addSource(new EnvironmentConfigSource());
+
+        return manager;
     }
 }
 

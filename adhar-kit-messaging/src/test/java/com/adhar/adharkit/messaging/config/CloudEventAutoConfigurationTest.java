@@ -1,7 +1,7 @@
 package com.adhar.adharkit.messaging.config;
 
-import com.adhar.adharkit.messaging.cloudevents.CloudEventAdapter;
-import io.cloudevents.CloudEvent;
+import com.adhar.kit.messaging.cloudevents.CloudEventAdapter;
+import com.adhar.kit.messaging.config.CloudEventAutoConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;

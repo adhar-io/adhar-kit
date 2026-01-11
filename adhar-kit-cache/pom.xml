@@ -11,24 +11,63 @@
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-cache</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>adhar-kit-cache</name>
-    <description>Adhar Cache Starter with Kafka and Redis-based distributed caching</description>
+    <name>Adhar Kit Cache</name>
+    <description>Enterprise caching with Caffeine - High-performance in-memory caching</description>
 
     <properties>
         <java.version>25</java.version>
-        <spring-kafka.version>3.1.5</spring-kafka.version>
+        <caffeine.version>3.1.8</caffeine.version>
+        <spring-kafka.version>3.2.0</spring-kafka.version>
         <spring-data-redis.version>3.2.5</spring-data-redis.version>
         <testcontainers.version>1.19.7</testcontainers.version>
+        <quarkus.version>3.16.3</quarkus.version>
+        <micronaut.version>4.7.5</micronaut.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-bom</artifactId>
+                <version>${quarkus.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.micronaut.platform</groupId>
+                <artifactId>micronaut-platform</artifactId>
+                <version>${micronaut.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
-        <!-- Spring Boot Starters -->
+        <!-- Adhar Kit Commons - for Framework support -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-commons</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- Caffeine Cache - Core Dependency -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+            <version>${caffeine.version}</version>
+        </dependency>
+
+        <!-- Spring Boot Starters (Optional) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-cache</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -41,22 +80,59 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- Kafka Dependencies -->
+        <!-- Quarkus Cache (Optional) -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-cache</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-redis-cache</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Micronaut Cache (Optional) -->
+        <dependency>
+            <groupId>io.micronaut</groupId>
+            <artifactId>micronaut-inject</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>io.micronaut.cache</groupId>
+            <artifactId>micronaut-cache-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>io.micronaut.cache</groupId>
+            <artifactId>micronaut-cache-caffeine</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Kafka Dependencies (Optional) -->
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
             <version>${spring-kafka.version}</version>
+            <optional>true</optional>
         </dependency>
 
-        <!-- Redis Dependencies -->
+        <!-- Redis Dependencies (Optional) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.springframework.data</groupId>
             <artifactId>spring-data-redis</artifactId>
             <version>${spring-data-redis.version}</version>
+            <optional>true</optional>
         </dependency>
 
         <!-- Utility Dependencies -->
@@ -112,6 +188,19 @@
 
     <build>
         <plugins>
+            <!-- Compiler Plugin - Exclude optional framework adapters -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <!-- Exclude Micronaut and Quarkus adapters - they need their specific dependencies -->
+                        <exclude>**/micronaut/**/*.java</exclude>
+                        <exclude>**/quarkus/**/*.java</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

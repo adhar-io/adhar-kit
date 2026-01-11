@@ -5,29 +5,77 @@ import com.adhar.kit.commons.model.ApiResponse;
 import com.adhar.kit.commons.model.ErrorResponse;
 import com.adhar.kit.commons.model.PagedResult;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 
-import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.Map;
+import java.util.HashMap;
 
 /**
  * Base controller class providing common functionality for REST controllers.
- * Includes standardized response handling, error handling, and request tracking.
+ *
+ * <p>Framework-agnostic base class that works with Spring, Quarkus, and Micronaut.</p>
+ *
+ * <p><b>Example - Spring:</b></p>
+ * <pre>{@code
+ * @RestController
+ * @RequestMapping("/api/users")
+ * public class UserController extends BaseController {
+ *
+ *     @GetMapping("/{id}")
+ *     public ResponseEntity<ApiResponse<User>> getUser(@PathVariable String id) {
+ *         User user = userService.findById(id);
+ *         return success(user);
+ *     }
+ * }
+ * }</pre>
+ *
+ * <p><b>Example - Quarkus:</b></p>
+ * <pre>{@code
+ * @Path("/api/users")
+ * public class UserController extends BaseController {
+ *
+ *     @GET
+ *     @Path("/{id}")
+ *     public Response getUser(@PathParam("id") String id) {
+ *         User user = userService.findById(id);
+ *         return Response.ok(successResponse(user)).build();
+ *     }
+ * }
+ * }</pre>
+ *
+ * @author Adhar Platform Team
+ * @since 1.0.0
  */
 @Slf4j
 public abstract class BaseController {
+
+    /**
+     * HTTP status codes.
+     */
+    protected static class HttpStatus {
+        public static final int OK = 200;
+        public static final int CREATED = 201;
+        public static final int NO_CONTENT = 204;
+        public static final int BAD_REQUEST = 400;
+        public static final int NOT_FOUND = 404;
+        public static final int CONFLICT = 409;
+        public static final int INTERNAL_SERVER_ERROR = 500;
+    }
+
+    // ==================== SUCCESS RESPONSES ====================
+
+    // ==================== SUCCESS RESPONSES ====================
 
     /**
      * Creates a successful response with data.
      *
      * @param data the response data
      * @param <T> the data type
-     * @return ResponseEntity with success response
+     * @return API response with success
      */
-    protected <T> ResponseEntity<ApiResponse<T>> success(T data) {
-        return ResponseEntity.ok(ApiResponse.success(data));
+    protected <T> ApiResponse<T> successResponse(T data) {
+        return ApiResponse.success(data);
     }
 
     /**
@@ -36,108 +84,97 @@ public abstract class BaseController {
      * @param data the response data
      * @param message the success message
      * @param <T> the data type
-     * @return ResponseEntity with success response
+     * @return API response with success
      */
-    protected <T> ResponseEntity<ApiResponse<T>> success(T data, String message) {
-        return ResponseEntity.ok(ApiResponse.success(data, message));
+    protected <T> ApiResponse<T> successResponse(T data, String message) {
+        return ApiResponse.success(data, message);
     }
 
     /**
      * Creates a successful response with only a message.
      *
      * @param message the success message
-     * @return ResponseEntity with success response
+     * @return API response with success
      */
-    protected ResponseEntity<ApiResponse<Void>> success(String message) {
-        return ResponseEntity.ok(ApiResponse.success(message));
+    protected ApiResponse<Void> successResponse(String message) {
+        return ApiResponse.success(message);
     }
 
     /**
-     * Creates a created (201) response with data.
+     * Creates a created response with data.
      *
      * @param data the created resource data
      * @param <T> the data type
-     * @return ResponseEntity with created status
+     * @return API response with created status
      */
-    protected <T> ResponseEntity<ApiResponse<T>> created(T data) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success(data, "Resource created successfully"));
+    protected <T> ApiResponse<T> createdResponse(T data) {
+        return ApiResponse.success(data, "Resource created successfully");
     }
 
     /**
-     * Creates a created (201) response with data and message.
+     * Creates a created response with data and message.
      *
      * @param data the created resource data
      * @param message the success message
      * @param <T> the data type
-     * @return ResponseEntity with created status
+     * @return API response with created status
      */
-    protected <T> ResponseEntity<ApiResponse<T>> created(T data, String message) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success(data, message));
+    protected <T> ApiResponse<T> createdResponse(T data, String message) {
+        return ApiResponse.success(data, message);
     }
 
-    /**
-     * Creates a no content (204) response.
-     *
-     * @return ResponseEntity with no content status
-     */
-    protected ResponseEntity<Void> noContent() {
-        return ResponseEntity.noContent().build();
-    }
+    // ==================== ERROR RESPONSES ====================
 
     /**
-     * Creates an error response with custom status.
+     * Creates an error response.
      *
-     * @param status the HTTP status
      * @param errorCode the error code
      * @param message the error message
-     * @return ResponseEntity with error response
+     * @return API response with error
      */
-    protected ResponseEntity<ApiResponse<Void>> error(HttpStatus status, String errorCode, String message) {
+    protected ApiResponse<Void> errorResponse(String errorCode, String message) {
         ErrorResponse error = ErrorResponse.of(errorCode, message);
-        return ResponseEntity.status(status)
-                .body(ApiResponse.error(error));
+        return ApiResponse.error(error);
     }
 
     /**
-     * Creates a bad request (400) error response.
+     * Creates a bad request error response.
      *
      * @param message the error message
-     * @return ResponseEntity with bad request status
+     * @return API response with bad request error
      */
-    protected ResponseEntity<ApiResponse<Void>> badRequest(String message) {
-        return error(HttpStatus.BAD_REQUEST, CommonConstants.ERROR_BAD_REQUEST, message);
+    protected ApiResponse<Void> badRequestResponse(String message) {
+        return errorResponse(CommonConstants.ERROR_BAD_REQUEST, message);
     }
 
     /**
-     * Creates a not found (404) error response.
+     * Creates a not found error response.
      *
      * @param message the error message
-     * @return ResponseEntity with not found status
+     * @return API response with not found error
      */
-    protected ResponseEntity<ApiResponse<Void>> notFound(String message) {
-        return error(HttpStatus.NOT_FOUND, CommonConstants.ERROR_RESOURCE_NOT_FOUND, message);
+    protected ApiResponse<Void> notFoundResponse(String message) {
+        return errorResponse(CommonConstants.ERROR_RESOURCE_NOT_FOUND, message);
     }
 
     /**
-     * Creates a conflict (409) error response.
+     * Creates a conflict error response.
      *
      * @param message the error message
-     * @return ResponseEntity with conflict status
+     * @return API response with conflict error
      */
-    protected ResponseEntity<ApiResponse<Void>> conflict(String message) {
-        return error(HttpStatus.CONFLICT, CommonConstants.ERROR_CONFLICT, message);
+    protected ApiResponse<Void> conflictResponse(String message) {
+        return errorResponse(CommonConstants.ERROR_CONFLICT, message);
     }
 
     /**
-     * Creates an internal server error (500) response.
+     * Creates an internal server error response.
      *
      * @param message the error message
-     * @return ResponseEntity with internal server error status
+     * @return API response with server error
      */
-    protected ResponseEntity<ApiResponse<Void>> internalServerError(String message) {
-        return error(HttpStatus.INTERNAL_SERVER_ERROR, CommonConstants.ERROR_INTERNAL_SERVER, message);
+    protected ApiResponse<Void> serverErrorResponse(String message) {
+        return errorResponse(CommonConstants.ERROR_INTERNAL_SERVER, message);
     }
 
     /**
@@ -145,20 +182,22 @@ public abstract class BaseController {
      *
      * @param pagedResult the paged result data
      * @param <T> the data type
-     * @return ResponseEntity with paginated data
+     * @return API response with paginated data
      */
-    protected <T> ResponseEntity<ApiResponse<PagedResult<T>>> paginated(PagedResult<T> pagedResult) {
-        return ResponseEntity.ok(ApiResponse.success(pagedResult));
+    protected <T> ApiResponse<PagedResult<T>> paginatedResponse(PagedResult<T> pagedResult) {
+        return ApiResponse.success(pagedResult);
     }
 
+    // ==================== REQUEST UTILITIES ====================
+
     /**
-     * Gets the request ID from headers or generates a new one.
+     * Gets or generates a request ID.
      *
-     * @param request the HTTP request
-     * @return the request ID
+     * @param headers request headers
+     * @return request ID
      */
-    protected String getOrGenerateRequestId(HttpServletRequest request) {
-        String requestId = request.getHeader(CommonConstants.HEADER_REQUEST_ID);
+    protected String getOrGenerateRequestId(Map<String, String> headers) {
+        String requestId = headers.get(CommonConstants.HEADER_REQUEST_ID);
         if (requestId == null || requestId.trim().isEmpty()) {
             requestId = UUID.randomUUID().toString();
         }
@@ -168,67 +207,64 @@ public abstract class BaseController {
     /**
      * Gets the correlation ID from headers.
      *
-     * @param request the HTTP request
-     * @return the correlation ID or null if not present
+     * @param headers request headers
+     * @return correlation ID or null
      */
-    protected String getCorrelationId(HttpServletRequest request) {
-        return request.getHeader(CommonConstants.HEADER_CORRELATION_ID);
+    protected String getCorrelationId(Map<String, String> headers) {
+        return headers.get(CommonConstants.HEADER_CORRELATION_ID);
     }
 
     /**
      * Gets the user ID from headers.
      *
-     * @param request the HTTP request
-     * @return the user ID or null if not present
+     * @param headers request headers
+     * @return user ID or null
      */
-    protected String getUserId(HttpServletRequest request) {
-        return request.getHeader(CommonConstants.HEADER_USER_ID);
+    protected String getUserId(Map<String, String> headers) {
+        return headers.get(CommonConstants.HEADER_USER_ID);
     }
 
     /**
      * Gets the tenant ID from headers.
      *
-     * @param request the HTTP request
-     * @return the tenant ID or null if not present
+     * @param headers request headers
+     * @return tenant ID or null
      */
-    protected String getTenantId(HttpServletRequest request) {
-        return request.getHeader(CommonConstants.HEADER_TENANT_ID);
+    protected String getTenantId(Map<String, String> headers) {
+        return headers.get(CommonConstants.HEADER_TENANT_ID);
     }
 
     /**
-     * Logs the incoming request for debugging purposes.
+     * Logs incoming request.
      *
-     * @param request the HTTP request
-     * @param methodName the controller method name
+     * @param methodName controller method name
+     * @param uri request URI
+     * @param requestId request ID
      */
-    protected void logRequest(HttpServletRequest request, String methodName) {
-        String requestId = getOrGenerateRequestId(request);
+    protected void logRequest(String methodName, String uri, String requestId) {
         log.info("Processing request - Method: {}, URI: {}, RequestId: {}",
-                methodName, request.getRequestURI(), requestId);
+                methodName, uri, requestId);
     }
 
     /**
      * Creates an error response with request context.
      *
-     * @param request the HTTP request
-     * @param status the HTTP status
-     * @param errorCode the error code
-     * @param message the error message
-     * @return ResponseEntity with error response including request context
+     * @param headers request headers
+     * @param uri request URI
+     * @param errorCode error code
+     * @param message error message
+     * @return API response with error and context
      */
-    protected ResponseEntity<ApiResponse<Void>> errorWithContext(
-            HttpServletRequest request, HttpStatus status, String errorCode, String message) {
+    protected ApiResponse<Void> errorWithContext(
+            Map<String, String> headers, String uri, String errorCode, String message) {
 
-        String requestId = getOrGenerateRequestId(request);
-        String path = request.getRequestURI();
+        String requestId = getOrGenerateRequestId(headers);
 
         ErrorResponse error = ErrorResponse.of(errorCode, message)
                 .withRequestId(requestId)
-                .withPath(path);
+                .withPath(uri);
 
-        ApiResponse<Void> response = ApiResponse.error(error)
+        return ApiResponse.<Void>error(error)
                 .withRequestId(requestId);
-
-        return ResponseEntity.status(status).body(response);
     }
 }

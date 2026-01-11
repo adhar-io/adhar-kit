@@ -10,36 +10,71 @@
         <relativePath>../adhar-kit-parent/pom.xml</relativePath>
     </parent>
     <artifactId>adhar-kit-dapr</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
-    <packaging>jar</packaging>
-    <name>adhar-kit-dapr</name>
-    <description>Adhar Platform - Dapr Integration Starter</description>
+    <name>Adhar Kit Dapr</name>
+    <description>Comprehensive Dapr integration - State, Pub/Sub, Service Invocation, Bindings, Actors, Secrets, Configuration</description>
+
+    <properties>
+        <dapr-sdk.version>1.11.0</dapr-sdk.version>
+    </properties>
 
     <dependencies>
+        <!-- Dapr SDK -->
+        <dependency>
+            <groupId>io.dapr</groupId>
+            <artifactId>dapr-sdk</artifactId>
+            <version>${dapr-sdk.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>io.dapr</groupId>
             <artifactId>dapr-sdk-springboot</artifactId>
+            <version>${dapr-sdk.version}</version>
         </dependency>
+
         <dependency>
             <groupId>io.dapr</groupId>
             <artifactId>dapr-sdk-actors</artifactId>
-            <optional>true</optional>
+            <version>${dapr-sdk.version}</version>
         </dependency>
+
+        <!-- Adhar Kit Commons -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-commons</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+
+        <!-- Spring Boot (optional) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
             <optional>true</optional>
         </dependency>
+
         <dependency>
-            <groupId>com.adhar.kit</groupId>
-            <artifactId>adhar-kit-commons</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
             <optional>true</optional>
         </dependency>
+
+        <!-- Jackson for JSON -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <scope>provided</scope>
+        </dependency>
+
+        <!-- Testing -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

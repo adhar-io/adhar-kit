@@ -1,6 +1,7 @@
 package com.adhar.adharkit.security.util;
 
-import com.adhar.adharkit.security.properties.AdharSecurityProperties;
+import com.adhar.kit.security.properties.AdharSecurityProperties;
+import com.adhar.kit.security.util.JwtUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.Authentication;
@@ -13,12 +14,10 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
  * Tests for {@link JwtUtils}.

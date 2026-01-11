@@ -1,10 +1,231 @@
 # Adhar Kit Metrics
 
-A comprehensive, enterprise-grade metrics library for Spring Boot applications with seamless Prometheus, OpenTelemetry, and Kubernetes integration.
+**Version:** 1.0.0  
+**Status:** ✅ Production Ready  
+**Description:** Enterprise-grade metrics library with **full framework parity** for Spring Boot, Quarkus, and Micronaut
 
-## Overview
+---
 
-The **adhar-kit-metrics** module provides a robust metrics infrastructure for Spring Boot applications, offering both annotation-based and programmatic metrics collection. It includes advanced features like performance monitoring, cache metrics, database metrics, API metrics, and Kubernetes-specific monitoring.
+## 📖 Overview
+
+The **adhar-kit-metrics** module provides a robust, framework-agnostic metrics infrastructure offering both annotation-based and programmatic metrics collection. It includes advanced features like performance monitoring, cache metrics, database metrics, API metrics, and Kubernetes-specific monitoring.
+
+### 🌟 Key Highlights
+
+- 🔄 **Full Framework Parity** - Identical functionality across Spring Boot, Quarkus, and Micronaut
+- 📊 **CloudEvents Integration** - Publish metric events for observability
+- 🎯 **Annotation-Driven** - 9 powerful annotations for declarative metrics
+- 🔧 **Programmatic API** - Comprehensive fluent API for manual metrics
+- ☁️ **Cloud-Native** - Kubernetes-aware with pod/node metadata
+- 📈 **Production-Ready** - Battle-tested enterprise features
+
+---
+
+## 🔄 Multi-Framework Support
+
+### Framework Compatibility Matrix
+
+| Feature | Spring Boot | Quarkus | Micronaut | Status |
+|---------|-------------|---------|-----------|--------|
+| **Counters** | ✅ | ✅ | ✅ | 100% Parity |
+| **Timers** | ✅ | ✅ | ✅ | 100% Parity |
+| **Gauges** | ✅ | ✅ | ✅ | 100% Parity |
+| **Histograms** | ✅ | ✅ | ✅ | 100% Parity |
+| **Prometheus Export** | ✅ | ✅ | ✅ | 100% Parity |
+| **@Timed Annotation** | ✅ | ✅ | ✅ | 100% Parity |
+| **@Counted Annotation** | ✅ | ✅ | ✅ | 100% Parity |
+| **MetricsFacade** | ✅ | ✅ | ✅ | 100% Parity |
+| **CloudEvents** | ✅ | ✅ | ✅ | 100% Parity |
+| **Kubernetes Metrics** | ✅ | ✅ | ✅ | 100% Parity |
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      MetricsFacade                          │
+│         (Framework-Agnostic Singleton API)                  │
+└─────────────────────────────────────────────────────────────┘
+                            │
+         ┌──────────────────┼──────────────────┐
+         │                  │                  │
+         ▼                  ▼                  ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│ Spring Adapter  │ │ Quarkus Adapter │ │Micronaut Adapter│
+│                 │ │                 │ │                 │
+│ @Service        │ │@ApplicationScoped│ │  @Singleton     │
+│ Spring DI       │ │    Quarkus CDI  │ │  Micronaut DI   │
+└─────────────────┘ └─────────────────┘ └─────────────────┘
+         │                  │                  │
+         └──────────────────┼──────────────────┘
+                            ▼
+                  ┌──────────────────┐
+                  │  MeterRegistry   │
+                  │   (Micrometer)   │
+                  └──────────────────┘
+```
+
+### Automatic Framework Detection
+
+The module automatically detects your framework at runtime:
+
+```java
+// Works in Spring Boot, Quarkus, or Micronaut automatically
+MetricsFacade metrics = MetricsFacade.getInstance();
+metrics.increment("orders.created");
+```
+
+**Detection Order:**
+1. Check for Spring Boot application context
+2. Check for Quarkus Arc CDI container
+3. Check for Micronaut application context
+4. Throw exception if no framework detected
+
+---
+
+## 🚀 Quick Start
+
+### Spring Boot
+
+**1. Add Dependency:**
+```xml
+<dependency>
+    <groupId>com.adhar.kit</groupId>
+    <artifactId>adhar-kit-metrics</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+**2. Configuration (application.yml):**
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+  metrics:
+    enable:
+      jvm: true
+      process: true
+      system: true
+    export:
+      prometheus:
+        enabled: true
+```
+
+**3. Usage:**
+```java
+@Service
+public class OrderService {
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    public Order createOrder(OrderRequest request) {
+        return metrics.recordTime("order.creation", () -> {
+            Order order = processOrder(request);
+            metrics.increment("orders.created", "region", order.getRegion());
+            return order;
+        });
+    }
+}
+```
+
+**4. Access Metrics:**
+- All metrics: `http://localhost:8080/actuator/metrics`
+- Prometheus: `http://localhost:8080/actuator/prometheus`
+
+### Quarkus
+
+**1. Add Dependencies:**
+```xml
+<dependency>
+    <groupId>com.adhar.kit</groupId>
+    <artifactId>adhar-kit-metrics</artifactId>
+    <version>1.0.0</version>
+</dependency>
+<dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-micrometer-registry-prometheus</artifactId>
+</dependency>
+```
+
+**2. Configuration (application.properties):**
+```properties
+quarkus.micrometer.enabled=true
+quarkus.micrometer.registry-enabled-default=false
+quarkus.micrometer.export.prometheus.enabled=true
+quarkus.micrometer.export.prometheus.path=/q/metrics
+quarkus.micrometer.binder.jvm=true
+quarkus.micrometer.binder.system=true
+```
+
+**3. Usage:**
+```java
+@ApplicationScoped
+public class OrderService {
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    public Order createOrder(OrderRequest request) {
+        return metrics.recordTime("order.creation", () -> {
+            Order order = processOrder(request);
+            metrics.increment("orders.created", "region", order.getRegion());
+            return order;
+        });
+    }
+}
+```
+
+**4. Access Metrics:**
+- Prometheus: `http://localhost:8080/q/metrics`
+- Dev UI: `http://localhost:8080/q/dev` (in dev mode)
+
+### Micronaut
+
+**1. Add Dependencies:**
+```xml
+<dependency>
+    <groupId>com.adhar.kit</groupId>
+    <artifactId>adhar-kit-metrics</artifactId>
+    <version>1.0.0</version>
+</dependency>
+<dependency>
+    <groupId>io.micronaut.micrometer</groupId>
+    <artifactId>micronaut-micrometer-registry-prometheus</artifactId>
+</dependency>
+```
+
+**2. Configuration (application.yml):**
+```yaml
+micronaut:
+  metrics:
+    enabled: true
+    export:
+      prometheus:
+        enabled: true
+        step: PT1M
+```
+
+**3. Usage:**
+```java
+@Singleton
+public class OrderService {
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    public Order createOrder(OrderRequest request) {
+        return metrics.recordTime("order.creation", () -> {
+            Order order = processOrder(request);
+            metrics.increment("orders.created", "region", order.getRegion());
+            return order;
+        });
+    }
+}
+```
+
+**4. Access Metrics:**
+- Prometheus: `http://localhost:8080/metrics`
+
+---
 
 ## Features
 
@@ -498,6 +719,427 @@ logging:
     com.adhar.adharkit.metrics: DEBUG
     io.micrometer: INFO
 ```
+
+---
+
+## 🔧 Framework-Specific Examples
+
+### Spring Boot Complete Example
+
+```java
+// Service with Metrics
+@Service
+public class OrderService {
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    @Autowired
+    private OrderRepository orderRepository;
+    
+    @Timed(value = "order.creation", percentiles = {0.5, 0.95, 0.99})
+    @Counted(value = "order.creation.attempts")
+    public Order createOrder(OrderRequest request) {
+        return metrics.recordTime("order.creation.internal", () -> {
+            // Increment counter with tags
+            metrics.increment("orders.total", 
+                "type", request.getType(),
+                "region", request.getRegion()
+            );
+            
+            Order order = processOrder(request);
+            
+            // Record order value
+            metrics.increment("orders.value", order.getAmount(),
+                "currency", order.getCurrency()
+            );
+            
+            return orderRepository.save(order);
+        });
+    }
+    
+    @Gauged(value = "orders.pending.count")
+    public int getPendingOrdersCount() {
+        return orderRepository.countByStatus("PENDING");
+    }
+}
+
+// Controller with API Metrics
+@RestController
+@RequestMapping("/api/orders")
+public class OrderController {
+    
+    @Autowired
+    private OrderService orderService;
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    @PostMapping
+    @ApiMetrics(value = "api.orders.create")
+    public ResponseEntity<Order> createOrder(@RequestBody OrderRequest request) {
+        metrics.increment("api.requests", 
+            "endpoint", "/orders",
+            "method", "POST"
+        );
+        
+        Order order = orderService.createOrder(request);
+        return ResponseEntity.ok(order);
+    }
+}
+
+// Monitoring Component
+@Component
+public class SystemMonitor {
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    @Autowired
+    private HikariDataSource dataSource;
+    
+    @PostConstruct
+    public void registerGauges() {
+        // Database connection pool
+        metrics.gauge("db.connections.active",
+            () -> dataSource.getHikariPoolMXBean().getActiveConnections()
+        );
+        
+        metrics.gauge("db.connections.idle",
+            () -> dataSource.getHikariPoolMXBean().getIdleConnections()
+        );
+        
+        // JVM memory
+        metrics.gauge("jvm.memory.used",
+            () -> Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
+        );
+    }
+}
+
+// Configuration
+@Configuration
+public class MetricsConfig {
+    
+    @Bean
+    public MeterRegistryCustomizer<MeterRegistry> metricsCommonTags(
+            @Value("${spring.application.name}") String appName) {
+        return registry -> registry.config().commonTags(
+            "application", appName,
+            "environment", System.getProperty("ENV", "dev"),
+            "version", "1.0.0"
+        );
+    }
+}
+```
+
+### Quarkus Complete Example
+
+```java
+// Service with Metrics
+@ApplicationScoped
+public class OrderService {
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    @Inject
+    OrderRepository orderRepository;
+    
+    @Timed(value = "order.creation", percentiles = {0.5, 0.95, 0.99})
+    @Counted(value = "order.creation.attempts")
+    public Order createOrder(OrderRequest request) {
+        return metrics.recordTime("order.creation.internal", () -> {
+            // Increment counter with tags
+            metrics.increment("orders.total", 
+                "type", request.getType(),
+                "region", request.getRegion()
+            );
+            
+            Order order = processOrder(request);
+            
+            // Record order value
+            metrics.increment("orders.value", order.getAmount(),
+                "currency", order.getCurrency()
+            );
+            
+            return orderRepository.persist(order);
+        });
+    }
+    
+    @Gauged(value = "orders.pending.count")
+    public int getPendingOrdersCount() {
+        return orderRepository.count("status", "PENDING");
+    }
+}
+
+// REST Resource with API Metrics
+@Path("/api/orders")
+@ApplicationScoped
+public class OrderResource {
+    
+    @Inject
+    OrderService orderService;
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    @POST
+    @ApiMetrics(value = "api.orders.create")
+    public Response createOrder(OrderRequest request) {
+        metrics.increment("api.requests", 
+            "endpoint", "/orders",
+            "method", "POST"
+        );
+        
+        Order order = orderService.createOrder(request);
+        return Response.ok(order).build();
+    }
+}
+
+// Monitoring Component
+@ApplicationScoped
+public class SystemMonitor {
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    @Inject
+    AgroalDataSource dataSource;
+    
+    void onStart(@Observes StartupEvent event) {
+        // Database connection pool
+        metrics.gauge("db.connections.active",
+            () -> dataSource.getConfiguration()
+                .connectionPoolConfiguration()
+                .maxSize()
+        );
+        
+        // JVM memory
+        metrics.gauge("jvm.memory.used",
+            () -> Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
+        );
+    }
+}
+
+// Configuration
+@ApplicationScoped
+public class MetricsConfig {
+    
+    @Inject
+    MeterRegistry registry;
+    
+    void configureMetrics(@Observes StartupEvent event,
+                         @ConfigProperty(name = "quarkus.application.name") String appName) {
+        registry.config().commonTags(
+            "application", appName,
+            "environment", System.getProperty("ENV", "dev"),
+            "version", "1.0.0"
+        );
+    }
+}
+```
+
+### Micronaut Complete Example
+
+```java
+// Service with Metrics
+@Singleton
+public class OrderService {
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    @Inject
+    private OrderRepository orderRepository;
+    
+    @Timed(value = "order.creation", percentiles = {0.5, 0.95, 0.99})
+    @Counted(value = "order.creation.attempts")
+    public Order createOrder(OrderRequest request) {
+        return metrics.recordTime("order.creation.internal", () -> {
+            // Increment counter with tags
+            metrics.increment("orders.total", 
+                "type", request.getType(),
+                "region", request.getRegion()
+            );
+            
+            Order order = processOrder(request);
+            
+            // Record order value
+            metrics.increment("orders.value", order.getAmount(),
+                "currency", order.getCurrency()
+            );
+            
+            return orderRepository.save(order);
+        });
+    }
+    
+    @Gauged(value = "orders.pending.count")
+    public int getPendingOrdersCount() {
+        return orderRepository.countByStatus("PENDING");
+    }
+}
+
+// Controller with API Metrics
+@Controller("/api/orders")
+public class OrderController {
+    
+    @Inject
+    private OrderService orderService;
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    @Post
+    @ApiMetrics(value = "api.orders.create")
+    public HttpResponse<Order> createOrder(@Body OrderRequest request) {
+        metrics.increment("api.requests", 
+            "endpoint", "/orders",
+            "method", "POST"
+        );
+        
+        Order order = orderService.createOrder(request);
+        return HttpResponse.ok(order);
+    }
+}
+
+// Monitoring Component
+@Singleton
+public class SystemMonitor {
+    
+    private final MetricsFacade metrics = MetricsFacade.getInstance();
+    
+    @Inject
+    private DataSource dataSource;
+    
+    @EventListener
+    void onStartup(StartupEvent event) {
+        // Database connection pool (HikariCP)
+        if (dataSource instanceof HikariDataSource hikari) {
+            metrics.gauge("db.connections.active",
+                () -> hikari.getHikariPoolMXBean().getActiveConnections()
+            );
+            
+            metrics.gauge("db.connections.idle",
+                () -> hikari.getHikariPoolMXBean().getIdleConnections()
+            );
+        }
+        
+        // JVM memory
+        metrics.gauge("jvm.memory.used",
+            () -> Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
+        );
+    }
+}
+
+// Configuration
+@Factory
+public class MetricsConfig {
+    
+    @Singleton
+    MeterRegistryCustomizer<MeterRegistry> metricsCommonTags(
+            @Property(name = "micronaut.application.name") String appName) {
+        return registry -> registry.config().commonTags(
+            "application", appName,
+            "environment", System.getProperty("ENV", "dev"),
+            "version", "1.0.0"
+        );
+    }
+}
+```
+
+---
+
+## 📊 Framework Feature Comparison
+
+### Metrics Export Endpoints
+
+| Framework | Endpoint | Format | Authentication |
+|-----------|----------|--------|----------------|
+| **Spring Boot** | `/actuator/prometheus` | Prometheus | Spring Security |
+| **Quarkus** | `/q/metrics` | Prometheus | Quarkus Security |
+| **Micronaut** | `/metrics` | Prometheus | Micronaut Security |
+
+### Built-in Metrics
+
+| Metric Category | Spring Boot | Quarkus | Micronaut |
+|----------------|-------------|---------|-----------|
+| **JVM Memory** | ✅ | ✅ | ✅ |
+| **JVM GC** | ✅ | ✅ | ✅ |
+| **JVM Threads** | ✅ | ✅ | ✅ |
+| **HTTP Requests** | ✅ | ✅ | ✅ |
+| **Database Pool** | ✅ (HikariCP) | ✅ (Agroal) | ✅ (HikariCP) |
+| **System CPU** | ✅ | ✅ | ✅ |
+| **System Disk** | ✅ | ✅ | ✅ |
+
+### Configuration Comparison
+
+#### Spring Boot
+```yaml
+management.metrics.export.prometheus.enabled=true
+```
+
+#### Quarkus
+```properties
+quarkus.micrometer.export.prometheus.enabled=true
+```
+
+#### Micronaut
+```yaml
+micronaut.metrics.export.prometheus.enabled=true
+```
+
+---
+
+## 🎯 Best Practices
+
+### 1. Use MetricsFacade for Framework Independence
+```java
+// ✅ GOOD - Works in all frameworks
+private final MetricsFacade metrics = MetricsFacade.getInstance();
+
+// ❌ BAD - Framework-specific
+@Autowired  // Only Spring
+private MeterRegistry meterRegistry;
+```
+
+### 2. Tag Wisely
+```java
+// ✅ GOOD - Low cardinality tags
+metrics.increment("orders.created", 
+    "region", "us-east-1",      // Limited values
+    "type", "STANDARD"          // Limited values
+);
+
+// ❌ BAD - High cardinality tags
+metrics.increment("orders.created",
+    "orderId", order.getId(),   // Unlimited values!
+    "timestamp", timestamp      // Unlimited values!
+);
+```
+
+### 3. Reuse Metrics
+```java
+// ✅ GOOD - Create once, reuse
+private final Counter orderCounter = 
+    MetricsFacade.getInstance().counter("orders.created");
+
+public void createOrder() {
+    orderCounter.increment();
+}
+
+// ❌ BAD - Create every time
+public void createOrder() {
+    MetricsFacade.getInstance()
+        .counter("orders.created")
+        .increment();  // Creates new counter each time!
+}
+```
+
+### 4. Use Appropriate Metric Types
+```java
+// Counters - Always increasing
+metrics.increment("requests.total");
+
+// Gauges - Can go up or down
+metrics.gauge("queue.size", queue::size);
+
+// Timers - Duration and rate
+metrics.recordTime("operation.duration", () -> doWork());
+```
+
+---
 
 ## Contributing
 

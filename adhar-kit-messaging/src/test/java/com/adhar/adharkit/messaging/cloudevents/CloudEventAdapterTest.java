@@ -1,6 +1,7 @@
 package com.adhar.adharkit.messaging.cloudevents;
 
-import com.adhar.adharkit.messaging.core.Message;
+import com.adhar.kit.messaging.cloudevents.CloudEventAdapter;
+import com.adhar.kit.messaging.core.Message;
 import io.cloudevents.CloudEvent;
 import io.cloudevents.core.builder.CloudEventBuilder;
 import org.junit.jupiter.api.Test;

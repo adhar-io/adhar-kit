@@ -1,4 +1,4 @@
-package com.dbs.persistence;
+package com.adhar.kit.persistence;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

@@ -1,9 +1,9 @@
 package com.adhar.adharkit.messaging.integration;
 
-import com.adhar.adharkit.messaging.core.Message;
-import com.adhar.adharkit.messaging.kafka.KafkaMessageListener;
-import com.adhar.adharkit.messaging.kafka.KafkaMessagePublisher;
-import com.adhar.adharkit.messaging.properties.AdharMessagingProperties;
+import com.adhar.kit.messaging.core.Message;
+import com.adhar.kit.messaging.kafka.KafkaMessageListener;
+import com.adhar.kit.messaging.kafka.KafkaMessagePublisher;
+import com.adhar.kit.messaging.properties.AdharMessagingProperties;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,7 +22,6 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -61,7 +60,7 @@ class KafkaIntegrationTest {
         kafkaTemplate = new KafkaTemplate<>(producerFactory);
 
         // Set up consumer factory and container factory
-        Map<String, Object> consumerProps = KafkaTestUtils.consumerProps("test-group", "true", kafka);
+        Map<String, Object> consumerProps = KafkaTestUtils.consumerProps("test-group", "true", kafka.getBootstrapServers());
         DefaultKafkaConsumerFactory<String, Object> consumerFactory = new DefaultKafkaConsumerFactory<>(consumerProps);
         ConcurrentKafkaListenerContainerFactory<String, Object> containerFactory = new ConcurrentKafkaListenerContainerFactory<>();
         containerFactory.setConsumerFactory(consumerFactory);

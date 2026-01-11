@@ -1,379 +1,836 @@
-# Adhar Kit Docs
+# 📚 Adhar Kit Docs - OpenAPI/Swagger Integration
 
-OpenAPI/Swagger integration for automatic API documentation generation.
+**Enterprise-grade API documentation for microservices**
 
-## Features
+[![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.java.net/)
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-brightgreen.svg)](https://www.openapis.org/)
+[![Swagger](https://img.shields.io/badge/Swagger-UI-brightgreen.svg)](https://swagger.io/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-- **OpenAPI 3.0** - Modern API documentation standard
-- **Swagger UI** - Interactive API explorer
-- **Security Documentation** - OAuth2, JWT, API Key support
-- **Custom Annotations** - Simplified API documentation
-- **Multiple API Groups** - Organize APIs by modules
-- **Auto-configuration** - Zero-config setup
+---
 
-## Quick Start
+## 📋 Table of Contents
 
-### Maven Dependency
+- [Overview](#overview)
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Annotations](#annotations)
+- [Configuration](#configuration)
+- [Examples](#examples)
+- [Customization](#customization)
+- [Best Practices](#best-practices)
 
+---
+
+## 🎯 Overview
+
+The **adhar-kit-docs** module provides comprehensive OpenAPI/Swagger integration for enterprise microservices with:
+
+- 🚀 **Auto-configuration** - Zero-code documentation setup
+- 🔐 **Security Integration** - JWT, OAuth2, API Key support
+- 📝 **Standard Annotations** - Simplified API documentation
+- 🎨 **Customizable UI** - Swagger UI with branding
+- 🌍 **Multi-environment** - Dev, staging, production servers
+- 📊 **Rich Examples** - Auto-generated request/response examples
+- 🔍 **Filtering** - Package and path-based filtering
+
+---
+
+## ✨ Features
+
+### Core Features
+
+✅ **OpenAPI 3.0 Specification** - Latest standard  
+✅ **Swagger UI** - Interactive API documentation  
+✅ **Security Schemes** - JWT, OAuth2, API Key, Basic Auth  
+✅ **Standard Responses** - Common HTTP status codes  
+✅ **Pagination Support** - Pageable documentation  
+✅ **Error Responses** - Standardized error schemas  
+✅ **Request/Response Examples** - Auto-generated examples  
+✅ **Multi-server Configuration** - Environment-specific endpoints  
+
+### Enterprise Features
+
+✅ **Common Headers** - Correlation ID, Request ID  
+✅ **Custom Annotations** - Simplified documentation  
+✅ **API Grouping** - Organize by tags/modules  
+✅ **Version Management** - API versioning support  
+✅ **Contact & License** - API metadata  
+✅ **Terms of Service** - Legal documentation  
+
+---
+
+## 🚀 Quick Start
+
+### 1. Add Dependency
+
+**Maven:**
 ```xml
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-docs</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>1.0.0</version>
 </dependency>
 ```
 
-## Usage
+**Gradle:**
+```gradle
+implementation 'com.adhar.kit:adhar-kit-docs:1.0.0'
+```
 
-### Basic Controller Documentation
+### 2. Configure Application
+
+**application.yml:**
+```yaml
+adhar:
+  docs:
+    enabled: true
+    info:
+      title: "Order Service API"
+      version: "1.0.0"
+      description: "Microservice for order management"
+    security:
+      jwt-enabled: true
+```
+
+### 3. Add OpenAPI Bean (Spring Boot)
+
+```java
+@Configuration
+public class OpenApiConfig {
+    
+    @Bean
+    public OpenAPI customOpenAPI() {
+        return AdharOpenApiConfig.builder()
+            .title("Order Service API")
+            .version("1.0.0")
+            .description("Comprehensive order management API")
+            .contact("API Team", "api@example.com", "https://example.com")
+            .license("Apache 2.0", "https://www.apache.org/licenses/LICENSE-2.0")
+            .server("http://localhost:8080", "Local Development")
+            .server("https://api.example.com", "Production")
+            .withJwtSecurity()
+            .build();
+    }
+}
+```
+
+### 4. Access Documentation
+
+- **Swagger UI:** `http://localhost:8080/swagger-ui.html`
+- **OpenAPI JSON:** `http://localhost:8080/v3/api-docs`
+- **OpenAPI YAML:** `http://localhost:8080/v3/api-docs.yaml`
+
+---
+
+## 🎯 Annotations
+
+### @EnableOpenApiDocs
+
+Enables automatic OpenAPI documentation generation (works with all frameworks).
+
+```java
+// Spring Boot
+@SpringBootApplication
+@EnableOpenApiDocs(
+    title = "Order Service API",
+    version = "1.0.0",
+    description = "Order management API",
+    enableJwtSecurity = true,
+    packagesToScan = {"com.example.order.api"}
+)
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+
+// Quarkus
+@ApplicationPath("/api")
+@EnableOpenApiDocs(title = "Order Service API", version = "1.0.0")
+public class ApiApplication extends Application {
+}
+
+// Micronaut
+@EnableOpenApiDocs(title = "Order Service API", version = "1.0.0")
+public class Application {
+    public static void main(String[] args) {
+        Micronaut.run(Application.class, args);
+    }
+}
+```
+
+### @ApiGroup
+
+Groups related endpoints together in documentation.
 
 ```java
 @RestController
-@RequestMapping("/api/users")
-@Tag(name = "Users", description = "User management APIs")
-public class UserController {
+@RequestMapping("/api/orders")
+@ApiGroup(
+    name = "Orders",
+    description = "Order management operations",
+    priority = 1
+)
+public class OrderController {
+    // All endpoints grouped under "Orders"
+}
+```
+
+### @DeprecatedApi
+
+Marks endpoints as deprecated with migration information.
+
+```java
+@GetMapping("/api/v1/orders")
+@DeprecatedApi(
+    since = "2.0.0",
+    migrateToUrl = "/api/v2/orders",
+    removalDate = "2025-12-31",
+    reason = "Please use v2 API for better performance"
+)
+public ResponseEntity<List<Order>> getOrdersV1() {
+    return ResponseEntity.ok(orderService.getOrders());
+}
+```
+
+### @StandardApiResponses
+
+Adds standard HTTP response documentation to endpoints.
+
+```java
+@RestController
+@RequestMapping("/api/orders")
+public class OrderController {
     
     @GetMapping("/{id}")
-    @Operation(summary = "Get user by ID", description = "Retrieves a user by their unique identifier")
     @StandardApiResponses
-    public ResponseEntity<User> getUser(
-            @Parameter(description = "User ID") @PathVariable Long id) {
-        return ResponseEntity.ok(userService.findById(id));
-    }
-    
-    @PostMapping
-    @Operation(summary = "Create user", description = "Creates a new user")
-    @StandardApiResponses
-    public ResponseEntity<User> createUser(
-            @RequestBody @Valid UserRequest request) {
-        return ResponseEntity.ok(userService.create(request));
+    @Operation(summary = "Get order by ID")
+    public ResponseEntity<Order> getOrder(@PathVariable String id) {
+        return ResponseEntity.ok(orderService.getOrder(id));
     }
 }
 ```
 
-### With Pagination
+**Automatically adds:**
+- ✅ 200 OK - Success
+- ✅ 400 Bad Request - Validation error
+- ✅ 401 Unauthorized - Authentication required
+- ✅ 403 Forbidden - Access denied
+- ✅ 404 Not Found - Resource not found
+- ✅ 500 Internal Server Error
+
+### @PageableDocumentation
+
+Documents pagination parameters for pageable endpoints.
 
 ```java
-@GetMapping
-@Operation(summary = "List all users")
-@PageableParameters
-@StandardApiResponses
-public ResponseEntity<Page<User>> listUsers(Pageable pageable) {
-    return ResponseEntity.ok(userService.findAll(pageable));
+@GetMapping("/api/orders")
+@PageableDocumentation
+@Operation(summary = "Get all orders with pagination")
+public ResponseEntity<Page<Order>> getOrders(
+    @PageableDefault(size = 20) Pageable pageable
+) {
+    return ResponseEntity.ok(orderService.getOrders(pageable));
 }
 ```
 
-### Security Documentation
+**Automatically documents:**
+- `page` - Page number (0-based)
+- `size` - Number of items per page
+- `sort` - Sort criteria (e.g., "name,asc")
 
-```yaml
-adhar:
-  docs:
-    security:
-      enabled: true
-      scheme-name: bearerAuth
-      scheme: bearer
-      bearer-format: JWT
-```
+### @SecuredEndpoint
 
-```java
-@GetMapping("/profile")
-@Operation(summary = "Get user profile", 
-           security = @SecurityRequirement(name = "bearerAuth"))
-public ResponseEntity<UserProfile> getProfile() {
-    return ResponseEntity.ok(userService.getCurrentUserProfile());
-}
-```
-
-### API Grouping
-
-```yaml
-adhar:
-  docs:
-    groups:
-      - name: public-api
-        display-name: Public API
-        packages-to-scan: com.example.api.public
-        paths-to-match: /api/public/**
-      - name: admin-api
-        display-name: Admin API
-        packages-to-scan: com.example.api.admin
-        paths-to-match: /api/admin/**
-```
-
-### Custom Annotations
-
-Use pre-defined annotations for common scenarios:
+Marks endpoints as secured with JWT authentication.
 
 ```java
 @RestController
-@StandardApiResponses  // Adds standard HTTP response codes
-public class ProductController {
+@RequestMapping("/api/orders")
+@SecuredEndpoint  // All endpoints require JWT
+public class OrderController {
     
-    @GetMapping
-    @PageableParameters  // Adds pagination parameters
-    public Page<Product> list(Pageable pageable) {
-        return productService.findAll(pageable);
+    @PostMapping
+    @Operation(summary = "Create new order")
+    public ResponseEntity<Order> createOrder(@RequestBody OrderRequest request) {
+        return ResponseEntity.ok(orderService.createOrder(request));
     }
 }
 ```
 
-### Schema Documentation
+
+---
+
+## 🌐 Multi-Framework Support
+
+### Spring Boot Integration
 
 ```java
-@Schema(description = "User registration request")
-public class UserRequest {
+// Method 1: Using @EnableOpenApiDocs
+@SpringBootApplication
+@EnableOpenApiDocs(
+    title = "Order Service API",
+    version = "1.0.0",
+    enableJwtSecurity = true
+)
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+
+// Method 2: Programmatic Configuration
+@Configuration
+public class OpenApiConfig {
     
-    @Schema(description = "User email address", example = "user@example.com", required = true)
-    @Email
-    @NotNull
-    private String email;
-    
-    @Schema(description = "User full name", example = "John Doe", required = true)
-    @NotBlank
-    private String name;
-    
-    @Schema(description = "User password", format = "password", minLength = 8)
-    @NotNull
-    private String password;
+    @Bean
+    public OpenAPI customOpenAPI() {
+        return SpringBootOpenApiIntegration.createOpenAPI()
+            .title("Order Service API")
+            .version("1.0.0")
+            .description("Comprehensive order management")
+            .withJwtSecurity()
+            .build();
+    }
 }
 ```
 
-### Examples in Responses
+### Quarkus Integration
 
 ```java
-@GetMapping("/{id}")
-@Operation(summary = "Get user")
-@ApiResponse(responseCode = "200", description = "Success",
-    content = @Content(mediaType = "application/json",
-        schema = @Schema(implementation = User.class),
-        examples = @ExampleObject(
-            name = "user-example",
-            value = """
-                {
-                  "id": 1,
-                  "email": "john@example.com",
-                  "name": "John Doe"
-                }
-                """
-        )))
-public ResponseEntity<User> getUser(@PathVariable Long id) {
-    return ResponseEntity.ok(userService.findById(id));
+// Method 1: Using @EnableOpenApiDocs
+@ApplicationPath("/api")
+@EnableOpenApiDocs(
+    title = "Order Service API",
+    version = "1.0.0",
+    enableJwtSecurity = true
+)
+public class ApiApplication extends Application {
+}
+
+// Method 2: CDI Producer
+@ApplicationScoped
+public class OpenApiConfig {
+    
+    @Produces
+    public OpenAPI customOpenAPI() {
+        return QuarkusOpenApiIntegration.createOpenAPI()
+            .title("Order Service API")
+            .version("1.0.0")
+            .withJwtSecurity()
+            .build();
+    }
+}
+
+// Method 3: application.properties
+quarkus.smallrye-openapi.info-title=Order Service API
+quarkus.smallrye-openapi.info-version=1.0.0
+adhar.docs.enabled=true
+adhar.docs.security.jwt-enabled=true
+```
+
+### Micronaut Integration
+
+```java
+// Method 1: Using @EnableOpenApiDocs
+@EnableOpenApiDocs(
+    title = "Order Service API",
+    version = "1.0.0",
+    enableJwtSecurity = true
+)
+public class Application {
+    public static void main(String[] args) {
+        Micronaut.run(Application.class, args);
+    }
+}
+
+// Method 2: Factory Bean
+@Factory
+public class OpenApiConfig {
+    
+    @Bean
+    @Singleton
+    public OpenAPI customOpenAPI() {
+        return MicronautOpenApiIntegration.createOpenAPI()
+            .title("Order Service API")
+            .version("1.0.0")
+            .withJwtSecurity()
+            .build();
+    }
+}
+
+// Method 3: application.yml
+micronaut:
+  router:
+    static-resources:
+      swagger:
+        paths: classpath:META-INF/swagger
+adhar:
+  docs:
+    enabled: true
+    info:
+      title: Order Service API
+      version: 1.0.0
+```
+
+---
+
+## 📦 Models
+
+### ApiErrorResponse
+
+Standard error response model for consistent error handling.
+
+```java
+// Automatic usage in exception handlers
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+    
+    @ExceptionHandler(ValidationException.class)
+    public ResponseEntity<ApiErrorResponse> handleValidation(
+        ValidationException ex,
+        HttpServletRequest request
+    ) {
+        ApiErrorResponse error = ApiErrorResponse.builder()
+            .timestamp(LocalDateTime.now())
+            .status(400)
+            .error("Bad Request")
+            .message("Validation failed")
+            .path(request.getRequestURI())
+            .correlationId(request.getHeader("X-Correlation-ID"))
+            .errors(ex.getValidationErrors())
+            .build();
+            
+        return ResponseEntity.badRequest().body(error);
+    }
 }
 ```
 
-## Configuration
+### PageableResponse
 
-### application.yml
+Standard pageable response model for consistent pagination.
 
+```java
+@GetMapping("/api/orders")
+public ResponseEntity<PageableResponse<Order>> getOrders(Pageable pageable) {
+    Page<Order> page = orderService.getOrders(pageable);
+    
+    PageableResponse<Order> response = PageableResponse.<Order>builder()
+        .content(page.getContent())
+        .pagination(PaginationMetadata.builder()
+            .page(page.getNumber())
+            .size(page.getSize())
+            .totalPages(page.getTotalPages())
+            .totalElements(page.getTotalElements())
+            .first(page.isFirst())
+            .last(page.isLast())
+            .hasNext(page.hasNext())
+            .hasPrevious(page.hasPrevious())
+            .build())
+        .build();
+        
+    return ResponseEntity.ok(response);
+}
+```
+
+---
+
+## ⚙️ Configuration
+
+### Complete Configuration Example
+
+**application.yml:**
 ```yaml
 adhar:
   docs:
     enabled: true
     
-    api-info:
-      title: My API
-      description: API for my application
-      version: 1.0.0
+    # API Information
+    info:
+      title: "E-Commerce API"
+      version: "2.0.0"
+      description: "Comprehensive e-commerce microservices API"
+      terms-of-service: "https://example.com/terms"
+      
       contact:
-        name: API Support
-        email: support@example.com
+        name: "API Support Team"
+        email: "api-support@example.com"
+        url: "https://example.com/support"
+        
       license:
-        name: Apache 2.0
-        url: https://www.apache.org/licenses/LICENSE-2.0
+        name: "Apache 2.0"
+        url: "https://www.apache.org/licenses/LICENSE-2.0"
     
-    swagger-ui:
-      enabled: true
-      path: /swagger-ui.html
-      try-it-out-enabled: true
+    # Multi-environment Servers
+    servers:
+      - url: "http://localhost:8080"
+        description: "Local Development"
+      - url: "https://api-dev.example.com"
+        description: "Development Environment"
+      - url: "https://api-staging.example.com"
+        description: "Staging Environment"
+      - url: "https://api.example.com"
+        description: "Production Environment"
     
+    # Security Configuration
     security:
       enabled: true
-      scheme-name: bearerAuth
-      scheme: bearer
-      bearer-format: JWT
+      jwt-enabled: true
+      api-key-enabled: false
+      oauth2-enabled: false
+      api-key-header: "X-API-KEY"
+    
+    # Swagger UI Customization
+    swagger-ui:
+      enabled: true
+      path: "/swagger-ui.html"
+      display-request-duration: true
+      doc-expansion: "none"
+      filter: true
+      show-request-headers: true
+    
+    # Path Configuration
+    paths:
+      packages-to-scan:
+        - "com.example.order.api"
+        - "com.example.product.api"
+      paths-to-match:
+        - "/api/**"
+      paths-to-exclude:
+        - "/api/internal/**"
+        - "/api/admin/**"
 ```
 
-## Accessing Documentation
+---
 
-Once configured, access the documentation at:
+## 💡 Examples
 
-- **Swagger UI:** http://localhost:8080/swagger-ui.html
-- **OpenAPI JSON:** http://localhost:8080/v3/api-docs
-- **OpenAPI YAML:** http://localhost:8080/v3/api-docs.yaml
+### Complete REST Controller Example
 
-## Advanced Features
+```java
+@RestController
+@RequestMapping("/api/orders")
+@Tag(name = "Orders", description = "Order management operations")
+@SecuredEndpoint
+@StandardApiResponses
+public class OrderController {
+    
+    private final OrderService orderService;
+    
+    @GetMapping
+    @Operation(summary = "Get all orders", description = "Retrieve paginated list of orders")
+    @PageableDocumentation
+    public ResponseEntity<Page<Order>> getOrders(
+        @PageableDefault(size = 20, sort = "createdDate,desc") Pageable pageable
+    ) {
+        return ResponseEntity.ok(orderService.getOrders(pageable));
+    }
+    
+    @GetMapping("/{id}")
+    @Operation(summary = "Get order by ID")
+    @ApiResponse(responseCode = "200", description = "Order found",
+        content = @Content(schema = @Schema(implementation = Order.class)))
+    public ResponseEntity<Order> getOrder(
+        @Parameter(description = "Order ID", example = "ORD-12345")
+        @PathVariable String id
+    ) {
+        return ResponseEntity.ok(orderService.getOrder(id));
+    }
+    
+    @PostMapping
+    @Operation(summary = "Create new order")
+    @ApiResponse(responseCode = "201", description = "Order created")
+    public ResponseEntity<Order> createOrder(
+        @RequestBody @Valid OrderRequest request
+    ) {
+        Order order = orderService.createOrder(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(order);
+    }
+    
+    @PutMapping("/{id}")
+    @Operation(summary = "Update order")
+    public ResponseEntity<Order> updateOrder(
+        @PathVariable String id,
+        @RequestBody @Valid OrderRequest request
+    ) {
+        return ResponseEntity.ok(orderService.updateOrder(id, request));
+    }
+    
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Delete order")
+    @ApiResponse(responseCode = "204", description = "Order deleted")
+    public ResponseEntity<Void> deleteOrder(@PathVariable String id) {
+        orderService.deleteOrder(id);
+        return ResponseEntity.noContent().build();
+    }
+}
+```
+
+### Model Documentation Example
+
+```java
+@Schema(description = "Order information")
+public class Order {
+    
+    @Schema(description = "Order ID", example = "ORD-12345", accessMode = Schema.AccessMode.READ_ONLY)
+    private String id;
+    
+    @Schema(description = "Customer ID", example = "CUST-67890", required = true)
+    private String customerId;
+    
+    @Schema(description = "Order status", example = "PENDING")
+    private OrderStatus status;
+    
+    @Schema(description = "Order items", required = true)
+    private List<OrderItem> items;
+    
+    @Schema(description = "Order total amount", example = "99.99")
+    private BigDecimal totalAmount;
+    
+    @Schema(description = "Order creation timestamp", accessMode = Schema.AccessMode.READ_ONLY)
+    private LocalDateTime createdDate;
+    
+    // Getters and setters
+}
+```
+
+### Request DTO Example
+
+```java
+@Schema(description = "Order creation request")
+public class OrderRequest {
+    
+    @Schema(description = "Customer ID", example = "CUST-67890", required = true)
+    @NotBlank
+    private String customerId;
+    
+    @Schema(description = "Order items", required = true)
+    @NotEmpty
+    @Valid
+    private List<OrderItemRequest> items;
+    
+    @Schema(description = "Delivery address", required = true)
+    @NotNull
+    @Valid
+    private Address deliveryAddress;
+    
+    @Schema(description = "Payment method", example = "CREDIT_CARD")
+    private PaymentMethod paymentMethod;
+    
+    // Getters and setters
+}
+```
+
+---
+
+## 🎨 Customization
 
 ### Custom OpenAPI Customizer
 
 ```java
 @Bean
-public OpenApiCustomizer openApiCustomizer() {
-    return openApi -> {
-        openApi.info(openApi.getInfo()
-                .description("Enhanced API Documentation"));
-        
-        // Add servers
-        openApi.addServersItem(new Server()
-                .url("https://api.production.com")
-                .description("Production"));
-        openApi.addServersItem(new Server()
-                .url("https://api.staging.com")
-                .description("Staging"));
-    };
+public OpenApiCustomizer customOpenApiCustomizer() {
+    return AdharOpenApiCustomizer.builder()
+        .addCommonHeaders()
+        .addCommonResponses()
+        .addExamples()
+        .build();
 }
 ```
 
-### Hide Endpoints
+### Custom Security Scheme
 
 ```java
-@GetMapping("/internal")
-@Hidden  // Hides from documentation
-public String internalEndpoint() {
-    return "Not documented";
+@Bean
+public OpenAPI customSecurityOpenAPI() {
+    return AdharOpenApiConfig.builder()
+        .title("Secure API")
+        .version("1.0.0")
+        .withJwtSecurity()
+        .withApiKeySecurity("X-API-KEY")
+        .withOAuth2Security()
+        .build();
 }
 ```
 
-### Deprecation
+---
+
+## 📊 Best Practices
+
+### 1. Use Descriptive Summaries
 
 ```java
-@GetMapping("/old-endpoint")
-@Operation(summary = "Old endpoint", deprecated = true)
-@Deprecated
-public String oldEndpoint() {
-    return "Use /new-endpoint instead";
-}
+@Operation(
+    summary = "Create new customer order",
+    description = "Creates a new order for the specified customer with the provided items and delivery address"
+)
 ```
 
-## Best Practices
-
-1. **Use @Operation**: Provide clear summaries and descriptions
-2. **Document Parameters**: Use @Parameter for clarity
-3. **Schema Descriptions**: Add examples and constraints
-4. **Group Related APIs**: Use tags for organization
-5. **Security Documentation**: Document authentication requirements
-6. **Version Your API**: Include version in URL or headers
-7. **Provide Examples**: Include request/response examples
-
-## Integration with Security
+### 2. Provide Examples
 
 ```java
-@Configuration
-@EnableWebSecurity
-public class SecurityConfig {
-    
-    @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        http
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
-                .anyRequest().authenticated()
-            );
-        return http.build();
+@Parameter(
+    description = "Order ID",
+    example = "ORD-2024-001234",
+    required = true
+)
+```
+
+### 3. Document Error Responses
+
+```java
+@ApiResponse(responseCode = "400", description = "Invalid order data",
+    content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+@ApiResponse(responseCode = "404", description = "Customer not found")
+```
+
+### 4. Group Related Endpoints
+
+```java
+@Tag(name = "Orders", description = "Order management operations")
+@Tag(name = "Payments", description = "Payment processing")
+```
+
+### 5. Version Your APIs
+
+```java
+@RequestMapping("/api/v1/orders")  // Version 1
+@RequestMapping("/api/v2/orders")  // Version 2
+```
+
+### 6. Use Schema Descriptions
+
+```java
+@Schema(
+    description = "Order status",
+    allowableValues = {"PENDING", "CONFIRMED", "SHIPPED", "DELIVERED", "CANCELLED"}
+)
+```
+
+---
+
+## 🔧 Framework Support
+
+### Spring Boot
+
+```java
+@SpringBootApplication
+@EnableOpenApi  // If using custom annotation
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
     }
 }
 ```
 
-## Dependencies
+### Quarkus
 
-- Springdoc OpenAPI
-- Swagger UI
-- Spring Web
-
-## License
-
-Copyright © 2025 Adhar Platform Team
-package com.adhar.kit.docs.config;
-
-import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-
-import java.util.ArrayList;
-import java.util.List;
-
-/**
- * Configuration properties for Adhar Docs module.
- *
- * @author Adhar Platform Team
- * @since 1.0.0
- */
-@Data
-@ConfigurationProperties(prefix = "adhar.docs")
-public class DocsProperties {
-
-    /**
-     * Enable/disable API documentation.
-     */
-    private boolean enabled = true;
-
-    /**
-     * API information.
-     */
-    private ApiInfo apiInfo = new ApiInfo();
-
-    /**
-     * Swagger UI configuration.
-     */
-    private SwaggerUi swaggerUi = new SwaggerUi();
-
-    /**
-     * Security configuration.
-     */
-    private Security security = new Security();
-
-    /**
-     * Group configuration for multiple API groups.
-     */
-    private List<GroupConfig> groups = new ArrayList<>();
-
-    @Data
-    public static class ApiInfo {
-        private String title = "API Documentation";
-        private String description = "REST API Documentation";
-        private String version = "1.0.0";
-        private String termsOfService = "";
-        private Contact contact = new Contact();
-        private License license = new License();
-    }
-
-    @Data
-    public static class Contact {
-        private String name = "API Support";
-        private String email = "support@example.com";
-        private String url = "";
-    }
-
-    @Data
-    public static class License {
-        private String name = "Apache 2.0";
-        private String url = "https://www.apache.org/licenses/LICENSE-2.0";
-    }
-
-    @Data
-    public static class SwaggerUi {
-        private boolean enabled = true;
-        private String path = "/swagger-ui.html";
-        private boolean displayRequestDuration = true;
-        private boolean showExtensions = true;
-        private String defaultModelsExpandDepth = "1";
-        private String defaultModelExpandDepth = "1";
-        private boolean tryItOutEnabled = true;
-    }
-
-    @Data
-    public static class Security {
-        private boolean enabled = false;
-        private String schemeName = "bearerAuth";
-        private String scheme = "bearer";
-        private String bearerFormat = "JWT";
-        private String description = "JWT Authentication";
-    }
-
-    @Data
-    public static class GroupConfig {
-        private String name;
-        private String displayName;
-        private String packagesToScan;
-        private String pathsToMatch;
-    }
+```java
+@ApplicationPath("/api")
+@OpenAPIDefinition(
+    info = @Info(title = "Order API", version = "1.0.0")
+)
+public class OrderApplication extends Application {
 }
+```
+
+### Micronaut
+
+```yaml
+micronaut:
+  router:
+    static-resources:
+      swagger:
+        paths: classpath:META-INF/swagger
+        mapping: /swagger/**
+```
+
+---
+
+## 📚 API Reference
+
+### AdharOpenApiConfig
+
+| Method | Description |
+|--------|-------------|
+| `builder()` | Creates configuration builder |
+| `title(String)` | Sets API title |
+| `version(String)` | Sets API version |
+| `description(String)` | Sets API description |
+| `contact(...)` | Adds contact information |
+| `license(...)` | Adds license information |
+| `server(...)` | Adds server configuration |
+| `withJwtSecurity()` | Enables JWT authentication |
+| `withApiKeySecurity(...)` | Enables API Key authentication |
+| `withOAuth2Security()` | Enables OAuth2 authentication |
+| `build()` | Builds OpenAPI instance |
+
+### Annotations
+
+| Annotation | Purpose |
+|------------|---------|
+| `@StandardApiResponses` | Adds standard HTTP responses |
+| `@PageableDocumentation` | Documents pagination |
+| `@SecuredEndpoint` | Marks as secured endpoint |
+
+---
+
+## 🌟 Features Matrix
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| OpenAPI 3.0 | ✅ | Latest specification |
+| Swagger UI | ✅ | Interactive documentation |
+| JWT Security | ✅ | Bearer token auth |
+| API Key Security | ✅ | Header-based auth |
+| OAuth2 Security | ✅ | OAuth2 flows |
+| Basic Auth | ✅ | Basic authentication |
+| Pagination | ✅ | Pageable support |
+| Error Responses | ✅ | Standard error schemas |
+| Examples | ✅ | Request/response examples |
+| Multi-server | ✅ | Environment configs |
+| Custom Headers | ✅ | Correlation/Request ID |
+| API Versioning | ✅ | Version management |
+
+---
+
+## 📦 Dependencies
+
+```xml
+<!-- OpenAPI -->
+<dependency>
+    <groupId>org.springdoc</groupId>
+    <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+</dependency>
+
+<!-- Lombok (for cleaner code) -->
+<dependency>
+    <groupId>org.projectlombok</groupId>
+    <artifactId>lombok</artifactId>
+</dependency>
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please follow our [contribution guidelines](../CONTRIBUTING.md).
+
+---
+
+## 📄 License
+
+Apache License 2.0 - see [LICENSE](../LICENSE) for details.
+
+---
+
+## 🔗 Related Modules
+
+- [adhar-kit-commons](../adhar-kit-commons) - Common utilities
+- [adhar-kit-security](../adhar-kit-security) - Security features
+- [adhar-kit-core](../adhar-kit-core) - Core patterns
+
+---
+
+**Built with ❤️ by Adhar Platform Team**
 

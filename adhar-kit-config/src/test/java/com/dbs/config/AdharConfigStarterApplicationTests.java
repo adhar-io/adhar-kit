@@ -1,4 +1,4 @@
-package com.dbs.config;
+package com.adhar.kit.config;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

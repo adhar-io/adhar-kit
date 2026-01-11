@@ -1,263 +1,298 @@
 package com.adhar.kit.commons.util;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.*;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
- * Utility class for collection operations and manipulations.
+ * Utility class for collection operations.
+ *
+ * <p>Provides null-safe collection operations and transformations.</p>
+ *
+ * <p><b>Example:</b></p>
+ * <pre>{@code
+ * // Null-safe operations
+ * boolean empty = CollectionUtils.isEmpty(list);
+ * List<String> safe = CollectionUtils.nullSafe(list);
+ *
+ * // Transformations
+ * List<String> names = CollectionUtils.map(users, User::getName);
+ * Map<String, User> userMap = CollectionUtils.toMap(users, User::getId);
+ *
+ * // Filtering
+ * List<User> active = CollectionUtils.filter(users, User::isActive);
+ * }</pre>
+ *
+ * @author Adhar Platform Team
+ * @since 1.0.0
  */
+@Slf4j
 public final class CollectionUtils {
 
-    // Private constructor to prevent instantiation
     private CollectionUtils() {
-        throw new UnsupportedOperationException("This is a utility class and cannot be instantiated");
+        throw new UnsupportedOperationException("Utility class");
     }
 
     /**
-     * Checks if a collection is null or empty.
+     * Checks if collection is null or empty.
      *
      * @param collection the collection to check
-     * @return true if the collection is null or empty
+     * @return true if null or empty
      */
     public static boolean isEmpty(Collection<?> collection) {
         return collection == null || collection.isEmpty();
     }
 
     /**
-     * Checks if a collection is not null and not empty.
+     * Checks if collection is not null and not empty.
      *
      * @param collection the collection to check
-     * @return true if the collection is not null and not empty
+     * @return true if not null and not empty
      */
     public static boolean isNotEmpty(Collection<?> collection) {
         return !isEmpty(collection);
     }
 
     /**
-     * Returns the size of a collection, handling null collections.
+     * Returns an empty list if input is null.
      *
-     * @param collection the collection
-     * @return the size, or 0 if null
+     * @param list the input list
+     * @param <T> element type
+     * @return non-null list
      */
-    public static int size(Collection<?> collection) {
-        return collection != null ? collection.size() : 0;
+    public static <T> List<T> nullSafe(List<T> list) {
+        return list == null ? Collections.emptyList() : list;
     }
 
     /**
-     * Returns a safe copy of a collection, never null.
+     * Returns an empty set if input is null.
      *
-     * @param collection the collection to copy
-     * @param <T> the element type
-     * @return a new list containing the elements, or empty list if input is null
+     * @param set the input set
+     * @param <T> element type
+     * @return non-null set
      */
-    public static <T> List<T> safeList(Collection<T> collection) {
-        return collection != null ? new ArrayList<>(collection) : new ArrayList<>();
+    public static <T> Set<T> nullSafe(Set<T> set) {
+        return set == null ? Collections.emptySet() : set;
     }
 
     /**
-     * Returns a safe copy of a set, never null.
+     * Returns an empty map if input is null.
      *
-     * @param collection the collection to copy
-     * @param <T> the element type
-     * @return a new set containing the elements, or empty set if input is null
+     * @param map the input map
+     * @param <K> key type
+     * @param <V> value type
+     * @return non-null map
      */
-    public static <T> Set<T> safeSet(Collection<T> collection) {
-        return collection != null ? new HashSet<>(collection) : new HashSet<>();
+    public static <K, V> Map<K, V> nullSafe(Map<K, V> map) {
+        return map == null ? Collections.emptyMap() : map;
     }
 
     /**
-     * Filters a collection based on a predicate.
+     * Maps a collection to another type.
      *
-     * @param collection the collection to filter
-     * @param predicate the filter predicate
-     * @param <T> the element type
-     * @return a new list containing filtered elements
-     */
-    public static <T> List<T> filter(Collection<T> collection, Predicate<T> predicate) {
-        if (isEmpty(collection) || predicate == null) {
-            return new ArrayList<>();
-        }
-
-        return collection.stream()
-                .filter(predicate)
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * Maps a collection to a new collection using a mapper function.
-     *
-     * @param collection the collection to map
+     * @param collection the input collection
      * @param mapper the mapping function
-     * @param <T> the input element type
-     * @param <R> the output element type
-     * @return a new list containing mapped elements
+     * @param <T> input type
+     * @param <R> output type
+     * @return mapped list
      */
     public static <T, R> List<R> map(Collection<T> collection, Function<T, R> mapper) {
-        if (isEmpty(collection) || mapper == null) {
-            return new ArrayList<>();
-        }
-
-        return collection.stream()
-                .map(mapper)
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * Partitions a collection into chunks of specified size.
-     *
-     * @param collection the collection to partition
-     * @param size the chunk size
-     * @param <T> the element type
-     * @return a list of lists, each containing at most 'size' elements
-     */
-    public static <T> List<List<T>> partition(Collection<T> collection, int size) {
-        if (isEmpty(collection) || size <= 0) {
-            return new ArrayList<>();
-        }
-
-        List<T> list = new ArrayList<>(collection);
-        List<List<T>> partitions = new ArrayList<>();
-
-        for (int i = 0; i < list.size(); i += size) {
-            partitions.add(list.subList(i, Math.min(i + size, list.size())));
-        }
-
-        return partitions;
-    }
-
-    /**
-     * Returns the first element of a collection, or null if empty.
-     *
-     * @param collection the collection
-     * @param <T> the element type
-     * @return the first element or null
-     */
-    public static <T> T getFirst(Collection<T> collection) {
-        return isEmpty(collection) ? null : collection.iterator().next();
-    }
-
-    /**
-     * Returns the first element of a collection, or a default value if empty.
-     *
-     * @param collection the collection
-     * @param defaultValue the default value
-     * @param <T> the element type
-     * @return the first element or default value
-     */
-    public static <T> T getFirst(Collection<T> collection, T defaultValue) {
-        return isEmpty(collection) ? defaultValue : collection.iterator().next();
-    }
-
-    /**
-     * Returns the last element of a list, or null if empty.
-     *
-     * @param list the list
-     * @param <T> the element type
-     * @return the last element or null
-     */
-    public static <T> T getLast(List<T> list) {
-        return isEmpty(list) ? null : list.get(list.size() - 1);
-    }
-
-    /**
-     * Returns the intersection of two collections.
-     *
-     * @param collection1 the first collection
-     * @param collection2 the second collection
-     * @param <T> the element type
-     * @return a new set containing common elements
-     */
-    public static <T> Set<T> intersection(Collection<T> collection1, Collection<T> collection2) {
-        if (isEmpty(collection1) || isEmpty(collection2)) {
-            return new HashSet<>();
-        }
-
-        Set<T> result = new HashSet<>(collection1);
-        result.retainAll(collection2);
-        return result;
-    }
-
-    /**
-     * Returns the union of two collections.
-     *
-     * @param collection1 the first collection
-     * @param collection2 the second collection
-     * @param <T> the element type
-     * @return a new set containing all unique elements from both collections
-     */
-    public static <T> Set<T> union(Collection<T> collection1, Collection<T> collection2) {
-        Set<T> result = new HashSet<>();
-        if (isNotEmpty(collection1)) {
-            result.addAll(collection1);
-        }
-        if (isNotEmpty(collection2)) {
-            result.addAll(collection2);
-        }
-        return result;
-    }
-
-    /**
-     * Returns the difference between two collections (elements in first but not in second).
-     *
-     * @param collection1 the first collection
-     * @param collection2 the second collection
-     * @param <T> the element type
-     * @return a new set containing elements only in the first collection
-     */
-    public static <T> Set<T> difference(Collection<T> collection1, Collection<T> collection2) {
-        if (isEmpty(collection1)) {
-            return new HashSet<>();
-        }
-
-        Set<T> result = new HashSet<>(collection1);
-        if (isNotEmpty(collection2)) {
-            result.removeAll(collection2);
-        }
-        return result;
-    }
-
-    /**
-     * Removes null elements from a collection.
-     *
-     * @param collection the collection
-     * @param <T> the element type
-     * @return a new list without null elements
-     */
-    public static <T> List<T> removeNulls(Collection<T> collection) {
         if (isEmpty(collection)) {
-            return new ArrayList<>();
+            return Collections.emptyList();
         }
-
         return collection.stream()
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+            .map(mapper)
+            .collect(Collectors.toList());
     }
 
     /**
-     * Checks if any element in the collection matches the predicate.
+     * Filters a collection.
      *
-     * @param collection the collection to check
-     * @param predicate the predicate
-     * @param <T> the element type
-     * @return true if any element matches
+     * @param collection the input collection
+     * @param predicate the filter predicate
+     * @param <T> element type
+     * @return filtered list
+     */
+    public static <T> List<T> filter(Collection<T> collection, Predicate<T> predicate) {
+        if (isEmpty(collection)) {
+            return Collections.emptyList();
+        }
+        return collection.stream()
+            .filter(predicate)
+            .collect(Collectors.toList());
+    }
+
+    /**
+     * Converts collection to map.
+     *
+     * @param collection the input collection
+     * @param keyMapper function to extract key
+     * @param <T> element type
+     * @param <K> key type
+     * @return map with elements
+     */
+    public static <T, K> Map<K, T> toMap(Collection<T> collection, Function<T, K> keyMapper) {
+        if (isEmpty(collection)) {
+            return Collections.emptyMap();
+        }
+        return collection.stream()
+            .collect(Collectors.toMap(keyMapper, Function.identity()));
+    }
+
+    /**
+     * Converts collection to map with custom value.
+     *
+     * @param collection the input collection
+     * @param keyMapper function to extract key
+     * @param valueMapper function to extract value
+     * @param <T> element type
+     * @param <K> key type
+     * @param <V> value type
+     * @return map with key-value pairs
+     */
+    public static <T, K, V> Map<K, V> toMap(Collection<T> collection,
+                                            Function<T, K> keyMapper,
+                                            Function<T, V> valueMapper) {
+        if (isEmpty(collection)) {
+            return Collections.emptyMap();
+        }
+        return collection.stream()
+            .collect(Collectors.toMap(keyMapper, valueMapper));
+    }
+
+    /**
+     * Partitions collection by predicate.
+     *
+     * @param collection the input collection
+     * @param predicate the partition predicate
+     * @param <T> element type
+     * @return map with true/false keys
+     */
+    public static <T> Map<Boolean, List<T>> partition(Collection<T> collection,
+                                                       Predicate<T> predicate) {
+        if (isEmpty(collection)) {
+            return Map.of(true, Collections.emptyList(), false, Collections.emptyList());
+        }
+        return collection.stream()
+            .collect(Collectors.partitioningBy(predicate));
+    }
+
+    /**
+     * Groups collection by classifier.
+     *
+     * @param collection the input collection
+     * @param classifier the grouping function
+     * @param <T> element type
+     * @param <K> key type
+     * @return grouped map
+     */
+    public static <T, K> Map<K, List<T>> groupBy(Collection<T> collection,
+                                                  Function<T, K> classifier) {
+        if (isEmpty(collection)) {
+            return Collections.emptyMap();
+        }
+        return collection.stream()
+            .collect(Collectors.groupingBy(classifier));
+    }
+
+    /**
+     * Finds first element matching predicate.
+     *
+     * @param collection the input collection
+     * @param predicate the search predicate
+     * @param <T> element type
+     * @return optional containing found element
+     */
+    public static <T> Optional<T> findFirst(Collection<T> collection, Predicate<T> predicate) {
+        if (isEmpty(collection)) {
+            return Optional.empty();
+        }
+        return collection.stream()
+            .filter(predicate)
+            .findFirst();
+    }
+
+    /**
+     * Checks if any element matches predicate.
+     *
+     * @param collection the input collection
+     * @param predicate the test predicate
+     * @param <T> element type
+     * @return true if any match
      */
     public static <T> boolean anyMatch(Collection<T> collection, Predicate<T> predicate) {
-        return isNotEmpty(collection) && predicate != null &&
-               collection.stream().anyMatch(predicate);
+        if (isEmpty(collection)) {
+            return false;
+        }
+        return collection.stream()
+            .anyMatch(predicate);
     }
 
     /**
-     * Checks if all elements in the collection match the predicate.
+     * Checks if all elements match predicate.
      *
-     * @param collection the collection to check
-     * @param predicate the predicate
-     * @param <T> the element type
-     * @return true if all elements match
+     * @param collection the input collection
+     * @param predicate the test predicate
+     * @param <T> element type
+     * @return true if all match
      */
     public static <T> boolean allMatch(Collection<T> collection, Predicate<T> predicate) {
-        return isEmpty(collection) || (predicate != null &&
-               collection.stream().allMatch(predicate));
+        if (isEmpty(collection)) {
+            return true;
+        }
+        return collection.stream()
+            .allMatch(predicate);
+    }
+
+    /**
+     * Gets first element or default.
+     *
+     * @param list the input list
+     * @param defaultValue default value if empty
+     * @param <T> element type
+     * @return first element or default
+     */
+    public static <T> T firstOrDefault(List<T> list, T defaultValue) {
+        return isEmpty(list) ? defaultValue : list.get(0);
+    }
+
+    /**
+     * Gets last element or default.
+     *
+     * @param list the input list
+     * @param defaultValue default value if empty
+     * @param <T> element type
+     * @return last element or default
+     */
+    public static <T> T lastOrDefault(List<T> list, T defaultValue) {
+        return isEmpty(list) ? defaultValue : list.get(list.size() - 1);
+    }
+
+    /**
+     * Creates a list from varargs.
+     *
+     * @param elements the elements
+     * @param <T> element type
+     * @return list containing elements
+     */
+    @SafeVarargs
+    public static <T> List<T> listOf(T... elements) {
+        return elements == null ? Collections.emptyList() : Arrays.asList(elements);
+    }
+
+    /**
+     * Creates a set from varargs.
+     *
+     * @param elements the elements
+     * @param <T> element type
+     * @return set containing elements
+     */
+    @SafeVarargs
+    public static <T> Set<T> setOf(T... elements) {
+        return elements == null ? Collections.emptySet() : new HashSet<>(Arrays.asList(elements));
     }
 }
+

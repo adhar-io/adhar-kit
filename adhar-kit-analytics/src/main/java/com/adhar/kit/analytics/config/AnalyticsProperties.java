@@ -2,65 +2,136 @@ package com.adhar.kit.analytics.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
 
 /**
- * Configuration properties for Adhar Analytics module.
+ * Configuration properties for Analytics module.
  *
  * @author Adhar Platform Team
  * @since 1.0.0
  */
 @Data
+@Component
 @ConfigurationProperties(prefix = "adhar.analytics")
 public class AnalyticsProperties {
 
     /**
-     * Enable/disable analytics features.
+     * Enable analytics module.
      */
     private boolean enabled = true;
 
     /**
-     * Event tracking settings.
+     * PostHog configuration.
+     */
+    private PostHog postHog = new PostHog();
+
+    /**
+     * Annotation support.
+     */
+    private Annotations annotations = new Annotations();
+
+    /**
+     * Event tracking configuration.
      */
     private EventTracking eventTracking = new EventTracking();
 
-    /**
-     * Report generation settings.
-     */
-    private Reporting reporting = new Reporting();
+    @Data
+    public static class PostHog {
+        /**
+         * PostHog API key.
+         */
+        private String apiKey;
 
-    /**
-     * Aggregation settings.
-     */
-    private Aggregation aggregation = new Aggregation();
+        /**
+         * PostHog host URL.
+         */
+        private String host = "https://app.posthog.com";
+
+        /**
+         * Enable personal API key for feature flags.
+         */
+        private String personalApiKey;
+
+        /**
+         * Batch size for events.
+         */
+        private int batchSize = 100;
+
+        /**
+         * Flush interval in seconds.
+         */
+        private int flushInterval = 10;
+    }
+
+    @Data
+    public static class Annotations {
+        /**
+         * Enable annotation processing.
+         */
+        private boolean enabled = true;
+
+        /**
+         * Enable @TrackEvent annotation.
+         */
+        private boolean trackEventEnabled = true;
+
+        /**
+         * Enable @TrackPageView annotation.
+         */
+        private boolean trackPageViewEnabled = true;
+
+        /**
+         * Enable @IdentifyUser annotation.
+         */
+        private boolean identifyUserEnabled = true;
+
+        /**
+         * Enable @FeatureFlag annotation.
+         */
+        private boolean featureFlagEnabled = true;
+
+        /**
+         * Enable @TrackGroup annotation.
+         */
+        private boolean trackGroupEnabled = true;
+
+        /**
+         * Enable @AliasUser annotation.
+         */
+        private boolean aliasUserEnabled = true;
+
+        /**
+         * Enable @EnableAnalytics annotation.
+         */
+        private boolean enableAnalyticsEnabled = true;
+
+        /**
+         * Enable @TrackSession annotation.
+         */
+        private boolean trackSessionEnabled = true;
+    }
 
     @Data
     public static class EventTracking {
+        /**
+         * Enable automatic event tracking.
+         */
         private boolean enabled = true;
-        private String kafkaTopic = "analytics-events";
-        private boolean trackPageViews = true;
-        private boolean trackUserActions = true;
-        private boolean trackBusinessEvents = true;
-        private int batchSize = 100;
-        private long flushInterval = 5000; // 5 seconds
-    }
 
-    @Data
-    public static class Reporting {
-        private boolean enabled = true;
-        private String outputDirectory = "/tmp/reports";
-        private boolean enableCsv = true;
-        private boolean enableExcel = true;
-        private boolean enablePdf = false;
-        private boolean enableScheduledReports = false;
-        private String scheduleExpression = "0 0 0 * * ?"; // Daily at midnight
-    }
+        /**
+         * Track HTTP requests automatically.
+         */
+        private boolean trackHttpRequests = false;
 
-    @Data
-    public static class Aggregation {
-        private boolean enabled = true;
-        private boolean realTimeAggregation = true;
-        private int aggregationWindowMinutes = 5;
-        private boolean persistAggregates = true;
+        /**
+         * Track exceptions automatically.
+         */
+        private boolean trackExceptions = true;
+
+        /**
+         * Async event tracking.
+         */
+        private boolean async = true;
     }
 }
 

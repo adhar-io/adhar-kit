@@ -1,4 +1,4 @@
-package com.dbs.analytics;
+package com.adhar.kit.analytics;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
