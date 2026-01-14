@@ -1,0 +1,80 @@
+# Adhar Kit Dapr Configuration
+# Complete configuration for all Dapr building blocks
+
+adhar:
+  dapr:
+    enabled: true
+    app-id: my-service
+    app-port: 8080
+
+    # Dapr Sidecar Ports
+    dapr-port: 3500
+    dapr-http-port: 3500
+    dapr-grpc-port: 50001
+
+    # Default Component Names
+    state-store: statestore
+    pubsub: pubsub
+    secret-store: secretstore
+    configuration-store: configstore
+    lock-store: lockstore
+
+    # 1. State Store Configuration
+    state-store-config:
+      enabled: true
+      component-name: statestore
+      consistency: eventual
+      concurrency: first-write
+
+    # 2. Pub/Sub Configuration
+    pub-sub-config:
+      enabled: true
+      component-name: pubsub
+      dead-letter-topic: dead-letter
+
+    # 3. Service Invocation Configuration
+    service-invocation:
+      enabled: true
+      timeout: 60000
+      retries: 3
+
+    # 4. Bindings Configuration
+    bindings:
+      enabled: true
+      input-bindings: []
+      output-bindings: []
+
+    # 5. Secrets Management Configuration
+    secrets:
+      enabled: true
+      store-name: secretstore
+
+    # 6. Configuration API
+    configuration:
+      enabled: true
+      store-name: configstore
+      subscribe-enabled: true
+
+    # 7. Distributed Lock Configuration
+    lock:
+      enabled: true
+      store-name: lockstore
+      default-timeout: 30000
+
+    # 8. Workflow Configuration
+    workflow:
+      enabled: true
+
+    # 9. Actors Configuration
+    actors:
+      enabled: true
+      actor-idle-timeout: 60m
+      actor-scan-interval: 30s
+      drain-ongoing-call-timeout: 60s
+      drain-rebalanced-actors: true
+
+    # 10. Cryptography Configuration
+    crypto:
+      enabled: true
+      default-component: crypto
+

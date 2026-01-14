@@ -33,7 +33,7 @@ public class GrpcAutoConfiguration {
 
     @Bean
     public Server grpcServer() throws IOException {
-        ServerBuilder<?> serverBuilder = ServerBuilder.forPort(grpcProperties.getPort());
+        ServerBuilder<?> serverBuilder = ServerBuilder.forPort(grpcProperties.getServer().getPort());
         Map<String, Object> grpcServices = applicationContext.getBeansWithAnnotation(GrpcService.class);
         for (Object grpcService : grpcServices.values()) {
             if (grpcService instanceof BindableService) {

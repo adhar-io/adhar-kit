@@ -39,6 +39,13 @@
     </dependencyManagement>
 
     <dependencies>
+        <!-- Adhar Kit Commons -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-commons</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- Spring Boot Actuator (Optional) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

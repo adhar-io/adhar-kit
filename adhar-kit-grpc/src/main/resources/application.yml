@@ -1,0 +1,100 @@
+# Adhar Kit gRPC - Enterprise Microservices Configuration
+
+adhar:
+  grpc:
+    enabled: true
+
+    # ========================================
+    # SERVER CONFIGURATION
+    # ========================================
+    server:
+      enabled: true
+      port: 9090
+      address: "0.0.0.0"
+
+      # Message Size Limits
+      max-inbound-message-size: 4194304      # 4MB
+      max-inbound-header-list-size: 8192     # 8KB
+
+      # Thread Pool
+      executor-thread-pool-size: 100
+
+      # Keep Alive Settings
+      keep-alive-time: 300                   # 5 minutes
+      keep-alive-timeout: 20                 # 20 seconds
+      permit-keep-alive-without-calls: false
+      permit-keep-alive-time: 300
+
+      # Services
+      enable-reflection: true                # Enable for debugging
+      enable-health-check: true
+
+      # Shutdown
+      shutdown-grace-period: 30              # 30 seconds
+
+    # ========================================
+    # CLIENT CONFIGURATION
+    # ========================================
+    client:
+      default-target: "localhost:9090"
+
+      # Default Channel Settings
+      defaults:
+        enable-load-balancing: true
+        load-balancing-policy: "round_robin"
+        enable-retry: true
+        max-retry-attempts: 3
+        default-timeout: 60000               # 60 seconds
+        max-inbound-message-size: 4194304    # 4MB
+        keep-alive-time: 300
+        keep-alive-timeout: 20
+        keep-alive-without-calls: false
+        enable-tls: false
+        user-agent: "adhar-grpc-client/1.0.0"
+
+      # Named Channels
+      channels:
+        # Order Service
+        order-service:
+          target: "localhost:9090"
+          enable-retry: true
+          max-retry-attempts: 3
+          default-timeout: 60000
+
+        # Inventory Service
+        inventory-service:
+          target: "localhost:9091"
+          enable-retry: true
+          max-retry-attempts: 3
+          default-timeout: 30000
+
+        # Payment Service
+        payment-service:
+          target: "localhost:9092"
+          enable-retry: false
+          default-timeout: 15000
+
+    # ========================================
+    # SECURITY CONFIGURATION
+    # ========================================
+    security:
+      enabled: false
+      enable-tls: false
+      enable-mtls: false
+      client-auth: "NONE"                    # NONE, OPTIONAL, REQUIRE
+
+      # TLS Certificates (when enabled)
+      # cert-chain: "classpath:certs/server.crt"
+      # private-key: "classpath:certs/server.key"
+      # trust-cert-collection: "classpath:certs/ca.crt"
+
+    # ========================================
+    # OBSERVABILITY CONFIGURATION
+    # ========================================
+    observability:
+      enable-metrics: true
+      enable-tracing: true
+      enable-logging: true
+      log-level: "BASIC"                     # NONE, BASIC, HEADERS, FULL
+      enable-health-check: true
+

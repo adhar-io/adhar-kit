@@ -1,0 +1,68 @@
+# Adhar Kit Health - Enterprise Health Check Configuration
+
+adhar:
+  health:
+    enabled: true
+    show-details: always
+    show-components: true
+
+    # Endpoints
+    endpoint: "/health"
+    readiness-endpoint: "/health/ready"
+    liveness-endpoint: "/health/live"
+
+    # ========================================
+    # DATABASE HEALTH
+    # ========================================
+    database:
+      enabled: true
+      timeout: 5000
+      validation-query: "SELECT 1"
+
+    # ========================================
+    # REDIS HEALTH
+    # ========================================
+    redis:
+      enabled: true
+      timeout: 3000
+
+    # ========================================
+    # KAFKA HEALTH
+    # ========================================
+    kafka:
+      enabled: true
+      timeout: 5000
+
+    # ========================================
+    # MONGODB HEALTH
+    # ========================================
+    mongo:
+      enabled: true
+      timeout: 3000
+
+    # ========================================
+    # ELASTICSEARCH HEALTH
+    # ========================================
+    elasticsearch:
+      enabled: true
+      timeout: 3000
+
+    # ========================================
+    # GRPC HEALTH
+    # ========================================
+    grpc:
+      enabled: true
+      timeout: 3000
+
+    # ========================================
+    # CUSTOM HEALTH INDICATORS
+    # ========================================
+    custom:
+      # Example custom indicator
+      payment-gateway:
+        enabled: true
+        timeout: 5000
+        properties:
+          url: "https://payment.example.com"
+          api-key: "${PAYMENT_API_KEY:}"
+

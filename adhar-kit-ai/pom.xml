@@ -14,9 +14,9 @@
     <description>AdharKit AI foundation with Spring AI and enterprise best practices</description>
 
     <properties>
-        <spring-ai.version>1.0.0-M3</spring-ai.version>
-        <openai.version>0.12.0</openai.version>
-        <langchain4j.version>0.34.0</langchain4j.version>
+        <spring-ai.version>1.0.0-M4</spring-ai.version>
+        <openai.version>0.18.0</openai.version>
+        <langchain4j.version>0.38.0</langchain4j.version>
         <!-- TODO: Increase to 0.80 once more tests are added -->
         <!-- Temporarily lowered to allow build while adding tests -->
         <jacoco.minimum.coverage>0.20</jacoco.minimum.coverage>
@@ -31,7 +31,16 @@
                 <enabled>false</enabled>
             </snapshots>
         </repository>
+        <repository>
+            <id>spring-snapshots</id>
+            <name>Spring Snapshots</name>
+            <url>https://repo.spring.io/snapshot</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
+        </repository>
     </repositories>
+
 
     <dependencies>
         <!-- Spring Boot Core -->

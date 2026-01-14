@@ -14,14 +14,19 @@
     <name>AdharKit gRPC</name>
     <description>gRPC services and utilities for the Adhar Microservices Platform</description>
     <properties>
-        <maven.compiler.source>24</maven.compiler.source>
-        <maven.compiler.target>24</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <grpc.version>1.58.0</grpc.version>
-        <protobuf.version>3.24.4</protobuf.version>
+        <grpc.version>1.60.0</grpc.version>
+        <protobuf.version>3.25.1</protobuf.version>
     </properties>
 
     <dependencies>
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-netty-shaded</artifactId>
@@ -41,7 +46,6 @@
             <groupId>io.grpc</groupId>
             <artifactId>grpc-services</artifactId>
             <version>${grpc.version}</version>
-            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>com.google.protobuf</groupId>
@@ -55,6 +59,13 @@
         </dependency>
     </dependencies>
 
+    <repositories>
+        <repository>
+            <id>projectlombok.org</id>
+            <url>https://projectlombok.org/edge-releases</url>
+        </repository>
+    </repositories>
+
     <build>
         <extensions>
             <extension>
@@ -64,6 +75,19 @@
             </extension>
         </extensions>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.xolstice.maven.plugins</groupId>
                 <artifactId>protobuf-maven-plugin</artifactId>

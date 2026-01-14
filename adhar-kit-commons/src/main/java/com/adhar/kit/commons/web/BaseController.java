@@ -247,6 +247,50 @@ public abstract class BaseController {
     }
 
     /**
+     * Logs incoming request from HttpServletRequest.
+     *
+     * @param request HTTP servlet request
+     * @param methodName controller method name
+     */
+    protected void logRequest(Object request, String methodName) {
+        // Framework-agnostic logging - just log the method name
+        log.info("Processing request - Method: {}", methodName);
+    }
+
+    /**
+     * Creates a successful ResponseEntity with data and message.
+     *
+     * @param data the response data
+     * @param message the success message
+     * @param <T> the data type
+     * @return ResponseEntity with API response
+     */
+    protected <T> org.springframework.http.ResponseEntity<ApiResponse<T>> success(T data, String message) {
+        return org.springframework.http.ResponseEntity.ok(ApiResponse.success(data, message));
+    }
+
+    /**
+     * Creates a successful ResponseEntity with data.
+     *
+     * @param data the response data
+     * @param <T> the data type
+     * @return ResponseEntity with API response
+     */
+    protected <T> org.springframework.http.ResponseEntity<ApiResponse<T>> success(T data) {
+        return org.springframework.http.ResponseEntity.ok(ApiResponse.success(data));
+    }
+
+    /**
+     * Creates a successful ResponseEntity with just a message.
+     *
+     * @param message the success message
+     * @return ResponseEntity with API response
+     */
+    protected org.springframework.http.ResponseEntity<ApiResponse<Void>> successMessage(String message) {
+        return org.springframework.http.ResponseEntity.ok(ApiResponse.success(message));
+    }
+
+    /**
      * Creates an error response with request context.
      *
      * @param headers request headers

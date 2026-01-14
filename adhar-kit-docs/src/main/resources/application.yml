@@ -1,0 +1,68 @@
+# Adhar Kit Docs - OpenAPI/Swagger Configuration
+# Comprehensive API documentation setup for enterprise microservices
+
+adhar:
+  docs:
+    enabled: true
+
+    # API Information
+    info:
+      title: "API Documentation"
+      version: "1.0.0"
+      description: "Microservice API Documentation"
+      terms-of-service: "https://example.com/terms"
+
+      # Contact Information
+      contact:
+        name: "API Support"
+        email: "api-support@example.com"
+        url: "https://example.com/support"
+
+      # License Information
+      license:
+        name: "Apache 2.0"
+        url: "https://www.apache.org/licenses/LICENSE-2.0"
+
+    # Server Configuration
+    servers:
+      - url: "http://localhost:8080"
+        description: "Local Development Server"
+      - url: "https://api-dev.example.com"
+        description: "Development Environment"
+      - url: "https://api.example.com"
+        description: "Production Environment"
+
+    # Security Configuration
+    security:
+      enabled: true
+      jwt-enabled: true
+      api-key-enabled: false
+      oauth2-enabled: false
+      basic-auth-enabled: false
+      api-key-header: "X-API-KEY"
+
+    # Swagger UI Configuration
+    swagger-ui:
+      enabled: true
+      path: "/swagger-ui.html"
+      config-url: "/v3/api-docs/swagger-config"
+      display-request-duration: true
+      show-extensions: true
+      show-common-extensions: true
+      default-models-expand-depth: "1"
+      default-model-expand-depth: "1"
+      doc-expansion: "none"
+      filter: false
+      show-request-headers: false
+
+    # Documentation Paths
+    paths:
+      api-docs: "/v3/api-docs"
+      api-docs-yaml: "/v3/api-docs.yaml"
+      packages-to-scan:
+        - "com.example.api"
+      paths-to-match:
+        - "/api/**"
+      paths-to-exclude:
+        - "/api/internal/**"
+

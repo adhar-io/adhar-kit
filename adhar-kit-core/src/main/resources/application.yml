@@ -1,0 +1,45 @@
+# Adhar Kit Core Configuration
+# Framework-agnostic core utilities
+
+adhar:
+  core:
+    enabled: true
+
+    # Async Configuration
+    async:
+      enabled: true
+      pool-size: 10
+      max-pool-size: 50
+      queue-capacity: 100
+      thread-name-prefix: "adhar-async-"
+      keep-alive-seconds: 60
+
+    # Retry Configuration
+    retry:
+      enabled: true
+      max-attempts: 3
+      initial-delay: 1000
+      max-delay: 30000
+      backoff-multiplier: 2.0
+
+    # Circuit Breaker Configuration
+    circuit-breaker:
+      enabled: true
+      failure-threshold: 5
+      success-threshold: 2
+      timeout-duration: 60000
+      half-open-wait-duration: 30000
+
+    # Cache Configuration
+    cache:
+      enabled: true
+      max-size: 1000
+      ttl: 300
+      tti: 180
+
+    # Validation Configuration
+    validation:
+      enabled: true
+      fail-fast: true
+      validate-on-startup: true
+
