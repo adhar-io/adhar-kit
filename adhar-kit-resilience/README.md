@@ -285,7 +285,7 @@ Access metrics via:
 
 ## Dependencies
 
-- Spring Boot 3.x
+- Spring Boot 4.x
 - Resilience4j 2.1.0
 - Spring AOP
 - Micrometer Core

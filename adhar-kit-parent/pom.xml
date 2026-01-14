@@ -13,7 +13,7 @@
     <version>0.0.1-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>AdharKit Parent</name>
-    <description>Production-ready parent POM for all Adhar Kit modules - Enterprise microservices platform (Java 21 LTS + Spring Boot 3.4)</description>
+    <description>Production-ready parent POM for all Adhar Kit modules - Enterprise microservices platform (Java 25 LTS + Spring Boot 3.4)</description>
     <url>https://github.com/adhar-platform/adhar-kit</url>
 
     <organization>
@@ -61,7 +61,7 @@
         <!-- ===================================================================== -->
         <!-- Java & Encoding Configuration                                         -->
         <!-- ===================================================================== -->
-        <java.version>21</java.version>
+        <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.compiler.source>${java.version}</maven.compiler.source>
@@ -77,6 +77,12 @@
         <!-- ===================================================================== -->
         <!-- Lombok - Java 25 compatible edge version -->
         <lombok.version>edge-SNAPSHOT</lombok.version>
+
+        <!-- Spring Boot components (explicit versions for Spring Boot 3.4) -->
+        <spring-boot.version>3.4.1</spring-boot.version>
+
+        <!-- Testing dependencies -->
+        <rest-assured.version>5.4.0</rest-assured.version>
 
         <!-- ===================================================================== -->
         <!-- AI & Machine Learning (v1.1.0+)                                       -->
@@ -162,6 +168,65 @@
                 <version>${adhar-kit.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+
+            <!-- ================================================================= -->
+            <!-- Spring Boot Components                                            -->
+            <!-- ================================================================= -->
+            <!-- Explicit versions for Spring Boot 3.4 components -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-aop</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-web</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-test</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-actuator</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-data-jpa</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-security</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-validation</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-configuration-processor</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+
+            <!-- ================================================================= -->
+            <!-- Testing Dependencies                                              -->
+            <!-- ================================================================= -->
+            <dependency>
+                <groupId>io.rest-assured</groupId>
+                <artifactId>rest-assured</artifactId>
+                <version>${rest-assured.version}</version>
             </dependency>
 
             <!-- ================================================================= -->
@@ -465,9 +530,9 @@
                                     <requireMavenVersion>
                                         <version>[3.8,)</version>
                                     </requireMavenVersion>
-                                    <!-- Require Java 21+ -->
+                                    <!-- Require Java 25+ -->
                                     <requireJavaVersion>
-                                        <version>[21,)</version>
+                                        <version>[25,)</version>
                                     </requireJavaVersion>
                                 </rules>
                             </configuration>

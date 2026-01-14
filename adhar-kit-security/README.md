@@ -15,8 +15,8 @@ A comprehensive security starter for enterprise applications based on Spring Sec
 
 ### Prerequisites
 
-- Java 21 or higher
-- Spring Boot 3.3.0 or higher
+- Java 25 or higher
+- Spring Boot 4.0.0 or higher
 
 ### Installation
 

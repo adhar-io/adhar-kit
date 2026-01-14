@@ -1,8 +1,8 @@
 # 🏆 Adhar Kit - Enterprise Microservices Toolkit
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/adhar-platform/adhar-kit)
-[![Java](https://img.shields.io/badge/Java-21_LTS-orange.svg)](https://openjdk.org/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4-green.svg)](https://spring.io/projects/spring-boot)
+[![Java](https://img.shields.io/badge/Java-25_LTS-orange.svg)](https://openjdk.org/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-green.svg)](https://spring.io/projects/spring-boot)
 [![Quarkus](https://img.shields.io/badge/Quarkus-3.6+-blue.svg)](https://quarkus.io/)
 [![Micronaut](https://img.shields.io/badge/Micronaut-4.2+-purple.svg)](https://micronaut.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -62,9 +62,9 @@
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Java 21 LTS or later
+- Java 25 LTS or later
 - Maven 3.9+
-- Spring Boot 3.4+ / Quarkus 3.6+ / Micronaut 4.2+
+- Spring Boot 4.0+ / Quarkus 3.6+ / Micronaut 4.2+
 
 ### Installation
 

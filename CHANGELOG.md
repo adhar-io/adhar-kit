@@ -12,10 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Major Achievement:** This release includes ALL features originally planned for v1.1.0, v1.2.0, and v2.0.0!
 
 ### Technology Stack
-- **Java:** 21 LTS (Baseline)
-- **Spring Boot:** 3.4.1 (GA)
-- **Spring Framework:** 6.2.1
-- **Spring Cloud:** 2024.0.0
+- **Java:** 25 LTS (Baseline)
+- **Spring Boot:** 4.0.0 (GA)
+- **Spring Framework:** 7.0.0
+- **Spring Cloud:** 2025.0.0
 - **Quarkus:** 3.6+ (Full support)
 - **Micronaut:** 4.2+ (Full support)
 

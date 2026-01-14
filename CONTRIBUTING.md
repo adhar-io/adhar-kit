@@ -108,7 +108,7 @@ What actually happens.
 
 **Environment:**
 - Adhar Kit Version: 1.0.0
-- Framework: Spring Boot 3.2.0
+- Framework: Spring Boot 4.0.0
 - Java Version: 25
 - OS: macOS 14
 

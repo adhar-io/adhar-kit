@@ -21,7 +21,7 @@ A Bill of Materials (BOM) is a Maven POM that centralizes dependency version man
 ✅ **Dependency Conflict Resolution** - Prevents version conflicts  
 ✅ **Easy Upgrades** - Update BOM version to upgrade all modules  
 ✅ **Production Tested** - All versions are tested together  
-✅ **Java 21 LTS Compatible** - Tested with Java 21 LTS
+✅ **Java 25 LTS Compatible** - Tested with Java 25 LTS
 
 ---
 
@@ -155,7 +155,7 @@ Add the BOM to your project's `pom.xml`:
 
 | Dependency | Version | Notes |
 |------------|---------|-------|
-| Spring Boot | 3.4.1 | Java 21 LTS compatible (GA) |
+| Spring Boot | 4.0.0 | Java 25 LTS compatible (GA) |
 | Spring Framework | 6.2.1 | Included with Boot |
 | Spring Cloud | 2024.0.0 | Latest release |
 | Spring Kafka | 3.3.0 | Kafka integration |
@@ -165,7 +165,7 @@ Add the BOM to your project's `pom.xml`:
 
 | Dependency | Version | Notes |
 |------------|---------|-------|
-| Lombok | 1.18.34 | Java 21 compatible |
+| Lombok | 1.18.34 | Java 25 compatible |
 | MapStruct | 1.6.0 | Object mapping |
 | Jakarta Persistence | 3.2.0 | JPA 3.2 |
 | Jakarta Validation | 3.1.0 | Bean Validation |
@@ -220,7 +220,7 @@ Add the BOM to your project's `pom.xml`:
 | Dependency | Version | Notes |
 |------------|---------|-------|
 | Testcontainers | 1.20.4 | Docker containers |
-| Mockito | 5.15.2 | Java 21 compatible |
+| Mockito | 5.15.2 | Java 25 compatible |
 | Byte Buddy | 1.17.0 | Java agent |
 | WireMock | 3.10.0 | HTTP mocking |
 | Awaitility | 4.2.2 | Async testing |
@@ -236,7 +236,7 @@ Add the BOM to your project's `pom.xml`:
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.1</version>
+        <version>4.0.0</version>
     </parent>
 
     <dependencyManagement>
@@ -678,7 +678,7 @@ Update BOM version to get all module updates:
 ✅ **23 Production-Ready Modules** - Complete microservices toolkit  
 ✅ **Centralized Version Management** - No version conflicts  
 ✅ **Java 25 Compatible** - Latest LTS support  
-✅ **Spring Boot 3.4+** - Modern Spring ecosystem  
+✅ **Spring Boot 4.0+** - Modern Spring ecosystem  
 ✅ **Cloud Native** - Kubernetes, Dapr ready  
 ✅ **AI Ready** - Spring AI, LangChain4j  
 ✅ **Analytics Ready** - PostHog integration  
