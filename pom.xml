@@ -6,16 +6,15 @@
 
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
-
     <name>Adhar Kit</name>
     <description>Enterprise-grade microservices platform toolkit with comprehensive support for resilience, observability, and cloud-native patterns</description>
-    <url>https://github.com/adhar-platform/adhar-kit</url>
+    <url>https://github.com/adhar-io/adhar-kit</url>
     <inceptionYear>2025</inceptionYear>
 
     <organization>
-        <name>Adhar Platform Team</name>
+        <name>Adhar Platform</name>
         <url>https://adhar.io</url>
     </organization>
 
@@ -30,8 +29,8 @@
     <developers>
         <developer>
             <id>adhar-team</id>
-            <name>Adhar Platform Team</name>
-            <email>dev@adhar-platform.io</email>
+            <name>Adhar Platform</name>
+            <email>contact@adhar.io</email>
             <organization>Adhar Platform</organization>
             <roles>
                 <role>architect</role>
@@ -41,20 +40,20 @@
     </developers>
 
     <scm>
-        <connection>scm:git:git://github.com/adhar-platform/adhar-kit.git</connection>
-        <developerConnection>scm:git:ssh://github.com:adhar-platform/adhar-kit.git</developerConnection>
-        <url>https://github.com/adhar-platform/adhar-kit/tree/main</url>
+        <connection>scm:git:git://github.com/adhar-io/adhar-kit.git</connection>
+        <developerConnection>scm:git:ssh://github.com:adhar-io/adhar-kit.git</developerConnection>
+        <url>https://github.com/adhar-io/adhar-kit/tree/main</url>
         <tag>HEAD</tag>
     </scm>
 
     <issueManagement>
         <system>GitHub Issues</system>
-        <url>https://github.com/adhar-platform/adhar-kit/issues</url>
+        <url>https://github.com/adhar-io/adhar-kit/issues</url>
     </issueManagement>
 
     <ciManagement>
         <system>GitHub Actions</system>
-        <url>https://github.com/adhar-platform/adhar-kit/actions</url>
+        <url>https://github.com/adhar-io/adhar-kit/actions</url>
     </ciManagement>
 
     <modules>

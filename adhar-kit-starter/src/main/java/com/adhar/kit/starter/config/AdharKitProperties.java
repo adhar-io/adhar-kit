@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * Configuration properties for Adhar Kit Starter.
  *
- * @author Adhar Platform Team
+ * @author Tapas Jena
  * @since 1.0.0
  */
 @Data

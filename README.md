@@ -1,5 +1,6 @@
 # 🏆 Adhar Kit - Enterprise Microservices Toolkit
 
+---
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/adhar-platform/adhar-kit)
 [![Java](https://img.shields.io/badge/Java-25_LTS-orange.svg)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-green.svg)](https://spring.io/projects/spring-boot)
@@ -9,53 +10,223 @@
 [![Build](https://img.shields.io/badge/Build-Passing-success.svg)](https://github.com/adhar-platform/adhar-kit)
 [![Coverage](https://img.shields.io/badge/Coverage-80%25+-brightgreen.svg)](https://github.com/adhar-platform/adhar-kit)
 
-**A comprehensive, framework-agnostic enterprise microservices platform for Spring Boot, Quarkus, and Micronaut.**
-
-> **Write once, run anywhere. Build anything.**
-
----
+> **A comprehensive, framework-agnostic enterprise microservices platform for Spring Boot, Quarkus, and Micronaut.**
 
 ## 📖 Overview
 
-**Adhar Kit** is a complete enterprise microservices platform that works seamlessly across **Spring Boot**, **Quarkus**, and **Micronaut**. It provides **22 production-ready modules** covering all aspects of modern cloud-native applications.
+**Adhar Kit** is a complete enterprise microservices platform that works seamlessly across **Spring Boot**, **Quarkus**, and **Micronaut**. It provides **21 production-ready modules** covering all aspects of modern cloud-native applications.
 
-### 🌟 Key Highlights
+<table>
+<tr>
+<td width="50%">
 
-**Complete Platform:**
-- ✅ **22 Production Modules** - Everything you need for enterprise microservices
-- ✅ **Framework Agnostic** - Works identically on Spring Boot 4.0, Quarkus 3.6+, Micronaut 4.2+
-- ✅ **Java 25 LTS** - Built on the latest long-term support Java version
-- ✅ **80%+ Coverage** - Comprehensive test coverage enforced
-- ✅ **100% JavaDoc** - Complete API documentation
+### 🌟 Complete Platform
 
-**Advanced Capabilities:**
-- 🤖 **Multi-Model AI** - OpenAI, Claude, Gemini, Llama support with streaming
-- ☁️ **Multi-Cloud** - Native AWS, Azure, GCP SDK integration
-- 📊 **GraphQL** - Modern API with subscriptions and federation
-- 🚀 **Native Image** - GraalVM compilation for <100ms startup
-- 🔄 **Service Mesh** - Istio and Linkerd integration
-- 📈 **Streaming** - Apache Flink and Kafka Streams for real-time analytics
-- 🔒 **Enterprise Security** - JWT, OAuth2, RBAC, MFA support
-- 📡 **OpenTelemetry** - Advanced observability with auto-instrumentation
+| Feature | Status |
+|---------|--------|
+| Production Modules | **21 Ready** |
+| Framework Support | Spring Boot 4.0, Quarkus 3.6+, Micronaut 4.2+ |
+| Java Version | **25 LTS** |
+| Test Coverage | **80%+** |
+| API Documentation | **100% JavaDoc** |
+
+</td>
+<td width="50%">
+
+### 🚀 Advanced Capabilities
+
+| Capability | Description |
+|------------|-------------|
+| 🤖 **AI/ML** | OpenAI, Claude, Gemini, Llama |
+| ☁️ **Multi-Cloud** | AWS, Azure, GCP native SDKs |
+| 📊 **GraphQL** | Subscriptions & Federation |
+| 🔄 **Service Mesh** | Istio & Linkerd |
+| 📈 **Streaming** | Flink & Kafka Streams |
+| 🔒 **Security** | JWT, OAuth2, RBAC, MFA |
+| 📡 **Observability** | OpenTelemetry auto-instrumentation |
+
+</td>
+</tr>
+</table>
 
 ### Why Adhar Kit?
 
-**Accelerated Delivery:**
-- Originally planned as 3 releases over 9 months (v1.1, v1.2, v2.0)
-- **ALL features delivered in v1.0.0** - No waiting for future releases!
-- Production-ready from day 1
+#### 🚀 Seamless Platform Integration
 
-**Framework Freedom:**
-- Write code once, run on any framework
-- Switch frameworks without rewriting application code
-- Framework-native implementations for optimal performance
+**Unlock the Full Power of Adhar Platform:**
 
-**Enterprise Grade:**
-- Battle-tested resilience patterns
-- Comprehensive security features
-- Multi-tenancy and soft-delete support
-- Audit trails and compliance-ready
-- Service mesh and cloud-native ready
+Adhar Kit is the developer toolkit that bridges your applications to the **Adhar Platform** - a comprehensive cloud-native infrastructure that handles the complexity of modern distributed systems so you can focus on building business value.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           YOUR APPLICATION                                   │
+│                     (Business Logic & Features)                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                            ADHAR KIT                                         │
+│           (**21 Modules - Single Facade - Framework Agnostic)                  │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐   │
+│  │ Logging │ │ Metrics │ │ Tracing │ │  Cache  │ │Security │ │   AI    │   │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                          ADHAR PLATFORM                                      │
+│     (Managed Infrastructure - Service Mesh - Observability - Security)       │
+│  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐    │
+│  │  Kubernetes   │ │     Dapr      │ │  Prometheus   │ │    Istio      │    │
+│  │   Cluster     │ │   Runtime     │ │   + Grafana   │ │  Service Mesh │    │
+│  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘    │
+│  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐    │
+│  │    Jaeger     │ │   Vault       │ │    Kafka      │ │   ArgoCD      │    │
+│  │   Tracing     │ │   Secrets     │ │   Streaming   │ │    GitOps     │    │
+│  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**How It Works Together:**
+
+| What You Need | Adhar Kit Provides | Adhar Platform Handles |
+|---------------|--------------------|-----------------------|
+| **Observability** | Simple `adhar.getMetrics()` API | Prometheus, Grafana dashboards, alerting |
+| **Distributed Tracing** | `adhar.getTracing().executeInSpan()` | Jaeger collection, visualization, analysis |
+| **Service Communication** | `adhar.getDapr().invokeService()` | Dapr sidecar, mTLS, retries, circuit breaking |
+| **Secret Management** | `adhar.getSecurity().getSecret()` | HashiCorp Vault integration, rotation |
+| **Event Streaming** | `adhar.getMessaging().publish()` | Kafka clusters, partitioning, replication |
+| **AI/ML Inference** | `adhar.getAi().chat()` | Model hosting, GPU scaling, load balancing |
+| **Configuration** | `adhar.getConfig().get()` | ConfigMaps, dynamic refresh, versioning |
+
+**The Adhar Kit Advantage:**
+
+```java
+// WITHOUT Adhar Kit - You manage everything manually
+@Service
+public class OrderService {
+    @Autowired private MeterRegistry meterRegistry;           // Metrics
+    @Autowired private Tracer tracer;                         // Tracing  
+    @Autowired private CircuitBreakerRegistry cbRegistry;     // Resilience
+    @Autowired private RedisTemplate<String, Object> redis;   // Caching
+    @Autowired private KafkaTemplate<String, Object> kafka;   // Messaging
+    @Autowired private DaprClient daprClient;                 // Dapr
+    @Autowired private VaultTemplate vault;                   // Secrets
+    // ... 15 more dependencies to wire up
+    
+    public Order createOrder(OrderRequest request) {
+        // 50+ lines of boilerplate for each operation
+    }
+}
+
+// WITH Adhar Kit - One facade, full platform power
+@Service  
+public class OrderService {
+    private final AdharFacade adhar = AdharFacade.getInstance();
+    
+    public Order createOrder(OrderRequest request) {
+        return adhar.getTracing().executeInSpan("create-order", () ->
+            adhar.getCircuitBreaker().execute("order-service", () -> {
+                adhar.getMetrics().increment("orders.created");
+                Order order = processOrder(request);
+                adhar.getMessaging().publish("order-events", order);
+                return order;
+            })
+        );
+    }
+}
+```
+
+**Platform-Aware Intelligence:**
+
+Adhar Kit automatically detects and adapts to your deployment environment:
+
+```java
+// Your code stays the same - Adhar Kit handles the environment
+AdharFacade adhar = AdharFacade.getInstance();
+
+// Automatically uses the right infrastructure:
+// ✅ Local Dev    → In-memory cache, console logging, mock services
+// ✅ Docker       → Redis cache, JSON logging, containerized services  
+// ✅ Kubernetes   → Distributed cache, structured logging, K8s services
+// ✅ Adhar Platform → Full platform integration with Dapr, Istio, Vault
+```
+
+**What This Means For You:**
+
+- 🎯 **Focus on Business Logic** - Stop wrestling with infrastructure code
+- 🔌 **Instant Platform Integration** - Connect to Adhar Platform services with one line of code
+- 🚀 **Faster Time to Production** - Go from development to deployment in hours, not weeks
+- 🔧 **Zero Configuration Drift** - Same code works identically across all environments
+- 📈 **Built-in Best Practices** - Enterprise patterns (resilience, security, observability) included by default
+- 🔄 **Seamless Upgrades** - Platform improvements automatically benefit your applications
+
+#### 🔄 Framework Freedom
+
+**True Portability - Not Just a Promise:**
+
+Most "framework-agnostic" libraries still tie you to specific implementations. Adhar Kit is different:
+
+| Capability | Spring Boot | Quarkus | Micronaut |
+|------------|-------------|---------|-----------|
+| Core APIs | ✅ Identical | ✅ Identical | ✅ Identical |
+| Configuration | ✅ Native YAML | ✅ Native Properties | ✅ Native YAML |
+| DI Integration | ✅ Spring DI | ✅ ArC CDI | ✅ Micronaut DI |
+| Native Image | ✅ GraalVM | ✅ GraalVM | ✅ GraalVM |
+| Performance | ✅ Optimized | ✅ Optimized | ✅ Optimized |
+
+**Real-world benefits:**
+- **Migrate without rewriting** - Switch from Spring Boot to Quarkus? Your Adhar Kit code stays the same
+- **Team flexibility** - Different teams can use different frameworks while sharing the same toolkit
+- **Future-proof architecture** - New framework emerges? We'll support it without breaking your code
+- **Framework-native performance** - We don't use lowest-common-denominator abstractions; each framework gets optimized implementations
+- **Consistent developer experience** - Learn once, apply everywhere
+
+```java
+// This exact code works identically on Spring Boot, Quarkus, AND Micronaut
+AdharFacade adhar = AdharFacade.getInstance();
+adhar.getCache().put("users", "123", user);           // Same API
+adhar.getMessaging().publish("events", event);         // Same API
+adhar.getCircuitBreaker().execute("service", call);    // Same API
+```
+
+#### 🏢 Enterprise Grade
+
+**Built for the Real World - Not Just Demos:**
+
+Enterprise applications have requirements that hobby projects don't. Adhar Kit addresses them all:
+
+**🔒 Security & Compliance:**
+- **JWT & OAuth2** - Industry-standard authentication with refresh token rotation
+- **RBAC & ABAC** - Fine-grained role-based and attribute-based access control
+- **Audit Logging** - Immutable audit trails for every sensitive operation
+- **Data Encryption** - At-rest and in-transit encryption with key rotation support
+- **PII Protection** - Automatic masking of sensitive data in logs
+- **Compliance Ready** - SOC2, HIPAA, GDPR patterns built-in
+
+**⚡ Resilience & Reliability:**
+- **Circuit Breakers** - Prevent cascade failures with configurable thresholds
+- **Retry Policies** - Exponential backoff with jitter for transient failures
+- **Rate Limiting** - Protect services from abuse and thundering herds
+- **Bulkhead Isolation** - Isolate failures to prevent system-wide impact
+- **Timeout Management** - Never let slow dependencies hang your application
+- **Graceful Degradation** - Fallback strategies for every critical path
+
+**🏗️ Multi-Tenancy & Data Management:**
+- **Tenant Isolation** - Row-level, schema-level, or database-level isolation
+- **Soft Delete** - Never lose data; mark as deleted with full recovery support
+- **Optimistic Locking** - Prevent concurrent modification conflicts
+- **Change Data Capture** - Track every change for audit and sync purposes
+- **Database Migrations** - Version-controlled schema evolution
+
+**☁️ Cloud-Native & Service Mesh:**
+- **Kubernetes Native** - ConfigMaps, Secrets, auto-scaling, service discovery
+- **Istio & Linkerd** - Full service mesh integration with mTLS
+- **Distributed Tracing** - OpenTelemetry with automatic context propagation
+- **Health Checks** - Liveness, readiness, and startup probes
+- **Prometheus Metrics** - Production-grade observability out of the box
+- **Horizontal Scaling** - Stateless design for unlimited scalability
+
+**📊 Advanced Capabilities:**
+- **Multi-Model AI** - OpenAI, Claude, Gemini, Llama with automatic failover
+- **Real-time Analytics** - Apache Flink and Kafka Streams integration
+- **GraphQL APIs** - Modern API design with subscriptions and federation
+- **Event Sourcing** - Full event-driven architecture support
+- **CQRS Patterns** - Command-query separation for complex domains
 
 ---
 
@@ -81,12 +252,12 @@ Add the starter dependency to your project:
 ### Simple Example
 
 ```java
-import com.adhar.kit.starter.AdharKitFacade;
+import com.adhar.kit.starter.AdharFacade;
 
 @Service
 public class OrderService {
-    // ONE facade - access ALL 22 modules!
-    private final AdharKitFacade adhar = AdharKitFacade.getInstance();
+    // ONE facade - access ALL 21 modules!
+    private final AdharFacade adhar = AdharFacade.getInstance();
     
     public Order createOrder(OrderRequest request) {
         // Logging & Metrics
@@ -115,43 +286,51 @@ public class OrderService {
 
 ---
 
-## 📦 All 22 Modules
+## 📦 All 21 Modules
 
-### TIER-1: Core Foundation (6 modules)
-
-| Module | Description | Key Features |
-|--------|-------------|--------------|
-| **commons** | Framework detection & base utilities | Auto-detection, logging foundation, common patterns |
-| **resilience** | Fault tolerance patterns | Circuit breaker, retry, rate limiter, bulkhead, time limiter |
-| **metrics** | Application metrics | Counters, timers, gauges, histograms, percentiles |
-| **tracing** | Distributed tracing | Spans, context propagation, correlation IDs, baggage |
-| **logging** | Structured logging | MDC context, JSON format, log levels, sensitive data masking |
-| **cache** | Distributed caching | Local & distributed, L1/L2 cache, eviction policies, TTL |
-
-### TIER-2: Integration & Communication (5 modules)
+<details open>
+<summary><b>🔧 TIER-1: Core Foundation (6 modules)</b></summary>
 
 | Module | Description | Key Features |
-|--------|-------------|--------------|
-| **health** | Health monitoring | K8s liveness/readiness probes, custom health checks |
-| **test-commons** | Integration testing | Testcontainers (Postgres, MongoDB, Redis, Kafka) |
-| **messaging** | Event-driven messaging | Kafka, RabbitMQ, Pub/Sub, DLQ, retry policies |
-| **docs** | API documentation | OpenAPI 3.0, Swagger UI, auto-generation, examples |
-| **grpc** | Service communication | Unary calls, streaming, metadata, interceptors, deadlines |
+|:-------|:------------|:-------------|
+| 🧩 **commons** | Framework detection & base utilities | Auto-detection, logging foundation, common patterns |
+| 🛡️ **resilience** | Fault tolerance patterns | Circuit breaker, retry, rate limiter, bulkhead, time limiter |
+| 📊 **metrics** | Application metrics | Counters, timers, gauges, histograms, percentiles |
+| 🔍 **tracing** | Distributed tracing | Spans, context propagation, correlation IDs, baggage |
+| 📝 **logging** | Structured logging | MDC context, JSON format, log levels, sensitive data masking |
+| 💾 **cache** | Distributed caching | Local & distributed, L1/L2 cache, eviction policies, TTL |
 
-### TIER-3: Enterprise & Advanced (11 modules)
+</details>
+
+<details open>
+<summary><b>🔌 TIER-2: Integration & Communication (5 modules)</b></summary>
 
 | Module | Description | Key Features |
-|--------|-------------|--------------|
-| **persistence** | Data access layer | JPA, MongoDB, transactions, multi-tenancy, soft delete |
-| **security** | Authentication & authorization | JWT, OAuth2, RBAC, password encoding, session management |
-| **config** | Configuration management | Runtime refresh, type-safe properties, encrypted values |
-| **starter** | Unified integration | Single facade for all modules, simplified development |
-| **ai** | AI/LLM integration | Chat completions, embeddings, semantic search, image generation |
-| **analytics** | Business analytics | Event tracking, funnels, A/B testing, user behavior analysis |
-| **kubernetes** | K8s native integration | ConfigMaps, Secrets, pod scaling, service discovery |
-| **dapr** | Distributed runtime | State management, Pub/Sub, service invocation, bindings |
-| **mers** | Enterprise patterns | DBS-specific integration and patterns |
-| **core** | Utility library | ID generation, JSON serialization, retry logic, async execution |
+|:-------|:------------|:-------------|
+| 💚 **health** | Health monitoring | K8s liveness/readiness probes, custom health checks |
+| 🧪 **test-commons** | Integration testing | Testcontainers (Postgres, MongoDB, Redis, Kafka) |
+| 📨 **messaging** | Event-driven messaging | Kafka, RabbitMQ, Pub/Sub, DLQ, retry policies |
+| 📖 **docs** | API documentation | OpenAPI 3.0, Swagger UI, auto-generation, examples |
+| 📡 **grpc** | Service communication | Unary calls, streaming, metadata, interceptors, deadlines |
+
+</details>
+
+<details open>
+<summary><b>🏢 TIER-3: Enterprise & Advanced (10 modules)</b></summary>
+
+| Module | Description | Key Features |
+|:-------|:------------|:-------------|
+| 🗄️ **persistence** | Data access layer | JPA, MongoDB, transactions, multi-tenancy, soft delete |
+| 🔐 **security** | Authentication & authorization | JWT, OAuth2, RBAC, password encoding, session management |
+| ⚙️ **config** | Configuration management | Runtime refresh, type-safe properties, encrypted values |
+| 🚀 **starter** | Unified integration | Single facade for all modules, simplified development |
+| 🤖 **ai** | AI/LLM integration | Chat completions, embeddings, semantic search, image generation |
+| 📈 **analytics** | Business analytics | Event tracking, funnels, A/B testing, user behavior analysis |
+| ☸️ **kubernetes** | K8s native integration | ConfigMaps, Secrets, pod scaling, service discovery |
+| 🔄 **dapr** | Distributed runtime | State management, Pub/Sub, service invocation, bindings |
+| 🛠️ **core** | Utility library | ID generation, JSON serialization, retry logic, async execution |
+
+</details>
 
 ---
 
@@ -162,7 +341,7 @@ public class OrderService {
 ```java
 @Service
 public class PaymentService {
-    private final AdharKitFacade adhar = AdharKitFacade.getInstance();
+    private final AdharFacade adhar = AdharFacade.getInstance();
     
     public Payment processPayment(PaymentRequest request) {
         // Add context to all logs in this request
@@ -197,7 +376,7 @@ public class PaymentService {
 @RestController
 @RequestMapping("/api/products")
 public class ProductController {
-    private final AdharKitFacade adhar = AdharKitFacade.getInstance();
+    private final AdharFacade adhar = AdharFacade.getInstance();
     
     @PostMapping
     public Product create(@RequestBody ProductRequest request) {
@@ -246,7 +425,7 @@ public class ProductController {
 ```java
 @Service
 public class SupportBotService {
-    private final AdharKitFacade adhar = AdharKitFacade.getInstance();
+    private final AdharFacade adhar = AdharFacade.getInstance();
     private final Map<String, List<String>> conversations = new ConcurrentHashMap<>();
     
     public String chat(String sessionId, String userMessage) {
@@ -671,13 +850,20 @@ spec:
 
 **✅ Recommended:**
 ```java
-// Single import, access all modules
-private final AdharKitFacade adhar = AdharKitFacade.getInstance();
+// Single import, access all modules via injection
+@Service
+public class OrderService {
+    private final AdharFacade adhar;
+    
+    public OrderService(AdharFacade adhar) {
+        this.adhar = adhar;
+    }
 
-public void processOrder() {
-    adhar.getLogging().info("Processing order");
-    adhar.getMetrics().increment("orders");
-    // ... use any of the 22 modules
+    public void processOrder() {
+        adhar.getLogging().info("Processing order");
+        adhar.getMetrics().increment("orders");
+        // ... use any of the 21 modules
+    }
 }
 ```
 
@@ -687,7 +873,7 @@ public void processOrder() {
 private final LoggingFacade log = LoggingFacade.getLogger(...);
 private final MetricsFacade metrics = MetricsFacade.getInstance();
 private final TracingFacade tracing = TracingFacade.getInstance();
-// ... 19 more facades
+// ... 18 more facades
 ```
 
 ### 2. Combine Modules for Powerful Patterns
@@ -827,7 +1013,7 @@ void setup() {
 @Test
 void testWithMocks() {
     // Adhar Kit facades are mockable
-    AdharKitFacade adhar = mock(AdharKitFacade.class);
+    AdharFacade adhar = mock(AdharFacade.class);
     when(adhar.getAi().chat("test")).thenReturn("mocked response");
 }
 ```
@@ -945,8 +1131,8 @@ This project is licensed under the **Apache License 2.0** - see the [LICENSE](LI
 
 ### Version 1.0.0 ✅ (Current - November 2025 - Production Ready)
 
-**All 22 Core Modules Complete:**
-- ✅ All 22 modules production-ready
+**All 21 Core Modules Complete:**
+- ✅ All 21 modules production-ready
 - ✅ Full Spring Boot 4.0, Quarkus 3.6+, and Micronaut 4.2+ support
 - ✅ Comprehensive documentation and real-world examples
 - ✅ 100% framework parity across all modules
@@ -1012,7 +1198,7 @@ Special thanks to:
 
 ## 📊 Project Statistics
 
-- **22 Modules** - Complete enterprise platform coverage
+- **21 Modules** - Complete enterprise platform coverage
 - **3 Frameworks** - Spring Boot, Quarkus, Micronaut support
 - **100% Feature Parity** - All modules work identically across frameworks
 - **Production-Ready** - Battle-tested in enterprise environments

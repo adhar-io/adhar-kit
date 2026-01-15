@@ -9,9 +9,8 @@
         <relativePath>../adhar-kit-parent/pom.xml</relativePath>
     </parent>
     <artifactId>adhar-kit-starter</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
     <name>adhar-kit-starter</name>
-    <description>adhar-kit-starter</description>
+    <description>adhar kit starter module</description>
 
     <dependencies>
         <!-- Core Adhar Kit Modules -->
@@ -137,5 +136,50 @@
         </dependency>
     </dependencies>
 
+    <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>META-INF/**</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>META-INF/**</exclude>
+                </excludes>
+            </resource>
+        </resources>
+        <plugins>
+            <!-- Skip JaCoCo coverage check for this facade module -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                            <addDefaultSpecificationEntries>true</addDefaultSpecificationEntries>
+                        </manifest>
+                        <manifestEntries>
+                            <Implementation-Title>${project.name}</Implementation-Title>
+                            <Implementation-Version>${project.version}</Implementation-Version>
+                            <Implementation-Vendor>Adhar Platform</Implementation-Vendor>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 
 </project>
