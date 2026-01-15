@@ -11,7 +11,7 @@ import jakarta.annotation.PostConstruct;
  * Auto-configuration for Adhar Kit Starter.
  * Aggregates all Adhar Kit modules.
  *
- * @author Adhar Platform Team
+ * @author Tapas Jena
  * @since 1.0.0
  */
 @Slf4j
@@ -30,11 +30,11 @@ public class AdharKitAutoConfiguration {
     public void init() {
         log.info("╔═══════════════════════════════════════════════════════════════╗");
         log.info("║                                                               ║");
-        log.info("║              ⚡ ADHAR KIT INITIALIZED ⚡                       ║");
+        log.info("║              ⚡ ADHAR KIT INITIALIZED ⚡                        ║");
         log.info("║                                                               ║");
-        log.info("║  Enterprise Microservices Framework                          ║");
+        log.info("║  Enterprise Microservices Framework                           ║");
         log.info("║  Version: 1.0.0-SNAPSHOT                                      ║");
-        log.info("║  Profile: {}                                             ║",
+        log.info("║  Profile: {}                                                  ║",
                 String.format("%-42s", properties.getProfile()));
         log.info("║                                                               ║");
         log.info("╠═══════════════════════════════════════════════════════════════╣");
