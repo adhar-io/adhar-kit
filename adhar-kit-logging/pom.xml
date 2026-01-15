@@ -13,7 +13,7 @@
     <artifactId>adhar-kit-logging</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>adhar-kit-logging</name>
-    <description>AdharKit Logging Starter for standardized enterprise logging (Java 25/Spring Boot 4.0+)</description>
+    <description>AdharKit Logging Starter for standardized enterprise logging (Java 25 LTS/Spring Boot 4.0+)</description>
 
     <properties>
         <java.version>25</java.version>

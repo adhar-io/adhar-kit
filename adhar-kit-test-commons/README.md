@@ -1,8 +1,24 @@
-# Adhar Kit Test Commons
+# 🧪 Adhar Kit Test Commons - Enterprise Testing Utilities
+
+**Comprehensive testing utilities for microservices**
+
+[![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.java.net/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0+-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Quarkus](https://img.shields.io/badge/Quarkus-3.x-blue.svg)](https://quarkus.io/)
+[![Micronaut](https://img.shields.io/badge/Micronaut-4.x-blue.svg)](https://micronaut.io/)
+[![Testcontainers](https://img.shields.io/badge/Testcontainers-1.19+-blue.svg)](https://www.testcontainers.org/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+**Version:** 1.0.0  
+**Status:** ✅ Production Ready
+
+---
+
+## 📖 Overview
 
 Comprehensive testing utilities and base classes for microservices integration and unit testing.
 
-## Features
+## 🎯 Features
 
 - **Testcontainers Integration** - PostgreSQL, Redis, Kafka, MongoDB containers
 - **Base Test Classes** - Pre-configured base classes for unit, integration, and controller tests

@@ -62,7 +62,7 @@ public class AdharMetricsAutoConfiguration {
 
     /**
      * Configures common tags for all meter registries directly.
-     * This is the Spring Boot 4 compatible approach without MeterRegistryCustomizer.
+     * This is the Spring Boot 4.0 compatible approach without MeterRegistryCustomizer.
      */
     @Bean
     @ConditionalOnMissingBean(name = "metricsCommonTagsPostProcessor")

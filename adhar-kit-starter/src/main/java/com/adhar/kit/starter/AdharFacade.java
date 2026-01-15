@@ -291,7 +291,7 @@ public class AdharFacade {
             - persistence, security, config, starter, ai, analytics,
               kubernetes, dapr, core
             
-            Framework Support: Spring Boot 4.0, Quarkus 3.6+, Micronaut 4.2+
+            Framework Support: Spring Boot 4.0+, Quarkus 3.6+, Micronaut 4.2+
             """, getVersion());
     }
 

@@ -3,9 +3,14 @@
 **Enterprise-grade API documentation for microservices**
 
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.java.net/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0+-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Quarkus](https://img.shields.io/badge/Quarkus-3.x-blue.svg)](https://quarkus.io/)
+[![Micronaut](https://img.shields.io/badge/Micronaut-4.x-blue.svg)](https://micronaut.io/)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-brightgreen.svg)](https://www.openapis.org/)
-[![Swagger](https://img.shields.io/badge/Swagger-UI-brightgreen.svg)](https://swagger.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+**Version:** 1.0.0  
+**Status:** ✅ Production Ready
 
 ---
 

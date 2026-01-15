@@ -1,8 +1,21 @@
-# Adhar Kit Maven Plugin
+# 🔧 Adhar Kit Maven Plugin - Enterprise Build Tooling
+
+**Maven plugin for versioning, release management, and code generation**
+
+[![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.java.net/)
+[![Maven](https://img.shields.io/badge/Maven-3.8+-blue.svg)](https://maven.apache.org/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+**Version:** 1.0.0  
+**Status:** ✅ Production Ready
+
+---
+
+## 📖 Overview
 
 Enterprise Maven plugin for microservices development, providing versioning, release management, code generation, and standardization features.
 
-## Features
+## 🎯 Features
 
 ### 🔢 Semantic Versioning (`adhar:version`)
 Automatic version management based on Conventional Commits:

@@ -13,7 +13,7 @@
     <version>0.0.1-SNAPSHOT</version>
     <packaging>pom</packaging>
     <name>AdharKit Parent</name>
-    <description>Production-ready parent POM for all Adhar Kit modules - Enterprise microservices platform (Java 25 LTS + Spring Boot 3.4)</description>
+    <description>Production-ready parent POM for all Adhar Kit modules - Enterprise microservices platform (Java 25 LTS + Spring Boot 4.0)</description>
     <url>https://github.com/adhar-platform/adhar-kit</url>
 
     <organization>
@@ -78,7 +78,7 @@
         <!-- Lombok - Java 25 compatible edge version -->
         <lombok.version>edge-SNAPSHOT</lombok.version>
 
-        <!-- Spring Boot components (explicit versions for Spring Boot 3.4) -->
+        <!-- Spring Boot components (explicit versions for Spring Boot 4.0) -->
         <spring-boot.version>3.4.1</spring-boot.version>
 
         <!-- Testing dependencies -->
@@ -173,7 +173,7 @@
             <!-- ================================================================= -->
             <!-- Spring Boot Components                                            -->
             <!-- ================================================================= -->
-            <!-- Explicit versions for Spring Boot 3.4 components -->
+            <!-- Explicit versions for Spring Boot 4.0 components -->
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-starter-aop</artifactId>

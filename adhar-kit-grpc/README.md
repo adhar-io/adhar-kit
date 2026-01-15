@@ -3,9 +3,14 @@
 **High-performance gRPC support for enterprise microservices**
 
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.java.net/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0+-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Quarkus](https://img.shields.io/badge/Quarkus-3.x-blue.svg)](https://quarkus.io/)
+[![Micronaut](https://img.shields.io/badge/Micronaut-4.x-blue.svg)](https://micronaut.io/)
 [![gRPC](https://img.shields.io/badge/gRPC-1.60+-brightgreen.svg)](https://grpc.io/)
-[![Protocol Buffers](https://img.shields.io/badge/Protobuf-3.25+-blue.svg)](https://developers.google.com/protocol-buffers)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+**Version:** 1.0.0  
+**Status:** ✅ Production Ready
 
 ---
 

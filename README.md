@@ -25,7 +25,7 @@
 | Feature | Status |
 |---------|--------|
 | Production Modules | **21 Ready** |
-| Framework Support | Spring Boot 4.0, Quarkus 3.6+, Micronaut 4.2+ |
+| Framework Support | Spring Boot 4.0+, Quarkus 3.6+, Micronaut 4.2+ |
 | Java Version | **25 LTS** |
 | Test Coverage | **80%+** |
 | API Documentation | **100% JavaDoc** |
@@ -1133,7 +1133,7 @@ This project is licensed under the **Apache License 2.0** - see the [LICENSE](LI
 
 **All 21 Core Modules Complete:**
 - ✅ All 21 modules production-ready
-- ✅ Full Spring Boot 4.0, Quarkus 3.6+, and Micronaut 4.2+ support
+- ✅ Full Spring Boot 4.0+, Quarkus 3.6+, and Micronaut 4.2+ support
 - ✅ Comprehensive documentation and real-world examples
 - ✅ 100% framework parity across all modules
 

@@ -1,8 +1,23 @@
-# Adhar Security Starter
+# 🔐 Adhar Kit Security - Enterprise Security Module
+
+**Comprehensive security for enterprise applications**
+
+[![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.java.net/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0+-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Quarkus](https://img.shields.io/badge/Quarkus-3.x-blue.svg)](https://quarkus.io/)
+[![Micronaut](https://img.shields.io/badge/Micronaut-4.x-blue.svg)](https://micronaut.io/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+**Version:** 1.0.0  
+**Status:** ✅ Production Ready
+
+---
+
+## 📖 Overview
 
 A comprehensive security starter for enterprise applications based on Spring Security, OAuth2, and OpenID Connect standards.
 
-## Features
+## 🎯 Features
 
 - **OAuth2/OpenID Connect Integration**: Seamless integration with OAuth2 and OpenID Connect providers
 - **JWT Token Validation**: Robust JWT token validation with customizable claims

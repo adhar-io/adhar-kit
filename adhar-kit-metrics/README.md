@@ -1,8 +1,16 @@
-# Adhar Kit Metrics
+# 📊 Adhar Kit Metrics - Enterprise Metrics Module
+
+**Framework-agnostic metrics infrastructure for microservices**
+
+[![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.java.net/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0+-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Quarkus](https://img.shields.io/badge/Quarkus-3.x-blue.svg)](https://quarkus.io/)
+[![Micronaut](https://img.shields.io/badge/Micronaut-4.x-blue.svg)](https://micronaut.io/)
+[![Micrometer](https://img.shields.io/badge/Micrometer-1.12+-blue.svg)](https://micrometer.io/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 **Version:** 1.0.0  
-**Status:** ✅ Production Ready  
-**Description:** Enterprise-grade metrics library with **full framework parity** for Spring Boot, Quarkus, and Micronaut
+**Status:** ✅ Production Ready
 
 ---
 
