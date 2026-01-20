@@ -99,14 +99,21 @@ Adhar Kit is the developer toolkit that bridges your applications to the **Adhar
 // WITHOUT Adhar Kit - You manage everything manually
 @Service
 public class OrderService {
-    @Autowired private MeterRegistry meterRegistry;           // Metrics
-    @Autowired private Tracer tracer;                         // Tracing  
-    @Autowired private CircuitBreakerRegistry cbRegistry;     // Resilience
-    @Autowired private RedisTemplate<String, Object> redis;   // Caching
-    @Autowired private KafkaTemplate<String, Object> kafka;   // Messaging
-    @Autowired private DaprClient daprClient;                 // Dapr
-    @Autowired private VaultTemplate vault;                   // Secrets
-    // ... 15 more dependencies to wire up
+    private final MeterRegistry meterRegistry;           // Metrics
+    private final Tracer tracer;                         // Tracing  
+    private final CircuitBreakerRegistry cbRegistry;     // Resilience
+    private final RedisTemplate<String, Object> redis;   // Caching
+    private final KafkaTemplate<String, Object> kafka;   // Messaging
+    private final DaprClient daprClient;                 // Dapr
+    private final VaultTemplate vault;                   // Secrets
+    // ... 15 more dependencies to inject via constructor
+    
+    public OrderService(MeterRegistry meterRegistry, Tracer tracer, 
+                       CircuitBreakerRegistry cbRegistry, /* ... */) {
+        this.meterRegistry = meterRegistry;
+        this.tracer = tracer;
+        // ... 15 more assignments
+    }
     
     public Order createOrder(OrderRequest request) {
         // 50+ lines of boilerplate for each operation
@@ -116,7 +123,11 @@ public class OrderService {
 // WITH Adhar Kit - One facade, full platform power
 @Service  
 public class OrderService {
-    private final AdharFacade adhar = AdharFacade.getInstance();
+    private final AdharFacade adhar;
+    
+    public OrderService(AdharFacade adhar) {
+        this.adhar = adhar;
+    }
     
     public Order createOrder(OrderRequest request) {
         return adhar.getTracing().executeInSpan("create-order", () ->
@@ -705,8 +716,12 @@ class OrderServiceIntegrationTest {
     private final TestContainerFacade containers = 
         TestContainerFacade.getInstance();
     
+    private final OrderService orderService;
+    
     @Autowired
-    private OrderService orderService;
+    OrderServiceIntegrationTest(OrderService orderService) {
+        this.orderService = orderService;
+    }
     
     @BeforeAll
     void setup() {

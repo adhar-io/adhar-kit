@@ -367,15 +367,19 @@ adhar:
 If you were previously using separate `BaggageUtils`, all functionality has been consolidated into `AdharTracing`:
 
 ```java
-// Before (deprecated)
-@Autowired private BaggageUtils baggageUtils;
-@Autowired private AdharTracing adharTracing;
+// Before (deprecated) - separate dependencies
+private final BaggageUtils baggageUtils;
+private final AdharTracing adharTracing;
 
 baggageUtils.setBaggage("key", "value");
 adharTracing.withinSpan("operation", () -> {...});
 
-// After (consolidated)
-@Autowired private AdharTracing tracing;
+// After (consolidated) - single dependency via constructor injection
+private final AdharTracing tracing;
+
+public MyService(AdharTracing tracing) {
+    this.tracing = tracing;
+}
 
 tracing.setBaggage("key", "value");
 tracing.withinSpan("operation", () -> {...});

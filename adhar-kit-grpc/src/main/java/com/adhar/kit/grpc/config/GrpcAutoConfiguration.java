@@ -20,11 +20,13 @@ import java.util.Map;
 @ConditionalOnBean(annotation = GrpcService.class)
 public class GrpcAutoConfiguration {
 
-    @Autowired
-    private GrpcProperties grpcProperties;
+    private final GrpcProperties grpcProperties;
+    private final ApplicationContext applicationContext;
 
-    @Autowired
-    private ApplicationContext applicationContext;
+    public GrpcAutoConfiguration(GrpcProperties grpcProperties, ApplicationContext applicationContext) {
+        this.grpcProperties = grpcProperties;
+        this.applicationContext = applicationContext;
+    }
 
     @Bean
     public GrpcServerLifecycle grpcServerLifecycle(Server server) {

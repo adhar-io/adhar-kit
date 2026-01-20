@@ -36,9 +36,12 @@ import java.util.function.Supplier;
  *
  * <p><b>Usage Examples:</b></p>
  * <pre>{@code
- * // Inject AdharLogger
- * @Autowired
- * private AdharLogger logger;
+ * // Inject AdharLogger via constructor
+ * private final AdharLogger logger;
+ *
+ * public MyService(AdharLogger logger) {
+ *     this.logger = logger;
+ * }
  *
  * // Simple logging with class reference
  * logger.info(OrderService.class, "Processing order for customer: {}", customerId);

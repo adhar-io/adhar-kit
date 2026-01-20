@@ -153,8 +153,11 @@ adhar:
 @Service
 public class OrderService {
     
-    @Autowired
-    private AdharLogger adharLogger;
+    private final AdharLogger adharLogger;
+    
+    public OrderService(AdharLogger adharLogger) {
+        this.adharLogger = adharLogger;
+    }
     
     @Loggable(logArgs = true, logResult = true)
     public Order createOrder(OrderRequest request) {
@@ -172,8 +175,12 @@ public class OrderService {
 @ApplicationScoped
 public class OrderService {
     
+    private final AdharLogger adharLogger;
+    
     @Inject
-    AdharLogger adharLogger;
+    public OrderService(AdharLogger adharLogger) {
+        this.adharLogger = adharLogger;
+    }
     
     @Loggable(logArgs = true, logResult = true)
     public Order createOrder(OrderRequest request) {
@@ -190,8 +197,11 @@ public class OrderService {
 @Singleton
 public class OrderService {
     
-    @Inject
-    private AdharLogger adharLogger;
+    private final AdharLogger adharLogger;
+    
+    public OrderService(AdharLogger adharLogger) {
+        this.adharLogger = adharLogger;
+    }
     
     @Loggable(logArgs = true, logResult = true)
     public Order createOrder(OrderRequest request) {
@@ -344,8 +354,12 @@ public class User {
 ### Basic Logging
 
 ```java
-@Autowired
-private AdharLogger logger;
+// Inject via constructor
+private final AdharLogger logger;
+
+public MyService(AdharLogger logger) {
+    this.logger = logger;
+}
 
 // Simple logging
 logger.info(MyClass.class, "Processing started");
@@ -519,8 +533,11 @@ public User registerUser(UserRequest request) {
 @RestController
 public class OrderController {
     
-    @Autowired
-    private AdharLogger logger;
+    private final AdharLogger logger;
+    
+    public OrderController(AdharLogger logger) {
+        this.logger = logger;
+    }
     
     @GetMapping("/orders/{id}")
     public Order getOrder(@PathVariable String id,
@@ -544,8 +561,11 @@ public class OrderController {
 @Service
 public class OrderService {
     
-    @Autowired
-    private AdharLogger logger;
+    private final AdharLogger logger;
+    
+    public OrderService(AdharLogger logger) {
+        this.logger = logger;
+    }
     
     @Async
     public CompletableFuture<Order> processOrderAsync(OrderRequest request) {
@@ -567,11 +587,13 @@ public class OrderService {
 @Service
 public class PaymentService {
     
-    @Autowired
-    private AdharLogger logger;
+    private final AdharLogger logger;
+    private final Tracer tracer;
     
-    @Autowired
-    private Tracer tracer;
+    public PaymentService(AdharLogger logger, Tracer tracer) {
+        this.logger = logger;
+        this.tracer = tracer;
+    }
     
     public PaymentResult processPayment(PaymentRequest request) {
         // Start span
@@ -619,7 +641,7 @@ public class LoggingConfig {
     
     @Bean
     public AdharLogger adharLogger(AdharLoggingProperties properties,
-                                   @Autowired(required = false) Tracer tracer) {
+                                   Tracer tracer) {
         return new AdharLogger(properties, tracer);
     }
 }
@@ -628,8 +650,11 @@ public class LoggingConfig {
 @Service
 public class OrderService {
     
-    @Autowired
-    private AdharLogger logger;
+    private final AdharLogger logger;
+    
+    public OrderService(AdharLogger logger) {
+        this.logger = logger;
+    }
     
     @Loggable(logArgs = true)
     public void processOrder(Order order) {
@@ -648,7 +673,7 @@ public class LoggingProducer {
     @Produces
     @Singleton
     public AdharLogger adharLogger(AdharLoggingProperties properties,
-                                   @Inject Tracer tracer) {
+                                   Tracer tracer) {
         return new AdharLogger(properties, tracer);
     }
 }
@@ -657,8 +682,12 @@ public class LoggingProducer {
 @ApplicationScoped
 public class OrderService {
     
+    private final AdharLogger logger;
+    
     @Inject
-    AdharLogger logger;
+    public OrderService(AdharLogger logger) {
+        this.logger = logger;
+    }
     
     @Loggable(logArgs = true)
     public void processOrder(Order order) {
@@ -686,8 +715,11 @@ public class LoggingFactory {
 @Singleton
 public class OrderService {
     
-    @Inject
-    private AdharLogger logger;
+    private final AdharLogger logger;
+    
+    public OrderService(AdharLogger logger) {
+        this.logger = logger;
+    }
     
     @Loggable(logArgs = true)
     public void processOrder(Order order) {
@@ -819,11 +851,13 @@ adhar:
 @RequestMapping("/api/orders")
 public class OrderController {
     
-    @Autowired
-    private AdharLogger logger;
+    private final AdharLogger logger;
+    private final OrderService orderService;
     
-    @Autowired
-    private OrderService orderService;
+    public OrderController(AdharLogger logger, OrderService orderService) {
+        this.logger = logger;
+        this.orderService = orderService;
+    }
     
     @PostMapping
     @Loggable(logArgs = true, logResult = true, maskFields = {"cardNumber", "cvv"})
@@ -864,8 +898,11 @@ public class OrderController {
 @Service
 public class PaymentService {
     
-    @Autowired
-    private AdharLogger logger;
+    private final AdharLogger logger;
+    
+    public PaymentService(AdharLogger logger) {
+        this.logger = logger;
+    }
     
     @LogExecutionTime(threshold = 1000)
     @LogExceptions(logStackTrace = true, includeContext = true)
@@ -913,8 +950,11 @@ public class PaymentService {
 @Service
 public class OrderProcessingService {
     
-    @Autowired
-    private AdharLogger logger;
+    private final AdharLogger logger;
+    
+    public OrderProcessingService(AdharLogger logger) {
+        this.logger = logger;
+    }
     
     @Async
     @Loggable(logArgs = true)
@@ -953,8 +993,11 @@ public class OrderProcessingService {
 @RestController
 public class ApiController {
     
-    @Autowired
-    private AdharLogger logger;
+    private final AdharLogger logger;
+    
+    public ApiController(AdharLogger logger) {
+        this.logger = logger;
+    }
     
     @PostMapping("/process")
     public ResponseEntity<?> process(@RequestHeader("X-Correlation-ID") String correlationId) {

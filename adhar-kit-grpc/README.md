@@ -360,8 +360,11 @@ public class GrpcConfig {
 @Component
 public class OrderServiceImpl extends OrderServiceGrpc.OrderServiceImplBase {
     
-    @Autowired
-    private OrderService orderService;
+    private final OrderService orderService;
+    
+    public OrderServiceImpl(OrderService orderService) {
+        this.orderService = orderService;
+    }
     
     @Override
     public void createOrder(CreateOrderRequest request,
