@@ -1,8 +1,12 @@
 package com.adhar.kit.graphql.config;
 
+import com.adhar.kit.graphql.dataloader.DataLoaderRegistrar;
 import com.adhar.kit.graphql.exception.GraphQlExceptionResolver;
 import com.adhar.kit.graphql.instrumentation.QueryComplexityInstrumentation;
 import com.adhar.kit.graphql.scalar.DateTimeScalar;
+import com.adhar.kit.graphql.schema.GraphQlSchemaRegistry;
+import com.adhar.kit.graphql.security.GraphQlSecurityInterceptor;
+import com.adhar.kit.graphql.validation.InputValidator;
 import graphql.schema.GraphQLScalarType;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -16,17 +20,22 @@ import org.springframework.graphql.execution.DataFetcherExceptionResolver;
 import org.springframework.graphql.execution.RuntimeWiringConfigurer;
 
 /**
- * Auto-configuration for Adhar GraphQL module.
+ * Auto-configuration for the Adhar GraphQL module.
  *
  * <p>Automatically configures GraphQL support with custom scalars, query complexity
- * limits, and centralized exception handling.</p>
+ * limits, centralized exception handling, schema registry, pagination, input
+ * validation, DataLoader support, and security interceptor.</p>
  *
  * <p><b>Features:</b></p>
  * <ul>
  *   <li>Custom {@code DateTime} scalar type backed by {@link java.time.LocalDateTime}</li>
  *   <li>Query complexity and depth instrumentation to prevent abuse</li>
  *   <li>Centralized exception resolution for consistent error responses</li>
- *   <li>Configurable introspection, CORS, and security settings</li>
+ *   <li>Schema registry for dynamic SDL type, query, and mutation registration</li>
+ *   <li>Input validation using Jakarta Validation annotations</li>
+ *   <li>DataLoader registrar for N+1 query prevention</li>
+ *   <li>Security interceptor with authentication enforcement and introspection control</li>
+ *   <li>Configurable introspection, CORS, pagination, and security settings</li>
  * </ul>
  *
  * <p><b>Configuration Example:</b></p>
@@ -38,6 +47,11 @@ import org.springframework.graphql.execution.RuntimeWiringConfigurer;
  *     max-query-depth: 10
  *     max-query-complexity: 200
  *     cors-enabled: true
+ *     pagination:
+ *       default-page-size: 20
+ *       max-page-size: 100
+ *     security:
+ *       require-authentication: false
  * }</pre>
  *
  * @author Adhar Platform Team
@@ -58,10 +72,14 @@ public class GraphQlAutoConfiguration {
 
     @PostConstruct
     public void logGraphQlConfiguration() {
-        log.info("Adhar GraphQL module initialized - introspection: {}, maxDepth: {}, maxComplexity: {}",
+        log.info("Adhar GraphQL module initialized - introspection: {}, maxDepth: {}, maxComplexity: {}, " +
+                        "defaultPageSize: {}, maxPageSize: {}, requireAuth: {}",
                 properties.isIntrospectionEnabled(),
                 properties.getMaxQueryDepth(),
-                properties.getMaxQueryComplexity());
+                properties.getMaxQueryComplexity(),
+                properties.getPagination().getDefaultPageSize(),
+                properties.getPagination().getMaxPageSize(),
+                properties.getSecurity().isRequireAuthentication());
     }
 
     /**
@@ -115,5 +133,65 @@ public class GraphQlAutoConfiguration {
     public GraphQlExceptionResolver graphQlExceptionResolver() {
         log.info("Registering GraphQL exception resolver");
         return new GraphQlExceptionResolver();
+    }
+
+    /**
+     * Creates the GraphQL schema registry for dynamic SDL management.
+     *
+     * @return a thread-safe schema registry
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public GraphQlSchemaRegistry graphQlSchemaRegistry() {
+        log.info("Registering GraphQL schema registry");
+        return new GraphQlSchemaRegistry();
+    }
+
+    /**
+     * Creates the DataLoader registrar for batch loading support.
+     *
+     * @return a DataLoader registrar for preventing N+1 queries
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public DataLoaderRegistrar dataLoaderRegistrar() {
+        log.info("Registering DataLoader registrar");
+        return new DataLoaderRegistrar();
+    }
+
+    /**
+     * Creates the input validator using Jakarta Validation.
+     *
+     * <p>Only registered when the Jakarta Validation API is on the classpath.</p>
+     *
+     * @return an input validator backed by Jakarta Bean Validation
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnClass(name = "jakarta.validation.Validator")
+    public InputValidator graphQlInputValidator() {
+        log.info("Registering GraphQL input validator");
+        return new InputValidator();
+    }
+
+    /**
+     * Creates the GraphQL security interceptor.
+     *
+     * <p>Only registered when Spring Security and Spring GraphQL server support
+     * are both on the classpath.</p>
+     *
+     * @return a security interceptor for authentication and introspection control
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnClass(name = {
+            "org.springframework.security.core.context.SecurityContextHolder",
+            "org.springframework.graphql.server.WebGraphQlInterceptor"
+    })
+    public GraphQlSecurityInterceptor graphQlSecurityInterceptor() {
+        log.info("Registering GraphQL security interceptor - requireAuth: {}, introspection: {}",
+                properties.getSecurity().isRequireAuthentication(),
+                properties.isIntrospectionEnabled());
+        return new GraphQlSecurityInterceptor(properties);
     }
 }

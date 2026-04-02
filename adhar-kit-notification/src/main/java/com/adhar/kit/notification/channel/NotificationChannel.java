@@ -14,7 +14,7 @@ import com.adhar.kit.notification.model.NotificationType;
  * @since 1.0.0
  */
 public sealed interface NotificationChannel
-        permits EmailNotificationChannel, WebhookNotificationChannel, InAppNotificationChannel {
+        permits EmailNotificationChannel, WebhookNotificationChannel, InAppNotificationChannel, SmsNotificationChannel {
 
     /**
      * Sends a notification through this channel.

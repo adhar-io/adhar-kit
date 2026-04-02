@@ -4,7 +4,7 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Configuration properties for Adhar GraphQL module.
+ * Configuration properties for the Adhar GraphQL module.
  *
  * <p><b>Configuration Example:</b></p>
  * <pre>{@code
@@ -15,6 +15,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *     max-query-depth: 10
  *     max-query-complexity: 200
  *     cors-enabled: true
+ *     pagination:
+ *       default-page-size: 20
+ *       max-page-size: 100
+ *     security:
+ *       require-authentication: false
  * }</pre>
  *
  * @author Adhar Platform Team
@@ -49,4 +54,44 @@ public class GraphQlProperties {
      * Enable CORS support for GraphQL endpoints.
      */
     private boolean corsEnabled = true;
+
+    /**
+     * Pagination configuration for Relay-style cursor pagination.
+     */
+    private Pagination pagination = new Pagination();
+
+    /**
+     * Security configuration for GraphQL requests.
+     */
+    private Security security = new Security();
+
+    /**
+     * Pagination settings for cursor-based GraphQL pagination.
+     */
+    @Data
+    public static class Pagination {
+
+        /**
+         * Default number of items per page when the client does not specify {@code first}.
+         */
+        private int defaultPageSize = 20;
+
+        /**
+         * Maximum allowed page size to prevent clients from requesting too many items at once.
+         */
+        private int maxPageSize = 100;
+    }
+
+    /**
+     * Security settings for GraphQL request handling.
+     */
+    @Data
+    public static class Security {
+
+        /**
+         * When true, all GraphQL requests require an authenticated {@link org.springframework.security.core.Authentication}
+         * in the security context. Unauthenticated requests will be rejected.
+         */
+        private boolean requireAuthentication = false;
+    }
 }

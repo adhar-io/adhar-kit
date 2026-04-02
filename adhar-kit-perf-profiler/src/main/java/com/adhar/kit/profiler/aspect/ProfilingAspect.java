@@ -2,6 +2,7 @@ package com.adhar.kit.profiler.aspect;
 
 import com.adhar.kit.profiler.annotation.Profiled;
 import com.adhar.kit.profiler.model.ProfilingResult;
+import com.adhar.kit.profiler.registry.ProfilingRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -17,6 +18,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * AOP aspect that intercepts methods annotated with {@link Profiled}
  * and records execution time, success/failure, and slow execution warnings.
+ * Results are registered in {@link ProfilingRegistry} for aggregation and reporting.
  */
 @Aspect
 public class ProfilingAspect {
@@ -24,9 +26,11 @@ public class ProfilingAspect {
     private static final Logger log = LoggerFactory.getLogger(ProfilingAspect.class);
 
     private final MeterRegistry meterRegistry;
+    private final ProfilingRegistry profilingRegistry;
 
-    public ProfilingAspect(MeterRegistry meterRegistry) {
+    public ProfilingAspect(MeterRegistry meterRegistry, ProfilingRegistry profilingRegistry) {
         this.meterRegistry = meterRegistry;
+        this.profilingRegistry = profilingRegistry;
     }
 
     @Around("@annotation(profiled)")
@@ -86,6 +90,9 @@ public class ProfilingAspect {
 
             ProfilingResult result = new ProfilingResult(
                     methodName, className, durationMs, success, errorType, Instant.now());
+
+            // Register result for aggregation and reporting
+            profilingRegistry.record(result);
 
             if (log.isDebugEnabled()) {
                 log.debug("Profiled {}.{}(): {}ms, success={}", className, methodName, durationMs, success);

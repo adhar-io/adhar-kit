@@ -48,4 +48,14 @@ public class BatchProperties {
      * Maximum number of retry attempts for failed jobs.
      */
     private int maxRetries = 3;
+
+    /**
+     * Default chunk size for step processing.
+     */
+    private int defaultChunkSize = 100;
+
+    /**
+     * Default page size for paginated item readers.
+     */
+    private int defaultPageSize = 50;
 }

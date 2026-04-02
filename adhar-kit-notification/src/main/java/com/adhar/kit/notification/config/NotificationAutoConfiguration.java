@@ -1,13 +1,18 @@
 package com.adhar.kit.notification.config;
 
 import com.adhar.kit.notification.DefaultNotificationService;
+import com.adhar.kit.notification.NotificationHistory;
+import com.adhar.kit.notification.NotificationRetryHandler;
 import com.adhar.kit.notification.NotificationService;
+import com.adhar.kit.notification.TemplateNotificationService;
 import com.adhar.kit.notification.channel.EmailNotificationChannel;
 import com.adhar.kit.notification.channel.InAppNotificationChannel;
 import com.adhar.kit.notification.channel.NotificationChannel;
+import com.adhar.kit.notification.channel.SmsNotificationChannel;
 import com.adhar.kit.notification.channel.WebhookNotificationChannel;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -24,8 +29,10 @@ import java.util.concurrent.Executors;
 /**
  * Auto-configuration for the Adhar Notification module.
  * <p>
- * Registers notification channels (email, webhook, in-app) and the
- * {@link NotificationService} based on available dependencies and configuration.
+ * Registers notification channels (email, webhook, in-app, SMS), the
+ * {@link NotificationService}, {@link TemplateNotificationService},
+ * {@link NotificationRetryHandler}, and {@link NotificationHistory}
+ * based on available dependencies and configuration.
  * </p>
  *
  * @author Adhar Platform Team
@@ -82,15 +89,61 @@ public class NotificationAutoConfiguration {
     }
 
     /**
-     * Creates the default notification service that routes to available channels.
+     * Registers the SMS notification channel when SMS is enabled.
+     */
+    @Bean
+    @ConditionalOnMissingBean(SmsNotificationChannel.class)
+    @ConditionalOnProperty(prefix = "adhar.notification.sms", name = "enabled", havingValue = "true")
+    public SmsNotificationChannel smsNotificationChannel() {
+        log.info("Registering SmsNotificationChannel");
+        return new SmsNotificationChannel();
+    }
+
+    /**
+     * Registers the notification retry handler.
+     */
+    @Bean
+    @ConditionalOnMissingBean(NotificationRetryHandler.class)
+    public NotificationRetryHandler notificationRetryHandler(NotificationProperties properties) {
+        log.info("Registering NotificationRetryHandler with maxRetries={}, backoffMs={}",
+                properties.getRetry().getMaxRetries(), properties.getRetry().getBackoffMs());
+        return new NotificationRetryHandler(properties);
+    }
+
+    /**
+     * Registers the in-memory notification history.
+     */
+    @Bean
+    @ConditionalOnMissingBean(NotificationHistory.class)
+    public NotificationHistory notificationHistory(NotificationProperties properties) {
+        log.info("Registering NotificationHistory with maxSize={}", properties.getHistory().getMaxSize());
+        return new NotificationHistory(properties.getHistory().getMaxSize());
+    }
+
+    /**
+     * Creates the default notification service that routes to available channels,
+     * with retry and history support.
      */
     @Bean
     @ConditionalOnMissingBean(NotificationService.class)
     public NotificationService notificationService(List<NotificationChannel> channels,
-                                                    NotificationProperties properties) {
+                                                    NotificationProperties properties,
+                                                    ObjectProvider<NotificationRetryHandler> retryHandlerProvider,
+                                                    ObjectProvider<NotificationHistory> historyProvider) {
         Executor executor = properties.isAsync()
                 ? Executors.newVirtualThreadPerTaskExecutor()
                 : Runnable::run;
-        return new DefaultNotificationService(channels, executor);
+        return new DefaultNotificationService(channels, executor,
+                retryHandlerProvider.getIfAvailable(), historyProvider.getIfAvailable());
+    }
+
+    /**
+     * Registers the template notification service.
+     */
+    @Bean
+    @ConditionalOnMissingBean(TemplateNotificationService.class)
+    public TemplateNotificationService templateNotificationService(NotificationService notificationService) {
+        log.info("Registering TemplateNotificationService");
+        return new TemplateNotificationService(notificationService);
     }
 }

@@ -1107,56 +1107,6 @@ open target/site/jacoco/index.html
 
 ---
 
-## 📝 License
-
-This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🎯 Roadmap & Features
-
-### Version 1.0.0 ✅ (Current - November 2025 - Production Ready)
-
-**All 21 Core Modules Complete:**
-- ✅ All 21 modules production-ready
-- ✅ Full Spring Boot 4.0+, Quarkus 3.6+, and Micronaut 4.2+ support
-- ✅ Comprehensive documentation and real-world examples
-- ✅ 100% framework parity across all modules
-
-**Advanced AI Support (Originally planned for v1.1.0 - NOW INCLUDED):**
-- ✅ Multiple AI model support (OpenAI GPT-4, Claude, Gemini, Llama)
-- ✅ Enhanced analytics dashboards and visualizations
-- ✅ GraphQL module for flexible API queries
-- ✅ Real-time AI streaming responses
-- ✅ Multi-model fallback strategies
-
-**Cloud-Native & Performance (Originally planned for v1.2.0 - NOW INCLUDED):**
-- ✅ GraalVM native image support for all frameworks
-- ✅ Cloud provider integrations (AWS SDK, Azure SDK, GCP SDK)
-- ✅ Advanced observability with OpenTelemetry
-- ✅ Serverless deployment support (AWS Lambda, Azure Functions, GCP Functions)
-- ✅ Container optimization and multi-stage Docker builds
-
-**Enterprise-Grade Features (Originally planned for v2.0.0 - NOW INCLUDED):**
-- ✅ Multi-cloud deployment automation
-- ✅ Advanced ML/AI features with model switching
-- ✅ Service mesh integration (Istio, Linkerd)
-- ✅ Real-time streaming analytics (Apache Flink, Kafka Streams)
-- ✅ Auto-scaling based on custom metrics
-- ✅ Blue-green and canary deployment support
-
-### Future Enhancements (v1.1.0+)
-
-**Continuous Improvements:**
-- Additional framework support (Helidon, Vert.x)
-- Enhanced developer tools and CLI
-- Visual monitoring dashboards
-- AI-powered code generation
-- Automated performance optimization
-- Advanced security scanning
-
----
-
 ## ⭐ Show Your Support
 
 If you find Adhar Kit useful, please consider:
@@ -1180,36 +1130,7 @@ Special thanks to:
 - Our contributors and early adopters
 - The Java community for continuous innovation
 
----
-
-## 📊 Project Statistics
-
-- **21 Modules** - Complete enterprise platform coverage
-- **3 Frameworks** - Spring Boot, Quarkus, Micronaut support
-- **100% Feature Parity** - All modules work identically across frameworks
-- **Production-Ready** - Battle-tested in enterprise environments
-- **Active Development** - Continuous improvements and updates
-- **Comprehensive Documentation** - JavaDoc, guides, examples for every module
-
----
-
-## 📞 Contact & Support
-
-- **Website**: [https://adhar-platform.com](https://adhar-platform.com)
-- **Documentation**: [https://docs.adhar.com/kit](https://docs.adhar.com/kit)
-- **GitHub**: [https://github.com/adhar-platform/adhar-kit](https://github.com/adhar-platform/adhar-kit)
-- **Email**: [support@adhar.com](mailto:support@adhar.com)
-- **Twitter**: [@AdharPlatform](https://twitter.com/AdharPlatform)
-
----
-
 <div align="center">
-
-**Adhar Kit - Write Once, Run Anywhere, Build Anything** 🚀
-
-*Empowering developers to build better enterprise microservices*
-
-**[Get Started](https://docs.adhar.com/kit/getting-started)** | **[Documentation](https://docs.adhar.com/kit)** | **[Examples](https://github.com/adhar-platform/adhar-kit-examples)** | **[Community](https://github.com/adhar-platform/adhar-kit/discussions)**
 
 ---
 

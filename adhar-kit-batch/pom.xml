@@ -50,6 +50,20 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Micrometer (optional - for BatchMetrics) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- JPA (optional - for JpaItemReaderBuilder) -->
+        <dependency>
+            <groupId>jakarta.persistence</groupId>
+            <artifactId>jakarta.persistence-api</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>

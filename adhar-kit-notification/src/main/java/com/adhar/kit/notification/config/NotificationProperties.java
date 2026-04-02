@@ -57,6 +57,21 @@ public class NotificationProperties {
     private InAppProperties inApp = new InAppProperties();
 
     /**
+     * SMS channel configuration.
+     */
+    private SmsProperties sms = new SmsProperties();
+
+    /**
+     * Retry configuration for failed notification sends.
+     */
+    private RetryProperties retry = new RetryProperties();
+
+    /**
+     * Notification history configuration.
+     */
+    private HistoryProperties history = new HistoryProperties();
+
+    /**
      * Email notification properties.
      */
     @Data
@@ -110,5 +125,46 @@ public class NotificationProperties {
          * Whether the in-app channel is enabled.
          */
         private boolean enabled = true;
+    }
+
+    /**
+     * SMS notification properties.
+     */
+    @Data
+    public static class SmsProperties {
+
+        /**
+         * Whether the SMS channel is enabled.
+         */
+        private boolean enabled = false;
+    }
+
+    /**
+     * Retry configuration for failed notification sends.
+     */
+    @Data
+    public static class RetryProperties {
+
+        /**
+         * Maximum number of retry attempts for failed sends.
+         */
+        private int maxRetries = 3;
+
+        /**
+         * Base backoff delay in milliseconds between retries (exponential backoff applied).
+         */
+        private long backoffMs = 1000;
+    }
+
+    /**
+     * Notification history configuration.
+     */
+    @Data
+    public static class HistoryProperties {
+
+        /**
+         * Maximum number of notification history entries to retain.
+         */
+        private int maxSize = 1000;
     }
 }

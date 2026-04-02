@@ -8,7 +8,8 @@
       "Bash(mvn verify:*)",
       "Bash(mvn install:*)",
       "Bash(mvn compile:*)",
-      "Bash(mvn dependency:resolve -f adhar-kit-batch/pom.xml -DskipTests -U)"
+      "Bash(mvn dependency:resolve -f adhar-kit-batch/pom.xml -DskipTests -U)",
+      "Bash(mvn dependency:tree -f adhar-kit-batch/pom.xml1khjjhkyikmfgi)"
     ]
   }
 }

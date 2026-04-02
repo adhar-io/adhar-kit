@@ -1,8 +1,8 @@
 package com.adhar.kit.batch.listener;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.JobExecutionListener;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.listener.JobExecutionListener;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -23,7 +23,7 @@ public class AdharJobExecutionListener implements JobExecutionListener {
     @Override
     public void beforeJob(JobExecution jobExecution) {
         var jobName = jobExecution.getJobInstance().getJobName();
-        var jobId = jobExecution.getJobId();
+        var jobId = jobExecution.getId();
         var startTime = jobExecution.getStartTime();
 
         log.info("Job [{}] (id={}) starting at {}", jobName, jobId, startTime);
@@ -33,7 +33,7 @@ public class AdharJobExecutionListener implements JobExecutionListener {
     @Override
     public void afterJob(JobExecution jobExecution) {
         var jobName = jobExecution.getJobInstance().getJobName();
-        var jobId = jobExecution.getJobId();
+        var jobId = jobExecution.getId();
         var startTime = jobExecution.getStartTime();
         var endTime = jobExecution.getEndTime();
         var status = jobExecution.getStatus();
@@ -50,7 +50,7 @@ public class AdharJobExecutionListener implements JobExecutionListener {
             if (exitDescription != null && !exitDescription.isBlank()) {
                 log.error("Job [{}] failure description: {}", jobName, exitDescription);
             }
-            var exceptions = jobExecution.getAllFailureExceptions();
+            var exceptions = jobExecution.getFailureExceptions();
             if (!exceptions.isEmpty()) {
                 exceptions.forEach(ex ->
                         log.error("Job [{}] exception: {}", jobName, ex.getMessage(), ex));
