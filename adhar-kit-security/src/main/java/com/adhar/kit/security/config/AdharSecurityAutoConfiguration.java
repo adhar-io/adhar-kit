@@ -1,14 +1,19 @@
 package com.adhar.kit.security.config;
 
+import com.adhar.kit.security.audit.SecurityAuditLogger;
+import com.adhar.kit.security.filter.RateLimitingFilter;
 import com.adhar.kit.security.properties.AdharSecurityProperties;
+import com.adhar.kit.security.service.TokenRefreshService;
 import com.adhar.kit.security.util.JwtUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.Ordered;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -198,5 +203,51 @@ public class AdharSecurityAutoConfiguration {
     @ConditionalOnMissingBean
     public JwtUtils jwtUtils() {
         return new JwtUtils(properties.getJwt());
+    }
+
+    /**
+     * Configures the rate limiting filter.
+     *
+     * @return the rate limiting filter registration
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.security.rate-limit", name = "enabled", havingValue = "true")
+    public FilterRegistrationBean<RateLimitingFilter> rateLimitingFilter() {
+        log.info("Configuring rate limiting filter: {} requests per {} seconds",
+            properties.getRateLimit().getMaxRequests(),
+            properties.getRateLimit().getWindowSeconds());
+
+        RateLimitingFilter filter = new RateLimitingFilter(properties.getRateLimit());
+        FilterRegistrationBean<RateLimitingFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
+        registration.addUrlPatterns("/*");
+        return registration;
+    }
+
+    /**
+     * Configures the security audit logger.
+     *
+     * @return the security audit logger
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.security.audit", name = "enabled", havingValue = "true")
+    public SecurityAuditLogger securityAuditLogger() {
+        log.info("Configuring security audit logger");
+        return new SecurityAuditLogger(properties.getAudit());
+    }
+
+    /**
+     * Configures the token refresh service.
+     *
+     * @return the token refresh service
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.security.token-refresh", name = "enabled", havingValue = "true")
+    public TokenRefreshService tokenRefreshService() {
+        log.info("Configuring token refresh service");
+        return new TokenRefreshService(properties.getTokenRefresh());
     }
 }

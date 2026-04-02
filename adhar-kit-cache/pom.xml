@@ -16,12 +16,9 @@
 
     <properties>
         <java.version>25</java.version>
-        <caffeine.version>3.1.8</caffeine.version>
-        <spring-kafka.version>3.2.0</spring-kafka.version>
-        <spring-data-redis.version>3.2.5</spring-data-redis.version>
-        <testcontainers.version>1.19.7</testcontainers.version>
-        <quarkus.version>3.16.3</quarkus.version>
-        <micronaut.version>4.7.5</micronaut.version>
+        <caffeine.version>3.2.0</caffeine.version>
+        <quarkus.version>3.21.0</quarkus.version>
+        <micronaut.version>4.8.0</micronaut.version>
     </properties>
 
     <dependencyManagement>
@@ -118,7 +115,6 @@
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
-            <version>${spring-kafka.version}</version>
             <optional>true</optional>
         </dependency>
 
@@ -131,7 +127,6 @@
         <dependency>
             <groupId>org.springframework.data</groupId>
             <artifactId>spring-data-redis</artifactId>
-            <version>${spring-data-redis.version}</version>
             <optional>true</optional>
         </dependency>
 
@@ -163,25 +158,21 @@
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka-test</artifactId>
-            <version>${spring-kafka.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
-            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>kafka</artifactId>
-            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

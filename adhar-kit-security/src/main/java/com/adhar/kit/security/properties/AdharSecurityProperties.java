@@ -65,6 +65,21 @@ public class AdharSecurityProperties {
     private CsrfProperties csrf = new CsrfProperties();
 
     /**
+     * Configuration for rate limiting.
+     */
+    private RateLimitProperties rateLimit = new RateLimitProperties();
+
+    /**
+     * Configuration for security audit logging.
+     */
+    private AuditProperties audit = new AuditProperties();
+
+    /**
+     * Configuration for token refresh.
+     */
+    private TokenRefreshProperties tokenRefresh = new TokenRefreshProperties();
+
+    /**
      * Configuration properties for JWT token validation.
      */
     @Data
@@ -480,5 +495,85 @@ public class AdharSecurityProperties {
          * Whether the CSRF cookie is HTTP only.
          */
         private boolean cookieHttpOnly = true;
+    }
+
+    /**
+     * Configuration properties for rate limiting.
+     */
+    @Data
+    public static class RateLimitProperties {
+        /**
+         * Whether rate limiting is enabled.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Maximum number of requests allowed within the time window.
+         */
+        private int maxRequests = 100;
+
+        /**
+         * Time window in seconds for rate limiting.
+         */
+        private int windowSeconds = 60;
+    }
+
+    /**
+     * Configuration properties for security audit logging.
+     */
+    @Data
+    public static class AuditProperties {
+        /**
+         * Whether security audit logging is enabled.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Whether to log successful authentication events.
+         */
+        private boolean logSuccessfulAuth = true;
+
+        /**
+         * Whether to log failed authentication events.
+         */
+        private boolean logFailedAuth = true;
+
+        /**
+         * Whether to log logout events.
+         */
+        private boolean logLogout = true;
+    }
+
+    /**
+     * Configuration properties for token refresh.
+     */
+    @Data
+    public static class TokenRefreshProperties {
+        /**
+         * Whether token refresh is enabled.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Access token validity in seconds.
+         */
+        private long accessTokenValiditySeconds = 900; // 15 minutes
+
+        /**
+         * Refresh token validity in seconds.
+         */
+        private long refreshTokenValiditySeconds = 604800; // 7 days
+
+        /**
+         * Whether to rotate refresh tokens on each use.
+         * When enabled, each refresh generates a new refresh token.
+         */
+        private boolean rotateRefreshTokens = true;
+
+        /**
+         * Secret key for signing tokens.
+         * Must be at least 256 bits (32 characters) for HS256.
+         */
+        private String secret;
     }
 }

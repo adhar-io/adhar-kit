@@ -15,10 +15,6 @@
 
     <properties>
         <java.version>25</java.version>
-        <spring-kafka.version>3.1.5</spring-kafka.version>
-        <spring-amqp.version>3.1.5</spring-amqp.version>
-        <testcontainers.version>1.19.7</testcontainers.version>
-        <cloudevents.version>2.5.0</cloudevents.version>
     </properties>
     <dependencies>
         <!-- Adhar Kit Commons -->
@@ -48,7 +44,6 @@
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
-            <version>${spring-kafka.version}</version>
             <optional>true</optional>
         </dependency>
 
@@ -56,7 +51,6 @@
         <dependency>
             <groupId>org.springframework.amqp</groupId>
             <artifactId>spring-rabbit</artifactId>
-            <version>${spring-amqp.version}</version>
             <optional>true</optional>
         </dependency>
 
@@ -64,12 +58,10 @@
         <dependency>
             <groupId>io.cloudevents</groupId>
             <artifactId>cloudevents-core</artifactId>
-            <version>${cloudevents.version}</version>
         </dependency>
         <dependency>
             <groupId>io.cloudevents</groupId>
             <artifactId>cloudevents-json-jackson</artifactId>
-            <version>${cloudevents.version}</version>
         </dependency>
 
         <!-- Development Tools -->
@@ -89,37 +81,31 @@
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka-test</artifactId>
-            <version>${spring-kafka.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.amqp</groupId>
             <artifactId>spring-rabbit-test</artifactId>
-            <version>${spring-amqp.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
-            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>kafka</artifactId>
-            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>rabbitmq</artifactId>
-            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

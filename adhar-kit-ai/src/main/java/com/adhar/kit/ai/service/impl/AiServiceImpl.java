@@ -129,13 +129,13 @@ public class AiServiceImpl implements AiService {
                     query.length(), limit);
 
             var results = vectorStore.similaritySearch(
-                org.springframework.ai.vectorstore.SearchRequest.query(query).withTopK(limit)
+                org.springframework.ai.vectorstore.SearchRequest.builder().query(query).topK(limit).build()
             );
 
             return results.stream()
                     .map(doc -> new SimilarityResult(
                             doc.getId(),
-                            doc.getContent(),
+                            doc.getText(),
                             0.0, // Similarity score would come from vector store
                             doc.getMetadata()
                     ))
@@ -190,13 +190,13 @@ public class AiServiceImpl implements AiService {
         try {
             log.info("Adding {} documents to knowledge base: {}", documents.size(), knowledgeBase);
 
-            var vectorDocuments = documents.stream()
+            List<org.springframework.ai.document.Document> vectorDocuments = documents.stream()
                     .map(doc -> org.springframework.ai.document.Document.builder()
-                            .withId(doc.id())
-                            .withContent(doc.content())
-                            .withMetadata("source", doc.source())
-                            .withMetadata("knowledgeBase", knowledgeBase)
-                            .withMetadata(doc.metadata())
+                            .id(doc.id())
+                            .text(doc.content())
+                            .metadata("source", doc.source())
+                            .metadata("knowledgeBase", knowledgeBase)
+                            .metadata(doc.metadata())
                             .build())
                     .toList();
 
@@ -269,7 +269,7 @@ public class AiServiceImpl implements AiService {
 
     private AiChatResponse buildChatResponse(AiChatRequest request, ChatResponse response,
                                            long processingTime) {
-        String content = response.getResults().get(0).getOutput().getContent();
+        String content = response.getResults().get(0).getOutput().getText();
 
         return AiChatResponse.builder()
                 .content(content)

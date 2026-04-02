@@ -3,9 +3,9 @@
 **Comprehensive security for enterprise applications**
 
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.java.net/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0+-brightgreen.svg)](https://spring.io/projects/spring-boot)
-[![Quarkus](https://img.shields.io/badge/Quarkus-3.x-blue.svg)](https://quarkus.io/)
-[![Micronaut](https://img.shields.io/badge/Micronaut-4.x-blue.svg)](https://micronaut.io/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.3-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Quarkus](https://img.shields.io/badge/Quarkus-3.17+-blue.svg)](https://quarkus.io/)
+[![Micronaut](https://img.shields.io/badge/Micronaut-4.8+-blue.svg)](https://micronaut.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 **Version:** 1.0.0  
@@ -25,13 +25,16 @@ A comprehensive security starter for enterprise applications based on Spring Sec
 - **Security Headers**: Comprehensive security headers configuration
 - **Content Security Policy**: Configurable Content Security Policy
 - **Authorization**: Fine-grained URL-based authorization
+- **Rate Limiting**: IP-based request throttling with configurable limits
+- **Security Audit Logging**: Structured logging for authentication events
+- **Token Refresh**: JWT token refresh with optional rotation for enhanced security
 
 ## Getting Started
 
 ### Prerequisites
 
 - Java 25 or higher
-- Spring Boot 4.0.0 or higher
+- Spring Boot 3.5.3 or higher
 
 ### Installation
 
@@ -342,6 +345,248 @@ public class CustomJwtConfig {
     }
 }
 ```
+
+## Rate Limiting
+
+Protect your APIs from abuse with configurable rate limiting.
+
+### Configuration
+
+```yaml
+adhar:
+  security:
+    rate-limit:
+      enabled: true
+      max-requests: 100      # Maximum requests per window
+      window-seconds: 60     # Time window in seconds
+```
+
+### Response Headers
+
+When rate limiting is enabled, responses include standard headers:
+
+| Header | Description |
+|--------|-------------|
+| `X-RateLimit-Limit` | Maximum requests allowed |
+| `X-RateLimit-Remaining` | Requests remaining in current window |
+| `X-RateLimit-Reset` | Unix timestamp when the window resets |
+| `Retry-After` | Seconds until requests allowed (only on 429) |
+
+### Rate Limit Exceeded Response
+
+```json
+{
+  "error": "Too Many Requests",
+  "message": "Rate limit exceeded. Try again in 45 seconds.",
+  "retryAfter": 45
+}
+```
+
+---
+
+## Security Audit Logging
+
+Track authentication events for security monitoring and compliance.
+
+### Configuration
+
+```yaml
+adhar:
+  security:
+    audit:
+      enabled: true
+      log-successful-auth: true
+      log-failed-auth: true
+      log-logout: true
+```
+
+### Audit Log Format
+
+Logs are written to the `SECURITY_AUDIT` logger:
+
+```json
+{
+  "event": "AUTHENTICATION_SUCCESS",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "principal": "user@example.com",
+  "ipAddress": "192.168.1.100",
+  "sessionId": "ABC123***",
+  "authorities": ["ROLE_USER", "ROLE_ADMIN"],
+  "details": {}
+}
+```
+
+### Event Types
+
+| Event Type | Description |
+|------------|-------------|
+| `AUTHENTICATION_SUCCESS` | Successful login |
+| `AUTHENTICATION_FAILURE_BAD_CREDENTIALS` | Invalid username/password |
+| `AUTHENTICATION_FAILURE_LOCKED` | Account locked |
+| `LOGOUT_SUCCESS` | User logged out |
+
+### Custom Audit Events
+
+```java
+@Service
+public class MyService {
+
+    @Autowired
+    private SecurityAuditLogger auditLogger;
+
+    public void sensitiveOperation(String userId) {
+        auditLogger.logCustomEvent(
+            SecurityAuditLogger.SecurityEventType.AUTHENTICATION_SUCCESS,
+            userId,
+            "192.168.1.100",
+            Map.of("action", "sensitive-data-access")
+        );
+    }
+}
+```
+
+---
+
+## Token Refresh
+
+Implement secure token refresh with optional refresh token rotation.
+
+### Configuration
+
+```yaml
+adhar:
+  security:
+    token-refresh:
+      enabled: true
+      access-token-validity-seconds: 900     # 15 minutes
+      refresh-token-validity-seconds: 604800 # 7 days
+      rotate-refresh-tokens: true            # Recommended for security
+      secret: your-256-bit-secret-key-here   # Must be 32+ characters
+```
+
+### Usage
+
+```java
+@RestController
+@RequestMapping("/auth")
+public class AuthController {
+
+    @Autowired
+    private TokenRefreshService tokenRefreshService;
+
+    @PostMapping("/login")
+    public TokenRefreshService.TokenResponse login(@RequestBody LoginRequest request) {
+        // Authenticate user...
+        User user = authenticate(request.getEmail(), request.getPassword());
+
+        // Create token pair
+        return tokenRefreshService.createTokenPair(
+            user.getId(),
+            Map.of(
+                "email", user.getEmail(),
+                "roles", user.getRoles()
+            )
+        );
+    }
+
+    @PostMapping("/refresh")
+    public TokenRefreshService.TokenResponse refresh(@RequestBody RefreshRequest request) {
+        return tokenRefreshService.refreshAccessToken(request.getRefreshToken());
+    }
+
+    @PostMapping("/logout")
+    public void logout(@RequestBody LogoutRequest request) {
+        tokenRefreshService.revokeRefreshToken(request.getRefreshToken());
+    }
+}
+```
+
+### Token Response
+
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+  "accessTokenExpiresIn": 900,
+  "refreshTokenExpiresIn": 604800,
+  "tokenType": "Bearer"
+}
+```
+
+### Refresh Token Rotation
+
+When `rotate-refresh-tokens: true`:
+
+1. Each refresh generates a new refresh token
+2. Old refresh token is invalidated
+3. Reuse of old tokens triggers family revocation (security feature)
+4. Protects against token theft
+
+### Revoking User Tokens
+
+```java
+// Revoke all refresh tokens for a user (e.g., on password change)
+tokenRefreshService.revokeAllUserTokens(userId);
+```
+
+---
+
+## Complete Configuration Example
+
+```yaml
+adhar:
+  security:
+    enabled: true
+
+    jwt:
+      enabled: true
+      issuer-uri: https://your-identity-provider.com
+      jwk-set-uri: https://your-identity-provider.com/.well-known/jwks.json
+
+    cors:
+      enabled: true
+      allowed-origins:
+        - https://your-frontend.com
+      allowed-methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+
+    rate-limit:
+      enabled: true
+      max-requests: 100
+      window-seconds: 60
+
+    audit:
+      enabled: true
+      log-successful-auth: true
+      log-failed-auth: true
+      log-logout: true
+
+    token-refresh:
+      enabled: true
+      access-token-validity-seconds: 900
+      refresh-token-validity-seconds: 604800
+      rotate-refresh-tokens: true
+      secret: ${TOKEN_REFRESH_SECRET}
+
+    csrf:
+      enabled: true
+      ignore-ant-matchers:
+        - /api/public/**
+        - /actuator/**
+
+    authorization:
+      permit-all:
+        - /public/**
+        - /auth/**
+        - /actuator/health
+      authenticated:
+        - /api/**
+```
+
+---
 
 ## License
 

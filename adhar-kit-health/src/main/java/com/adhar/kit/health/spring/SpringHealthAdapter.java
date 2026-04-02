@@ -4,8 +4,8 @@ import com.adhar.kit.health.api.HealthService;
 import com.adhar.kit.commons.framework.Framework;
 import com.adhar.kit.commons.framework.FrameworkAdapter;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.actuate.health.Health;
-import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.boot.health.contributor.Health;
+import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.stereotype.Service;
 

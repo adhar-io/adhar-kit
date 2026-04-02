@@ -42,8 +42,8 @@ public class AiConfiguration {
     @ConditionalOnProperty(name = "adhar.ai.openai.api-key")
     @ConditionalOnMissingBean(ChatModel.class)
     public ChatModel openAiChatModel() {
-        var openAiApi = new OpenAiApi(aiProperties.getOpenAi().getApiKey());
-        return new OpenAiChatModel(openAiApi);
+        var openAiApi = OpenAiApi.builder().apiKey(aiProperties.getOpenAi().getApiKey()).build();
+        return OpenAiChatModel.builder().openAiApi(openAiApi).build();
     }
 
     /**
@@ -53,7 +53,7 @@ public class AiConfiguration {
     @ConditionalOnProperty(name = "adhar.ai.openai.api-key")
     @ConditionalOnMissingBean(EmbeddingModel.class)
     public EmbeddingModel openAiEmbeddingModel() {
-        var openAiApi = new OpenAiApi(aiProperties.getOpenAi().getApiKey());
+        var openAiApi = OpenAiApi.builder().apiKey(aiProperties.getOpenAi().getApiKey()).build();
         return new OpenAiEmbeddingModel(openAiApi);
     }
 

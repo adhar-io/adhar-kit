@@ -96,9 +96,14 @@ public class AnalyticsFacade {
     private volatile boolean available = false;
 
     /**
-     * Feature flags cache (user -> flag -> value).
+     * Feature flags cache (user -> flag -> enabled).
      */
     private final Map<String, Map<String, Boolean>> featureFlagsCache = new ConcurrentHashMap<>();
+
+    /**
+     * Feature flag variants cache (user -> flag -> variant value).
+     */
+    private final Map<String, Map<String, Object>> featureFlagVariantsCache = new ConcurrentHashMap<>();
 
     /**
      * Private constructor for singleton pattern.
@@ -346,9 +351,8 @@ public class AnalyticsFacade {
                 return userFlags.get(featureKey);
             }
 
-            // Fetch from PostHog
-            // TODO: Implement feature flag check via API
-            boolean enabled = false;
+            // Fetch from PostHog /decide endpoint
+            boolean enabled = fetchFeatureFlagFromApi(userId, featureKey);
 
             // Cache result
             featureFlagsCache.computeIfAbsent(userId, k -> new ConcurrentHashMap<>())
@@ -360,6 +364,64 @@ public class AnalyticsFacade {
             return enabled;
         } catch (Exception e) {
             log.error("Failed to check feature flag: " + featureKey, e);
+            return false;
+        }
+    }
+
+    /**
+     * Fetches feature flag value from PostHog /decide API.
+     *
+     * @param userId user identifier
+     * @param featureKey feature flag key
+     * @return true if feature is enabled
+     */
+    @SuppressWarnings("unchecked")
+    private boolean fetchFeatureFlagFromApi(String userId, String featureKey) {
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("api_key", apiKey);
+            payload.put("distinct_id", userId);
+
+            String json = objectMapper.writeValueAsString(payload);
+            RequestBody body = RequestBody.create(json, MediaType.parse("application/json"));
+
+            Request request = new Request.Builder()
+                .url(apiUrl + "/decide/?v=3")
+                .post(body)
+                .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    log.warn("PostHog /decide API call failed: {}", response.code());
+                    return false;
+                }
+
+                String responseBody = response.body().string();
+                Map<String, Object> result = objectMapper.readValue(responseBody, Map.class);
+
+                // Check featureFlags map
+                Map<String, Object> featureFlags = (Map<String, Object>) result.get("featureFlags");
+                if (featureFlags != null && featureFlags.containsKey(featureKey)) {
+                    Object value = featureFlags.get(featureKey);
+
+                    // Cache the variant value
+                    featureFlagVariantsCache.computeIfAbsent(userId, k -> new ConcurrentHashMap<>())
+                        .put(featureKey, value);
+
+                    // Return boolean based on value type
+                    if (value instanceof Boolean) {
+                        return (Boolean) value;
+                    } else if (value instanceof String) {
+                        return !value.toString().isEmpty() && !"false".equalsIgnoreCase(value.toString());
+                    } else {
+                        return value != null;
+                    }
+                }
+
+                return false;
+            }
+        } catch (IOException e) {
+            log.error("Failed to fetch feature flag from PostHog", e);
             return false;
         }
     }
@@ -385,9 +447,24 @@ public class AnalyticsFacade {
         }
 
         try {
-            // TODO: Implement feature flag value retrieval via API
-            Object value = null;
-            return value != null ? value.toString() : null;
+            // Check variants cache first
+            Map<String, Object> userVariants = featureFlagVariantsCache.get(userId);
+            if (userVariants != null && userVariants.containsKey(featureKey)) {
+                Object value = userVariants.get(featureKey);
+                return value != null ? value.toString() : null;
+            }
+
+            // Fetch from API (this will also populate the cache)
+            isFeatureEnabled(userId, featureKey);
+
+            // Now check cache again
+            userVariants = featureFlagVariantsCache.get(userId);
+            if (userVariants != null && userVariants.containsKey(featureKey)) {
+                Object value = userVariants.get(featureKey);
+                return value != null ? value.toString() : null;
+            }
+
+            return null;
         } catch (Exception e) {
             log.error("Failed to get feature flag value: " + featureKey, e);
             return null;
@@ -406,11 +483,82 @@ public class AnalyticsFacade {
 
         try {
             log.info("Reloading feature flags from PostHog");
-            // TODO: Implement feature flags reload via API
-            log.debug("Feature flags reload requested");
+
+            // Clear all caches
             featureFlagsCache.clear();
+            featureFlagVariantsCache.clear();
+
+            log.info("Feature flags cache cleared - flags will be fetched on next access");
         } catch (Exception e) {
             log.error("Failed to reload feature flags", e);
+        }
+    }
+
+    /**
+     * Preloads feature flags for a specific user.
+     *
+     * <p>This method fetches all feature flags for a user from PostHog and caches them.
+     * Useful for reducing API calls when you know you'll check multiple flags for the same user.</p>
+     *
+     * @param userId user identifier
+     */
+    @SuppressWarnings("unchecked")
+    public void preloadFeatureFlags(String userId) {
+        if (!available) {
+            return;
+        }
+
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("api_key", apiKey);
+            payload.put("distinct_id", userId);
+
+            String json = objectMapper.writeValueAsString(payload);
+            RequestBody body = RequestBody.create(json, MediaType.parse("application/json"));
+
+            Request request = new Request.Builder()
+                .url(apiUrl + "/decide/?v=3")
+                .post(body)
+                .build();
+
+            try (Response response = httpClient.newCall(request).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    log.warn("PostHog /decide API call failed during preload: {}", response.code());
+                    return;
+                }
+
+                String responseBody = response.body().string();
+                Map<String, Object> result = objectMapper.readValue(responseBody, Map.class);
+
+                Map<String, Object> featureFlags = (Map<String, Object>) result.get("featureFlags");
+                if (featureFlags != null) {
+                    Map<String, Boolean> userFlags = featureFlagsCache.computeIfAbsent(userId, k -> new ConcurrentHashMap<>());
+                    Map<String, Object> userVariants = featureFlagVariantsCache.computeIfAbsent(userId, k -> new ConcurrentHashMap<>());
+
+                    for (Map.Entry<String, Object> entry : featureFlags.entrySet()) {
+                        String flagKey = entry.getKey();
+                        Object value = entry.getValue();
+
+                        // Store variant value
+                        userVariants.put(flagKey, value);
+
+                        // Determine boolean value
+                        boolean enabled;
+                        if (value instanceof Boolean) {
+                            enabled = (Boolean) value;
+                        } else if (value instanceof String) {
+                            enabled = !value.toString().isEmpty() && !"false".equalsIgnoreCase(value.toString());
+                        } else {
+                            enabled = value != null;
+                        }
+                        userFlags.put(flagKey, enabled);
+                    }
+
+                    log.debug("Preloaded {} feature flags for user {}", featureFlags.size(), userId);
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to preload feature flags for user: " + userId, e);
         }
     }
 

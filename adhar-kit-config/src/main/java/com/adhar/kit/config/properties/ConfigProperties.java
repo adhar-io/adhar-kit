@@ -157,14 +157,29 @@ public class ConfigProperties {
         private String algorithm = "AES";
 
         /**
-         * Key location.
+         * Encryption key (direct value - prefer using environment variable ADHAR_CONFIG_ENCRYPTION_KEY).
+         */
+        private String key;
+
+        /**
+         * Key location (file path to encryption key).
          */
         private String keyLocation;
 
         /**
-         * Key alias.
+         * Key alias (for keystore-based encryption).
          */
         private String keyAlias;
+
+        /**
+         * Prefix for encrypted values (default: ENC()).
+         */
+        private String encryptedPrefix = "ENC(";
+
+        /**
+         * Suffix for encrypted values (default: )).
+         */
+        private String encryptedSuffix = ")";
     }
 
     /**

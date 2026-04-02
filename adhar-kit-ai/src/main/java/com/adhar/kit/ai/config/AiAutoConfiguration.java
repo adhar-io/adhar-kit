@@ -3,13 +3,14 @@ package com.adhar.kit.ai.config;
 import com.adhar.kit.ai.AiFacade;
 import com.adhar.kit.ai.aspect.*;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 
 /**
@@ -17,18 +18,34 @@ import org.springframework.context.annotation.EnableAspectJAutoProxy;
  *
  * <p>Automatically configures AI aspects and components when the module is present.</p>
  *
+ * <p><b>Features:</b></p>
+ * <ul>
+ *   <li>Multi-provider AI integration (OpenAI, Anthropic, Google, local models)</li>
+ *   <li>@AiChat annotation for declarative chat completions</li>
+ *   <li>@AiEmbedding annotation for vector embeddings</li>
+ *   <li>@AiCache annotation for response caching</li>
+ *   <li>@AiMetrics annotation for performance metrics</li>
+ * </ul>
+ *
  * <p><b>Configuration Properties:</b></p>
- * <pre>
- * adhar.ai.enabled=true
- * adhar.ai.annotations.enabled=true
- * adhar.ai.cache.enabled=true
- * adhar.ai.metrics.enabled=true
- * </pre>
+ * <pre>{@code
+ * adhar:
+ *   ai:
+ *     enabled: true
+ *     default-provider: openai
+ *     annotations.enabled: true
+ *     cache.enabled: true
+ *     metrics.enabled: true
+ *     openai:
+ *       api-key: ${OPENAI_API_KEY}
+ *       model: gpt-4
+ * }</pre>
  *
  * @author Adhar Platform Team
  * @since 1.0.0
  */
-@Configuration
+@Slf4j
+@AutoConfiguration
 @EnableAspectJAutoProxy
 @EnableConfigurationProperties(AiProperties.class)
 @ConditionalOnProperty(
@@ -37,8 +54,12 @@ import org.springframework.context.annotation.EnableAspectJAutoProxy;
     havingValue = "true",
     matchIfMissing = true
 )
-@Slf4j
 public class AiAutoConfiguration {
+
+    @PostConstruct
+    public void logAiConfiguration() {
+        log.info("Adhar AI module initialized - multi-provider AI integration enabled");
+    }
 
     /**
      * Creates AiFacade bean.

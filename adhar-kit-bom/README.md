@@ -3,9 +3,9 @@
 **Centralized dependency management for the Adhar Kit Enterprise Platform**
 
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.java.net/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0+-brightgreen.svg)](https://spring.io/projects/spring-boot)
-[![Quarkus](https://img.shields.io/badge/Quarkus-3.x-blue.svg)](https://quarkus.io/)
-[![Micronaut](https://img.shields.io/badge/Micronaut-4.x-blue.svg)](https://micronaut.io/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.3-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Quarkus](https://img.shields.io/badge/Quarkus-3.17+-blue.svg)](https://quarkus.io/)
+[![Micronaut](https://img.shields.io/badge/Micronaut-4.8+-blue.svg)](https://micronaut.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 **Version:** 1.0.0  
@@ -162,11 +162,11 @@ Add the BOM to your project's `pom.xml`:
 
 | Dependency | Version | Notes |
 |------------|---------|-------|
-| Spring Boot | 4.0.0 | Java 25 LTS compatible (GA) |
-| Spring Framework | 6.2.1 | Included with Boot |
+| Spring Boot | 3.5.3 | Java 25 compatible (Latest Stable) |
+| Spring Framework | 6.2.6 | Included with Boot |
 | Spring Cloud | 2024.0.0 | Latest release |
-| Spring Kafka | 3.3.0 | Kafka integration |
-| Spring AMQP | 3.2.0 | RabbitMQ support |
+| Spring Kafka | 3.3.4 | Kafka integration |
+| Spring AMQP | 3.2.4 | RabbitMQ support |
 
 ### Core Libraries
 
@@ -243,7 +243,7 @@ Add the BOM to your project's `pom.xml`:
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.0</version>
+        <version>3.5.3</version>
     </parent>
 
     <dependencyManagement>
@@ -666,7 +666,7 @@ Update BOM version to get all module updates:
 
 | Adhar Kit BOM | Java | Spring Boot | Spring Cloud |
 |---------------|------|-------------|--------------|
-| 1.0.0 | 25 | 3.4.0 | 2024.0.0 |
+| 1.0.0 | 25 | 3.5.3 | 2024.0.0 |
 
 ### Framework Compatibility
 
@@ -682,10 +682,10 @@ Update BOM version to get all module updates:
 
 **The Adhar Kit BOM provides:**
 
-✅ **23 Production-Ready Modules** - Complete microservices toolkit  
-✅ **Centralized Version Management** - No version conflicts  
-✅ **Java 25 Compatible** - Latest LTS support  
-✅ **Spring Boot 4.0+** - Modern Spring ecosystem  
+✅ **23 Production-Ready Modules** - Complete microservices toolkit
+✅ **Centralized Version Management** - No version conflicts
+✅ **Java 25 Compatible** - Latest Java support
+✅ **Spring Boot 3.5+** - Modern Spring ecosystem  
 ✅ **Cloud Native** - Kubernetes, Dapr ready  
 ✅ **AI Ready** - Spring AI, LangChain4j  
 ✅ **Analytics Ready** - PostHog integration  

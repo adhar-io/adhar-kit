@@ -13,7 +13,7 @@
     <artifactId>adhar-kit-commons</artifactId>
     <name>adhar-kit-commons</name>
     <version>0.0.1-SNAPSHOT</version>
-    <description>Core Common Library (DTOs/Records, Utils, Exceptions, Error DTO)</description>
+    <description>Core Common Library (DTOs/Records, Utils, Exceptions, Error DTO etc)</description>
 
     <dependencies>
         <dependency>

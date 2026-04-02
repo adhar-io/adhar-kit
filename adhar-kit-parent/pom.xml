@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.1</version>
+        <version>4.0.2</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.adhar.kit</groupId>
@@ -55,7 +55,31 @@
             <id>projectlombok.org</id>
             <url>https://projectlombok.org/edge-releases</url>
         </repository>
+        <repository>
+            <id>spring-milestones</id>
+            <name>Spring Milestones</name>
+            <url>https://repo.spring.io/milestone</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>spring-snapshots</id>
+            <name>Spring Snapshots</name>
+            <url>https://repo.spring.io/snapshot</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
+        </repository>
     </repositories>
+
+    <pluginRepositories>
+        <pluginRepository>
+            <id>spring-milestones</id>
+            <name>Spring Milestones</name>
+            <url>https://repo.spring.io/milestone</url>
+        </pluginRepository>
+    </pluginRepositories>
 
     <properties>
         <!-- ===================================================================== -->
@@ -78,68 +102,51 @@
         <!-- Lombok - Java 25 compatible edge version -->
         <lombok.version>edge-SNAPSHOT</lombok.version>
 
-        <!-- Spring Boot components (explicit versions for Spring Boot 4.0) -->
-        <spring-boot.version>3.4.1</spring-boot.version>
+        <!-- Spring Boot components (explicit versions for Spring Boot 4.0.x) -->
+        <spring-boot.version>4.0.2</spring-boot.version>
 
         <!-- Testing dependencies -->
-        <rest-assured.version>5.4.0</rest-assured.version>
+        <rest-assured.version>5.5.1</rest-assured.version>
 
         <!-- ===================================================================== -->
-        <!-- AI & Machine Learning (v1.1.0+)                                       -->
-        <!-- ===================================================================== -->
-        <!-- Additional AI model providers beyond OpenAI -->
-        <anthropic.version>1.0.0</anthropic.version>
-        <google-ai.version>1.0.0</google-ai.version>
-        <llama.version>1.0.0</llama.version>
-
-        <!-- ===================================================================== -->
-        <!-- API Technologies (v1.1.0+)                                            -->
+        <!-- API Technologies                                                       -->
         <!-- ===================================================================== -->
         <!-- GraphQL support for flexible APIs -->
-        <graphql-spring-boot.version>15.0.0</graphql-spring-boot.version>
-        <graphql-java.version>21.0</graphql-java.version>
+        <graphql-java.version>22.3</graphql-java.version>
 
         <!-- ===================================================================== -->
-        <!-- Native Compilation (v1.2.0+)                                          -->
+        <!-- Native Compilation                                                     -->
         <!-- ===================================================================== -->
         <!-- GraalVM Native Image for fast startup and low memory -->
-        <native-maven-plugin.version>0.10.3</native-maven-plugin.version>
+        <native-maven-plugin.version>0.10.6</native-maven-plugin.version>
 
         <!-- ===================================================================== -->
-        <!-- Cloud Provider SDKs (v1.2.0+)                                         -->
+        <!-- Cloud Provider SDKs                                                    -->
         <!-- ===================================================================== -->
         <!-- Multi-cloud support: AWS, Azure, GCP -->
-        <aws-sdk.version>2.30.0</aws-sdk.version>
-        <azure-sdk.version>1.17.0</azure-sdk.version>
-        <google-cloud.version>26.55.0</google-cloud.version>
+        <aws-sdk.version>2.31.1</aws-sdk.version>
+        <azure-sdk.version>1.18.0</azure-sdk.version>
+        <google-cloud.version>26.58.0</google-cloud.version>
 
         <!-- ===================================================================== -->
-        <!-- Observability & Tracing (v1.2.0+)                                     -->
+        <!-- Observability & Tracing                                                -->
         <!-- ===================================================================== -->
         <!-- OpenTelemetry for vendor-neutral observability -->
-        <opentelemetry.version>1.45.0</opentelemetry.version>
-        <opentelemetry-instrumentation.version>2.12.0</opentelemetry-instrumentation.version>
+        <opentelemetry.version>1.51.0</opentelemetry.version>
+        <opentelemetry-instrumentation.version>2.14.0</opentelemetry-instrumentation.version>
 
         <!-- ===================================================================== -->
-        <!-- Service Mesh (v2.0.0+)                                                -->
+        <!-- Streaming & Analytics                                                  -->
         <!-- ===================================================================== -->
-        <!-- Istio and Linkerd support for advanced traffic management -->
-        <istio-client.version>1.20.0</istio-client.version>
-        <linkerd-client.version>2.14.0</linkerd-client.version>
-
-        <!-- ===================================================================== -->
-        <!-- Streaming & Analytics (v2.0.0+)                                       -->
-        <!-- ===================================================================== -->
-        <!-- Real-time data processing with Flink and Kafka Streams -->
-        <flink.version>1.20.0</flink.version>
+        <!-- Real-time data processing with Kafka Streams -->
         <kafka-streams.version>3.9.0</kafka-streams.version>
 
         <!-- ===================================================================== -->
         <!-- Maven Plugin Versions                                                  -->
         <!-- ===================================================================== -->
         <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
-        <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
-        <maven-failsafe-plugin.version>3.5.2</maven-failsafe-plugin.version>
+        <maven-surefire-plugin.version>3.5.3</maven-surefire-plugin.version>
+        <maven-failsafe-plugin.version>3.5.3</maven-failsafe-plugin.version>
         <maven-release-plugin.version>3.1.1</maven-release-plugin.version>
         <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
         <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
@@ -176,7 +183,7 @@
             <!-- Explicit versions for Spring Boot 4.0 components -->
             <dependency>
                 <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-starter-aop</artifactId>
+                <artifactId>spring-boot-starter-aspectj</artifactId>
                 <version>${spring-boot.version}</version>
             </dependency>
             <dependency>
@@ -186,7 +193,7 @@
             </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-starter-web</artifactId>
+                <artifactId>spring-boot-starter-webmvc</artifactId>
                 <version>${spring-boot.version}</version>
             </dependency>
             <dependency>
@@ -240,22 +247,7 @@
             </dependency>
 
             <!-- ================================================================= -->
-            <!-- GraphQL Support (v1.1.0+)                                         -->
-            <!-- ================================================================= -->
-            <!-- Modern GraphQL API support as alternative to REST                -->
-            <dependency>
-                <groupId>com.graphql-java</groupId>
-                <artifactId>graphql-java</artifactId>
-                <version>${graphql-java.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.graphql-java</groupId>
-                <artifactId>graphql-java-spring-boot-starter-webmvc</artifactId>
-                <version>${graphql-spring-boot.version}</version>
-            </dependency>
-
-            <!-- ================================================================= -->
-            <!-- Cloud Provider SDKs (v1.2.0+)                                     -->
+            <!-- Cloud Provider SDKs                                               -->
             <!-- ================================================================= -->
 
             <!-- AWS SDK v2 - Comprehensive AWS services support -->
@@ -288,7 +280,7 @@
             </dependency>
 
             <!-- ================================================================= -->
-            <!-- OpenTelemetry (v1.2.0+)                                           -->
+            <!-- OpenTelemetry                                                     -->
             <!-- ================================================================= -->
             <!-- Vendor-neutral observability framework for traces, metrics, logs -->
 
@@ -311,15 +303,8 @@
             </dependency>
 
             <!-- ================================================================= -->
-            <!-- Streaming & Analytics (v2.0.0+)                                   -->
+            <!-- Streaming & Analytics                                             -->
             <!-- ================================================================= -->
-
-            <!-- Apache Flink - Stateful stream processing -->
-            <dependency>
-                <groupId>org.apache.flink</groupId>
-                <artifactId>flink-streaming-java</artifactId>
-                <version>${flink.version}</version>
-            </dependency>
 
             <!-- Kafka Streams - Stream processing on Kafka -->
             <dependency>

@@ -15,70 +15,92 @@
             <id>projectlombok.org</id>
             <url>https://projectlombok.org/edge-releases</url>
         </repository>
+        <repository>
+            <id>spring-milestones</id>
+            <name>Spring Milestones</name>
+            <url>https://repo.spring.io/milestone</url>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>spring-snapshots</id>
+            <name>Spring Snapshots</name>
+            <url>https://repo.spring.io/snapshot</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
+        </repository>
     </repositories>
 
     <properties>
         <java.version>25</java.version>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- Adhar Kit Version -->
         <adhar-kit.version>1.0.0</adhar-kit.version>
 
-        <!-- Spring Ecosystem -->
-        <spring-boot.version>3.4.1</spring-boot.version>
-        <spring-framework.version>6.2.1</spring-framework.version>
-        <spring-cloud.version>2024.0.0</spring-cloud.version>
-        <spring-kafka.version>3.3.0</spring-kafka.version>
-        <spring-rabbit.version>3.2.0</spring-rabbit.version>
+        <!-- Spring Ecosystem - Spring Boot 4.0.x + Spring Framework 7.0.x -->
+        <spring-boot.version>4.0.2</spring-boot.version>
+        <spring-framework.version>7.0.2</spring-framework.version>
+        <spring-cloud.version>2025.0.0</spring-cloud.version>
+        <spring-kafka.version>3.3.7</spring-kafka.version>
+        <spring-rabbit.version>3.2.5</spring-rabbit.version>
 
         <!-- Code Generation -->
         <lombok.version>edge-SNAPSHOT</lombok.version>
-        <mapstruct.version>1.6.0</mapstruct.version>
+        <mapstruct.version>1.6.3</mapstruct.version>
 
         <!-- Resilience & Observability -->
         <resilience4j.version>2.3.0</resilience4j.version>
         <micrometer.version>1.15.0</micrometer.version>
         <micrometer-tracing.version>1.5.0</micrometer-tracing.version>
-        <opentelemetry.version>1.45.0</opentelemetry.version>
+        <opentelemetry.version>1.51.0</opentelemetry.version>
 
         <!-- Logging -->
-        <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
-        <janino.version>3.1.10</janino.version>
+        <logstash-logback-encoder.version>8.1</logstash-logback-encoder.version>
+        <janino.version>3.1.12</janino.version>
 
         <!-- Persistence -->
         <jakarta-persistence.version>3.2.0</jakarta-persistence.version>
         <jakarta-validation.version>3.1.0</jakarta-validation.version>
         <querydsl.version>5.1.0</querydsl.version>
-        <flyway.version>10.20.0</flyway.version>
-        <liquibase.version>4.30.0</liquibase.version>
+        <flyway.version>11.8.2</flyway.version>
+        <liquibase.version>4.32.0</liquibase.version>
 
         <!-- API Documentation -->
-        <springdoc-openapi.version>2.8.0</springdoc-openapi.version>
+        <springdoc-openapi.version>2.8.6</springdoc-openapi.version>
 
         <!-- gRPC -->
-        <grpc.version>1.70.0</grpc.version>
-        <protobuf.version>4.29.0</protobuf.version>
-        <grpc-spring-boot-starter.version>3.2.0</grpc-spring-boot-starter.version>
+        <grpc.version>1.73.0</grpc.version>
+        <protobuf.version>4.29.5</protobuf.version>
+        <grpc-spring-boot-starter.version>3.4.0</grpc-spring-boot-starter.version>
 
         <!-- Cloud Native -->
-        <dapr-sdk.version>1.14.0</dapr-sdk.version>
-        <kubernetes-client.version>7.1.0</kubernetes-client.version>
+        <dapr-sdk.version>1.14.1</dapr-sdk.version>
+        <kubernetes-client.version>7.3.1</kubernetes-client.version>
 
         <!-- AI Integration -->
-        <spring-ai.version>1.0.0</spring-ai.version>
-        <langchain4j.version>0.38.0</langchain4j.version>
+        <spring-ai.version>1.0.0-SNAPSHOT</spring-ai.version>
+        <langchain4j.version>1.0.0</langchain4j.version>
 
         <!-- Analytics -->
-        <posthog.version>3.1.1</posthog.version>
+        <posthog.version>3.8.1</posthog.version>
+
+        <!-- Notification -->
+        <jakarta-mail.version>2.1.3</jakarta-mail.version>
 
         <!-- Testing -->
-        <testcontainers.version>1.20.4</testcontainers.version>
-        <mockito.version>5.15.2</mockito.version>
-        <byte-buddy.version>1.17.0</byte-buddy.version>
-        <wiremock.version>3.10.0</wiremock.version>
+        <testcontainers.version>1.21.3</testcontainers.version>
+        <mockito.version>5.18.0</mockito.version>
+        <byte-buddy.version>1.17.5</byte-buddy.version>
+        <wiremock.version>3.13.1</wiremock.version>
         <awaitility.version>4.2.2</awaitility.version>
+
+        <!-- CloudEvents -->
+        <cloudevents.version>2.5.0</cloudevents.version>
     </properties>
 
     <dependencyManagement>
@@ -240,6 +262,41 @@
             </dependency>
 
 
+            <!-- GraphQL -->
+            <dependency>
+                <groupId>com.adhar.kit</groupId>
+                <artifactId>adhar-kit-graphql</artifactId>
+                <version>${adhar-kit.version}</version>
+            </dependency>
+
+            <!-- Batch Processing -->
+            <dependency>
+                <groupId>com.adhar.kit</groupId>
+                <artifactId>adhar-kit-batch</artifactId>
+                <version>${adhar-kit.version}</version>
+            </dependency>
+
+            <!-- Notification -->
+            <dependency>
+                <groupId>com.adhar.kit</groupId>
+                <artifactId>adhar-kit-notification</artifactId>
+                <version>${adhar-kit.version}</version>
+            </dependency>
+
+            <!-- Event Sourcing -->
+            <dependency>
+                <groupId>com.adhar.kit</groupId>
+                <artifactId>adhar-kit-event-sourcing</artifactId>
+                <version>${adhar-kit.version}</version>
+            </dependency>
+
+            <!-- Performance Profiler -->
+            <dependency>
+                <groupId>com.adhar.kit</groupId>
+                <artifactId>adhar-kit-perf-profiler</artifactId>
+                <version>${adhar-kit.version}</version>
+            </dependency>
+
             <!-- All-in-One Starter -->
             <dependency>
                 <groupId>com.adhar.kit</groupId>
@@ -277,11 +334,32 @@
                 <version>${springdoc-openapi.version}</version>
             </dependency>
 
-            <!-- Resilience4j -->
+            <!-- CloudEvents -->
+            <dependency>
+                <groupId>io.cloudevents</groupId>
+                <artifactId>cloudevents-core</artifactId>
+                <version>${cloudevents.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.cloudevents</groupId>
+                <artifactId>cloudevents-json-jackson</artifactId>
+                <version>${cloudevents.version}</version>
+            </dependency>
+
+            <!-- Resilience4j - Spring Boot 4 compatible -->
             <dependency>
                 <groupId>io.github.resilience4j</groupId>
                 <artifactId>resilience4j-spring-boot3</artifactId>
                 <version>${resilience4j.version}</version>
+            </dependency>
+
+            <!-- Resilience4j BOM for consistent versions -->
+            <dependency>
+                <groupId>io.github.resilience4j</groupId>
+                <artifactId>resilience4j-bom</artifactId>
+                <version>${resilience4j.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
             </dependency>
 
             <!-- Micrometer -->

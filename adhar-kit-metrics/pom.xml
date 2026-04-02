@@ -15,10 +15,10 @@
     <description>Adhar Platform - Metrics Starter (Common Tags/Config) with Prometheus and OpenTelemetry support</description>
 
     <properties>
-        <opentelemetry.version>1.37.0</opentelemetry.version>
-        <micrometer.version>1.13.0</micrometer.version>
-        <quarkus.version>3.16.3</quarkus.version>
-        <micronaut.version>4.7.5</micronaut.version>
+        <opentelemetry.version>1.51.0</opentelemetry.version>
+        <micrometer.version>1.15.0</micrometer.version>
+        <quarkus.version>3.21.0</quarkus.version>
+        <micronaut.version>4.8.0</micronaut.version>
     </properties>
 
     <dependencyManagement>
@@ -56,7 +56,7 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-aop</artifactId>
+            <artifactId>spring-boot-starter-aspectj</artifactId>
             <optional>true</optional>
         </dependency>
         <dependency>
@@ -66,7 +66,7 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
             <optional>true</optional>
         </dependency>
 
@@ -139,7 +139,7 @@
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-client</artifactId>
-            <version>6.8.1</version>
+            <version>7.3.1</version>
             <optional>true</optional>
         </dependency>
 

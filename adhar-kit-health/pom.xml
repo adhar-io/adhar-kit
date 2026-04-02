@@ -15,8 +15,8 @@
     <description>Adhar Platform - Health Check Starter (Custom Indicators)</description>
 
     <properties>
-        <quarkus.version>3.16.3</quarkus.version>
-        <micronaut.version>4.7.5</micronaut.version>
+        <quarkus.version>3.21.0</quarkus.version>
+        <micronaut.version>4.8.0</micronaut.version>
     </properties>
 
     <dependencyManagement>
@@ -85,6 +85,46 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <scope>provided</scope>
+        </dependency>
+
+        <!-- Redis (Optional) -->
+        <dependency>
+            <groupId>org.springframework.data</groupId>
+            <artifactId>spring-data-redis</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Kafka (Optional) -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- MongoDB (Optional) -->
+        <dependency>
+            <groupId>org.mongodb</groupId>
+            <artifactId>mongodb-driver-sync</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Elasticsearch (Optional) -->
+        <dependency>
+            <groupId>co.elastic.clients</groupId>
+            <artifactId>elasticsearch-java</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- gRPC Health (Optional) -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-services</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+            <optional>true</optional>
         </dependency>
     </dependencies>
 </project>

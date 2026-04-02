@@ -4,8 +4,11 @@ import com.adhar.kit.persistence.auditing.AuditorAwareImpl;
 import com.adhar.kit.persistence.multitenancy.TenantIdentifierResolver;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -21,16 +24,46 @@ import javax.sql.DataSource;
 /**
  * Auto-configuration for Adhar Persistence module.
  *
+ * <p>Provides JPA configuration with auditing, multi-tenancy support,
+ * and optimized connection pooling via HikariCP.</p>
+ *
+ * <p><b>Features:</b></p>
+ * <ul>
+ *   <li>JPA Auditing with automatic created/modified timestamps</li>
+ *   <li>Multi-tenancy support (schema-based or discriminator)</li>
+ *   <li>Optimized HikariCP connection pool settings</li>
+ *   <li>Transaction management</li>
+ * </ul>
+ *
+ * <p><b>Configuration Example:</b></p>
+ * <pre>{@code
+ * adhar:
+ *   persistence:
+ *     enabled: true
+ *     enable-auditing: true
+ *     enable-multi-tenancy: false
+ *     connection-pool:
+ *       maximum-pool-size: 20
+ *       minimum-idle: 5
+ *       connection-timeout: 30000
+ * }</pre>
+ *
  * @author Adhar Platform Team
  * @since 1.0.0
  */
 @Slf4j
-@Configuration
+@AutoConfiguration
 @EnableTransactionManagement
 @EnableJpaRepositories(basePackages = "com.adhar")
 @EnableConfigurationProperties(PersistenceProperties.class)
 @ConditionalOnProperty(prefix = "adhar.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnClass(name = "jakarta.persistence.EntityManager")
 public class PersistenceAutoConfiguration {
+
+    @PostConstruct
+    public void logPersistenceConfiguration() {
+        log.info("Adhar Persistence module initialized with JPA support");
+    }
 
     @Slf4j
     @Configuration

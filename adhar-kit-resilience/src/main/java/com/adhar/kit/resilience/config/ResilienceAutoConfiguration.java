@@ -20,7 +20,9 @@ import io.github.resilience4j.retry.RetryRegistry;
 import io.github.resilience4j.timelimiter.TimeLimiterConfig;
 import io.github.resilience4j.timelimiter.TimeLimiterRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -33,17 +35,56 @@ import java.time.Duration;
 
 /**
  * Auto-configuration for Adhar Resilience module.
- * Configures Resilience4j registries and metrics.
+ *
+ * <p>Configures Resilience4j registries and metrics with declarative annotation support.</p>
+ *
+ * <p><b>Features:</b></p>
+ * <ul>
+ *   <li>Circuit Breaker - Prevents cascading failures</li>
+ *   <li>Retry - Automatic retry with exponential backoff</li>
+ *   <li>Rate Limiter - Request rate limiting</li>
+ *   <li>Bulkhead - Concurrent request isolation</li>
+ *   <li>Time Limiter - Timeout management</li>
+ *   <li>Micrometer metrics integration</li>
+ * </ul>
+ *
+ * <p><b>Configuration Example:</b></p>
+ * <pre>{@code
+ * adhar:
+ *   resilience:
+ *     enabled: true
+ *     circuit-breaker:
+ *       default:
+ *         failure-rate-threshold: 50
+ *         slow-call-rate-threshold: 100
+ *         wait-duration-in-open-state: 60s
+ *     retry:
+ *       default:
+ *         max-attempts: 3
+ *         wait-duration: 500ms
+ *     rate-limiter:
+ *       default:
+ *         limit-for-period: 10
+ *         limit-refresh-period: 1s
+ *     metrics:
+ *       enabled: true
+ * }</pre>
  *
  * @author Adhar Platform Team
  * @since 1.0.0
  */
 @Slf4j
-@Configuration
+@AutoConfiguration
 @EnableAspectJAutoProxy
 @EnableConfigurationProperties(ResilienceProperties.class)
 @ConditionalOnProperty(prefix = "adhar.resilience", name = "enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnClass(name = "io.github.resilience4j.circuitbreaker.CircuitBreaker")
 public class ResilienceAutoConfiguration {
+
+    @PostConstruct
+    public void logResilienceConfiguration() {
+        log.info("Adhar Resilience module initialized with Resilience4j patterns (CircuitBreaker, Retry, RateLimiter, Bulkhead, TimeLimiter)");
+    }
 
     @Bean
     @ConditionalOnMissingBean

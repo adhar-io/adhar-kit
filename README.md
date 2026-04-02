@@ -2,56 +2,21 @@
 
 ---
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/adhar-platform/adhar-kit)
-[![Java](https://img.shields.io/badge/Java-25_LTS-orange.svg)](https://openjdk.org/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-green.svg)](https://spring.io/projects/spring-boot)
-[![Quarkus](https://img.shields.io/badge/Quarkus-3.6+-blue.svg)](https://quarkus.io/)
-[![Micronaut](https://img.shields.io/badge/Micronaut-4.2+-purple.svg)](https://micronaut.io/)
+[![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.org/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.2-green.svg)](https://spring.io/projects/spring-boot)
+[![Quarkus](https://img.shields.io/badge/Quarkus-3.17+-blue.svg)](https://quarkus.io/)
+[![Micronaut](https://img.shields.io/badge/Micronaut-4.8+-purple.svg)](https://micronaut.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Build](https://img.shields.io/badge/Build-Passing-success.svg)](https://github.com/adhar-platform/adhar-kit)
 [![Coverage](https://img.shields.io/badge/Coverage-80%25+-brightgreen.svg)](https://github.com/adhar-platform/adhar-kit)
 
-> **A comprehensive, framework-agnostic enterprise microservices platform for Spring Boot, Quarkus, and Micronaut.**
+> **A comprehensive, framework-agnostic enterprise microservices toolkit for Spring Boot, Quarkus, and Micronaut.**
 
 ## 📖 Overview
 
-**Adhar Kit** is a complete enterprise microservices platform that works seamlessly across **Spring Boot**, **Quarkus**, and **Micronaut**. It provides **21 production-ready modules** covering all aspects of modern cloud-native applications.
-
-<table>
-<tr>
-<td width="50%">
-
-### 🌟 Complete Platform
-
-| Feature | Status |
-|---------|--------|
-| Production Modules | **21 Ready** |
-| Framework Support | Spring Boot 4.0+, Quarkus 3.6+, Micronaut 4.2+ |
-| Java Version | **25 LTS** |
-| Test Coverage | **80%+** |
-| API Documentation | **100% JavaDoc** |
-
-</td>
-<td width="50%">
-
-### 🚀 Advanced Capabilities
-
-| Capability | Description |
-|------------|-------------|
-| 🤖 **AI/ML** | OpenAI, Claude, Gemini, Llama |
-| ☁️ **Multi-Cloud** | AWS, Azure, GCP native SDKs |
-| 📊 **GraphQL** | Subscriptions & Federation |
-| 🔄 **Service Mesh** | Istio & Linkerd |
-| 📈 **Streaming** | Flink & Kafka Streams |
-| 🔒 **Security** | JWT, OAuth2, RBAC, MFA |
-| 📡 **Observability** | OpenTelemetry auto-instrumentation |
-
-</td>
-</tr>
-</table>
+**Adhar Kit** is a complete enterprise microservices toolkit that works seamlessly across **Spring Boot**, **Quarkus**, and **Micronaut**. It provides **foundational production-ready modules** covering all aspects of modern cloud-native applications.
 
 ### Why Adhar Kit?
-
-#### 🚀 Seamless Platform Integration
 
 **Unlock the Full Power of Adhar Platform:**
 
@@ -59,24 +24,24 @@ Adhar Kit is the developer toolkit that bridges your applications to the **Adhar
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           YOUR APPLICATION                                   │
-│                     (Business Logic & Features)                              │
+│                           YOUR APPLICATION                                  │
+│                     (Business Logic & Features)                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                            ADHAR KIT                                         │
-│           (**21 Modules - Single Facade - Framework Agnostic)                  │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐   │
-│  │ Logging │ │ Metrics │ │ Tracing │ │  Cache  │ │Security │ │   AI    │   │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘   │
+│                            ADHAR KIT                                        │
+│           (**27 Modules - Single Facade - Framework Agnostic)               │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐    │
+│  │ Logging │ │ Metrics │ │ Tracing │ │  Cache  │ │Security │ │   AI    │    │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘    │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                          ADHAR PLATFORM                                      │
-│     (Managed Infrastructure - Service Mesh - Observability - Security)       │
+│                          ADHAR PLATFORM                                     │
+│     (Managed Infrastructure - Service Mesh - Observability - Security)      │
 │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐    │
-│  │  Kubernetes   │ │     Dapr      │ │  Prometheus   │ │    Istio      │    │
-│  │   Cluster     │ │   Runtime     │ │   + Grafana   │ │  Service Mesh │    │
+│  │  Kubernetes   │ │     Dapr      │ │  Prometheus   │ │   Cilium      │    │
+│  │   Cluster     │ │   Runtime     │ │   + Grafana   │ │  eBPF Mesh    │    │
 │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘    │
 │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐    │
-│  │    Jaeger     │ │   Vault       │ │    Kafka      │ │   ArgoCD      │    │
-│  │   Tracing     │ │   Secrets     │ │   Streaming   │ │    GitOps     │    │
+│  │  Crossplane   │ │   Vault       │ │    Kafka      │ │   ArgoCD      │    │
+│  │  Control Plane│ │   Secrets     │ │   Streaming   │ │    GitOps     │    │
 │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -86,7 +51,7 @@ Adhar Kit is the developer toolkit that bridges your applications to the **Adhar
 | What You Need | Adhar Kit Provides | Adhar Platform Handles |
 |---------------|--------------------|-----------------------|
 | **Observability** | Simple `adhar.getMetrics()` API | Prometheus, Grafana dashboards, alerting |
-| **Distributed Tracing** | `adhar.getTracing().executeInSpan()` | Jaeger collection, visualization, analysis |
+| **Distributed Tracing** | `adhar.getTracing().executeInSpan()` | OpenTelemetry collection, visualization, analysis |
 | **Service Communication** | `adhar.getDapr().invokeService()` | Dapr sidecar, mTLS, retries, circuit breaking |
 | **Secret Management** | `adhar.getSecurity().getSecret()` | HashiCorp Vault integration, rotation |
 | **Event Streaming** | `adhar.getMessaging().publish()` | Kafka clusters, partitioning, replication |
@@ -154,7 +119,7 @@ AdharFacade adhar = AdharFacade.getInstance();
 // ✅ Local Dev    → In-memory cache, console logging, mock services
 // ✅ Docker       → Redis cache, JSON logging, containerized services  
 // ✅ Kubernetes   → Distributed cache, structured logging, K8s services
-// ✅ Adhar Platform → Full platform integration with Dapr, Istio, Vault
+// ✅ Adhar Platform → Full platform integration with Dapr, Cilium, Vault
 ```
 
 **What This Means For You:**
@@ -226,7 +191,7 @@ Enterprise applications have requirements that hobby projects don't. Adhar Kit a
 
 **☁️ Cloud-Native & Service Mesh:**
 - **Kubernetes Native** - ConfigMaps, Secrets, auto-scaling, service discovery
-- **Istio & Linkerd** - Full service mesh integration with mTLS
+- **Cilium & eBPF** - Full service mesh integration with mTLS
 - **Distributed Tracing** - OpenTelemetry with automatic context propagation
 - **Health Checks** - Liveness, readiness, and startup probes
 - **Prometheus Metrics** - Production-grade observability out of the box
@@ -234,7 +199,7 @@ Enterprise applications have requirements that hobby projects don't. Adhar Kit a
 
 **📊 Advanced Capabilities:**
 - **Multi-Model AI** - OpenAI, Claude, Gemini, Llama with automatic failover
-- **Real-time Analytics** - Apache Flink and Kafka Streams integration
+- **Real-time Analytics** - Kafka Streams integration
 - **GraphQL APIs** - Modern API design with subscriptions and federation
 - **Event Sourcing** - Full event-driven architecture support
 - **CQRS Patterns** - Command-query separation for complex domains
@@ -244,9 +209,9 @@ Enterprise applications have requirements that hobby projects don't. Adhar Kit a
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Java 25 LTS or later
+- Java 25 or later
 - Maven 3.9+
-- Spring Boot 4.0+ / Quarkus 3.6+ / Micronaut 4.2+
+- Spring Boot 4.0+ / Quarkus 3.21+ / Micronaut 4.8+
 
 ### Installation
 
@@ -267,7 +232,7 @@ import com.adhar.kit.starter.AdharFacade;
 
 @Service
 public class OrderService {
-    // ONE facade - access ALL 21 modules!
+    // ONE facade - access ALL 27 modules!
     private final AdharFacade adhar = AdharFacade.getInstance();
     
     public Order createOrder(OrderRequest request) {
@@ -297,7 +262,7 @@ public class OrderService {
 
 ---
 
-## 📦 All 21 Modules
+## 📦 All 27 Modules
 
 <details open>
 <summary><b>🔧 TIER-1: Core Foundation (6 modules)</b></summary>
@@ -327,7 +292,7 @@ public class OrderService {
 </details>
 
 <details open>
-<summary><b>🏢 TIER-3: Enterprise & Advanced (10 modules)</b></summary>
+<summary><b>🏢 TIER-3: Enterprise & Advanced (16 modules)</b></summary>
 
 | Module | Description | Key Features |
 |:-------|:------------|:-------------|
@@ -340,6 +305,12 @@ public class OrderService {
 | ☸️ **kubernetes** | K8s native integration | ConfigMaps, Secrets, pod scaling, service discovery |
 | 🔄 **dapr** | Distributed runtime | State management, Pub/Sub, service invocation, bindings |
 | 🛠️ **core** | Utility library | ID generation, JSON serialization, retry logic, async execution |
+| 🔀 **graphql** | GraphQL API support | Query complexity limits, custom scalars, exception resolvers |
+| 📦 **batch** | Batch processing | Spring Batch integration, partitioning, job monitoring |
+| 🔔 **notification** | Multi-channel notifications | Email, webhook, in-app, SMS with async delivery |
+| 📜 **event-sourcing** | Event sourcing & CQRS | Event store, aggregate repository, domain event bus |
+| ⚡ **perf-profiler** | Performance profiling | Method tracing, slow detection, Micrometer metrics |
+| 🔌 **maven-plugin** | Build tooling | Versioning, release management, code generation |
 
 </details>
 

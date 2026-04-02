@@ -28,6 +28,9 @@ import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
 
+import jakarta.annotation.PostConstruct;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -40,14 +43,39 @@ import java.util.Map;
  * - Cache manager
  * - Cache listeners
  * <p>
- * The auto-configuration is conditionally enabled based on the "adhar.cache.enabled" property.
+ * The auto-configuration is conditionally enabled based on the "adhar.cache.enabled" property
+ * and requires Kafka classes on the classpath.
+ *
+ * <p><b>Configuration Example:</b></p>
+ * <pre>{@code
+ * adhar:
+ *   cache:
+ *     enabled: true
+ *     kafka:
+ *       enabled: true
+ *       bootstrap-servers: localhost:9092
+ *       topic-prefix: adhar-cache
+ *       group-id: adhar-cache-group
+ *       auto-create-topics: true
+ *       partitions: 3
+ *       replication-factor: 1
+ * }</pre>
+ *
+ * @author Adhar Platform Team
+ * @since 1.0.0
  */
 @Slf4j
 @AutoConfiguration
 @EnableKafka
 @EnableConfigurationProperties(AdharCacheProperties.class)
 @ConditionalOnProperty(prefix = "adhar.cache", name = "enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnClass(name = "org.apache.kafka.clients.producer.KafkaProducer")
 public class AdharCacheAutoConfiguration {
+
+    @PostConstruct
+    public void logCacheConfiguration() {
+        log.info("Adhar Cache module initialized with Kafka-based distributed cache synchronization");
+    }
 
     /**
      * Creates a Kafka admin client for topic management.

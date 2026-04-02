@@ -62,6 +62,11 @@ public class AdharKitProperties {
         private boolean kubernetes = false;
         private boolean dapr = false;
         private boolean grpc = false;
+        private boolean graphql = false;
+        private boolean batch = false;
+        private boolean notification = false;
+        private boolean eventSourcing = false;
+        private boolean perfProfiler = false;
     }
 }
 

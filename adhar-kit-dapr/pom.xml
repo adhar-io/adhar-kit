@@ -14,7 +14,7 @@
     <description>Comprehensive Dapr integration - State, Pub/Sub, Service Invocation, Bindings, Actors, Secrets, Configuration</description>
 
     <properties>
-        <dapr-sdk.version>1.11.0</dapr-sdk.version>
+        <dapr-sdk.version>1.14.1</dapr-sdk.version>
     </properties>
 
     <dependencies>
@@ -53,7 +53,7 @@
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
             <optional>true</optional>
         </dependency>
 

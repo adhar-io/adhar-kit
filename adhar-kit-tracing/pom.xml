@@ -15,13 +15,13 @@
     <description>Adhar Platform - Distributed Tracing Starter with OpenTelemetry, Zipkin, and Jaeger support</description>
 
     <properties>
-        <opentelemetry.version>1.37.0</opentelemetry.version>
-        <opentelemetry-instrumentation.version>2.3.0</opentelemetry-instrumentation.version>
-        <micrometer-tracing.version>1.3.0</micrometer-tracing.version>
-        <zipkin-reporter.version>3.4.0</zipkin-reporter.version>
+        <opentelemetry.version>1.51.0</opentelemetry.version>
+        <opentelemetry-instrumentation.version>2.14.0</opentelemetry-instrumentation.version>
+        <micrometer-tracing.version>1.5.0</micrometer-tracing.version>
+        <zipkin-reporter.version>3.5.0</zipkin-reporter.version>
         <brave.version>6.0.3</brave.version>
-        <quarkus.version>3.16.3</quarkus.version>
-        <micronaut.version>4.7.5</micronaut.version>
+        <quarkus.version>3.21.0</quarkus.version>
+        <micronaut.version>4.8.0</micronaut.version>
     </properties>
 
     <dependencyManagement>
@@ -52,7 +52,7 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-aop</artifactId>
+            <artifactId>spring-boot-starter-aspectj</artifactId>
             <optional>true</optional>
         </dependency>
         <dependency>
@@ -62,7 +62,7 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
             <optional>true</optional>
         </dependency>
         <dependency>
@@ -216,7 +216,7 @@
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-client</artifactId>
-            <version>6.8.1</version>
+            <version>7.3.1</version>
             <optional>true</optional>
         </dependency>
 
@@ -265,7 +265,6 @@
         <dependency>
             <groupId>org.wiremock</groupId>
             <artifactId>wiremock-standalone</artifactId>
-            <version>3.5.4</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -287,29 +286,9 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.0.0</version>
                 <configuration>
                     <useSystemClassLoader>false</useSystemClassLoader>
                 </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.10</version>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
-                    </execution>
-                    <execution>
-                        <id>report</id>
-                        <phase>test</phase>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

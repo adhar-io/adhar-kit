@@ -361,6 +361,234 @@ public DiskSpaceHealthIndicator diskSpaceHealthIndicator() {
 }
 ```
 
+### Redis Health Indicator
+
+Checks Redis connectivity via PING command.
+
+```java
+@Bean
+@ConditionalOnBean(RedisConnectionFactory.class)
+public RedisHealthIndicator redisHealthIndicator(
+        RedisConnectionFactory redisConnectionFactory,
+        AdharHealthProperties properties) {
+    return new RedisHealthIndicator(redisConnectionFactory, properties.getRedis());
+}
+```
+
+**Configuration:**
+```yaml
+adhar:
+  health:
+    redis:
+      enabled: true
+      timeout: 3000
+```
+
+**Health Response:**
+```json
+{
+  "status": "UP",
+  "component": "redis",
+  "details": {
+    "version": "7.2.4",
+    "mode": "standalone",
+    "connectedClients": "5"
+  }
+}
+```
+
+### Kafka Health Indicator
+
+Checks Kafka broker connectivity using AdminClient.
+
+```java
+@Bean
+@ConditionalOnBean(AdminClient.class)
+public KafkaHealthIndicator kafkaHealthIndicator(
+        AdminClient adminClient,
+        AdharHealthProperties properties) {
+    return new KafkaHealthIndicator(adminClient, properties.getKafka());
+}
+```
+
+**Configuration:**
+```yaml
+adhar:
+  health:
+    kafka:
+      enabled: true
+      timeout: 5000
+```
+
+**Health Response:**
+```json
+{
+  "status": "UP",
+  "component": "kafka",
+  "details": {
+    "clusterId": "MkU3OEVBNTcwNTJENDM2Qk",
+    "brokerCount": 3,
+    "controller": "broker1:9092 (id=1)"
+  }
+}
+```
+
+### MongoDB Health Indicator
+
+Checks MongoDB connectivity via ping command.
+
+```java
+@Bean
+@ConditionalOnBean(MongoClient.class)
+public MongoHealthIndicator mongoHealthIndicator(
+        MongoClient mongoClient,
+        AdharHealthProperties properties) {
+    return new MongoHealthIndicator(mongoClient, properties.getMongo());
+}
+```
+
+**Configuration:**
+```yaml
+adhar:
+  health:
+    mongo:
+      enabled: true
+      timeout: 3000
+```
+
+**Health Response:**
+```json
+{
+  "status": "UP",
+  "component": "mongodb",
+  "details": {
+    "version": "7.0.5",
+    "replicaSet": "rs0 (PRIMARY)",
+    "maxBsonObjectSize": "16.00 MB"
+  }
+}
+```
+
+### Elasticsearch Health Indicator
+
+Checks Elasticsearch cluster health via _cluster/health API.
+
+```java
+@Bean
+@ConditionalOnBean(ElasticsearchClient.class)
+public ElasticsearchHealthIndicator elasticsearchHealthIndicator(
+        ElasticsearchClient elasticsearchClient,
+        AdharHealthProperties properties) {
+    return new ElasticsearchHealthIndicator(elasticsearchClient, properties.getElasticsearch());
+}
+```
+
+**Configuration:**
+```yaml
+adhar:
+  health:
+    elasticsearch:
+      enabled: true
+      timeout: 3000
+```
+
+**Health Response:**
+```json
+{
+  "status": "UP",
+  "component": "elasticsearch",
+  "details": {
+    "status": "green",
+    "clusterName": "my-cluster",
+    "nodeCount": 3,
+    "activeShards": 50,
+    "relocatingShards": 0
+  }
+}
+```
+
+### gRPC Health Indicator
+
+Checks gRPC service health using the standard Health Checking Protocol (grpc.health.v1).
+
+```java
+@Bean
+@ConditionalOnBean(ManagedChannel.class)
+public GrpcHealthIndicator grpcHealthIndicator(
+        ManagedChannel managedChannel,
+        AdharHealthProperties properties) {
+    return new GrpcHealthIndicator(managedChannel, properties.getGrpc());
+}
+
+// Or check specific services
+@Bean
+public GrpcHealthIndicator grpcHealthIndicator(
+        ManagedChannel managedChannel,
+        AdharHealthProperties properties) {
+    return new GrpcHealthIndicator(
+        managedChannel,
+        properties.getGrpc(),
+        new String[]{"", "user-service", "order-service"}
+    );
+}
+```
+
+**Configuration:**
+```yaml
+adhar:
+  health:
+    grpc:
+      enabled: true
+      timeout: 3000
+```
+
+**Health Response:**
+```json
+{
+  "status": "UP",
+  "component": "grpc",
+  "details": {
+    "services": {
+      "overall": "SERVING",
+      "user-service": "SERVING",
+      "order-service": "SERVING"
+    },
+    "channelState": "READY"
+  }
+}
+```
+
+### Auto-Configuration
+
+All health indicators can be auto-configured based on classpath detection:
+
+```java
+@Configuration
+public class HealthConfig {
+
+    @Bean
+    public HealthRegistry healthRegistry(
+            Collection<AdharHealthIndicator> indicators,
+            AdharHealthProperties properties,
+            Optional<RedisConnectionFactory> redisConnectionFactory,
+            Optional<AdminClient> kafkaAdminClient,
+            Optional<MongoClient> mongoClient,
+            Optional<ElasticsearchClient> esClient,
+            Optional<ManagedChannel> grpcChannel) {
+
+        return SpringBootHealthIntegration.createHealthRegistryWithAutoConfig(
+            indicators,
+            properties,
+            redisConnectionFactory.orElse(null),
+            kafkaAdminClient.orElse(null),
+            mongoClient.orElse(null),
+            esClient.orElse(null),
+            grpcChannel.orElse(null)
+        );
+    }
+}
+```
+
 ---
 
 ## 🎨 Custom Health Indicators
