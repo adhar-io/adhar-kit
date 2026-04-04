@@ -22,6 +22,8 @@ public abstract class AggregateRoot {
 
     /**
      * Returns the unique identifier of this aggregate.
+     *
+     * @return the aggregate identifier, or {@code null} if not yet set
      */
     public String getAggregateId() {
         return aggregateId;
@@ -38,6 +40,8 @@ public abstract class AggregateRoot {
 
     /**
      * Returns the current version (number of events applied).
+     *
+     * @return the current aggregate version
      */
     public int getVersion() {
         return version;
@@ -66,6 +70,8 @@ public abstract class AggregateRoot {
 
     /**
      * Returns an unmodifiable view of events that have not yet been persisted.
+     *
+     * @return unmodifiable list of uncommitted domain events
      */
     public List<DomainEvent> getUncommittedEvents() {
         return Collections.unmodifiableList(uncommittedEvents);

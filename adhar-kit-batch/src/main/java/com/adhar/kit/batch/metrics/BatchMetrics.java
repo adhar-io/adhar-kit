@@ -36,6 +36,11 @@ public class BatchMetrics {
     private final MeterRegistry meterRegistry;
     private final ConcurrentHashMap<String, JobMetricsAccumulator> jobMetrics = new ConcurrentHashMap<>();
 
+    /**
+     * Constructs a new {@code BatchMetrics} collector.
+     *
+     * @param meterRegistry the Micrometer meter registry for recording metrics
+     */
     public BatchMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
     }

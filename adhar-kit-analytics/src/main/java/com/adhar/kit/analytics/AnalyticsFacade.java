@@ -1,5 +1,6 @@
 package com.adhar.kit.analytics;
 
+import com.adhar.kit.commons.event.AdharCloudEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
@@ -208,6 +209,52 @@ public class AnalyticsFacade {
      */
     public void trackPageView(String userId, String page) {
         trackPageView(userId, page, Collections.emptyMap());
+    }
+
+    // ==================== CloudEvent Tracking ====================
+
+    /**
+     * Tracks an analytics event and returns it wrapped in a CloudEvent envelope.
+     *
+     * <p>This method performs the same tracking as {@link #track(String, String, Map)} but
+     * additionally wraps the event data in an {@link AdharCloudEvent} with
+     * source {@code "adhar-kit/analytics"} and type {@code "com.adhar.analytics.tracked"}.</p>
+     *
+     * <p><b>Example:</b></p>
+     * <pre>{@code
+     * AdharCloudEvent<?> cloudEvent = analytics.trackAsCloudEvent("user123", "Purchase", Map.of(
+     *     "product_id", "prod_456",
+     *     "price", 99.99
+     * ));
+     * // cloudEvent can be forwarded to messaging, event bus, etc.
+     * }</pre>
+     *
+     * @param userId     user identifier
+     * @param event      event name (e.g., "Button Clicked", "Purchase")
+     * @param properties event properties (metadata)
+     * @return an {@link AdharCloudEvent} wrapping the analytics event data, or {@code null} if analytics is unavailable
+     */
+    public AdharCloudEvent<Map<String, Object>> trackAsCloudEvent(String userId, String event, Map<String, Object> properties) {
+        // Delegate to standard tracking
+        track(userId, event, properties);
+
+        // Build CloudEvent envelope
+        Map<String, Object> eventData = new HashMap<>();
+        eventData.put("userId", userId);
+        eventData.put("event", event);
+        eventData.put("properties", properties != null ? properties : Map.of());
+
+        AdharCloudEvent<Map<String, Object>> cloudEvent = AdharCloudEvent.of(
+                "adhar-kit/analytics",
+                "com.adhar.analytics.tracked",
+                userId,
+                eventData
+        );
+
+        log.debug("Created CloudEvent [type={}, subject={}] for analytics event '{}'",
+                cloudEvent.type(), cloudEvent.subject(), event);
+
+        return cloudEvent;
     }
 
     // ==================== User Identification ====================

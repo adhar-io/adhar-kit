@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.adhar.kit</groupId>
+        <artifactId>adhar-kit-parent</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../adhar-kit-parent/pom.xml</relativePath>
+    </parent>
+    <artifactId>adhar-kit-rewrite</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>Adhar Kit Rewrite</name>
+    <description>Automated codebase modernization with OpenRewrite - migrations, upgrades, and Adhar Kit best-practice enforcement</description>
+
+    <properties>
+        <java.version>25</java.version>
+        <jacoco.minimum.coverage>0.20</jacoco.minimum.coverage>
+        <openrewrite.version>8.78.1</openrewrite.version>
+        <rewrite-spring.version>6.28.2</rewrite-spring.version>
+        <rewrite-migrate-java.version>3.31.3</rewrite-migrate-java.version>
+        <rewrite-testing.version>3.33.0</rewrite-testing.version>
+        <rewrite-maven-plugin.version>6.35.0</rewrite-maven-plugin.version>
+    </properties>
+
+    <dependencies>
+        <!-- OpenRewrite Core -->
+        <dependency>
+            <groupId>org.openrewrite</groupId>
+            <artifactId>rewrite-core</artifactId>
+            <version>${openrewrite.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openrewrite</groupId>
+            <artifactId>rewrite-java</artifactId>
+            <version>${openrewrite.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openrewrite</groupId>
+            <artifactId>rewrite-maven</artifactId>
+            <version>${openrewrite.version}</version>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Pre-built Recipe Catalogs -->
+        <dependency>
+            <groupId>org.openrewrite.recipe</groupId>
+            <artifactId>rewrite-spring</artifactId>
+            <version>${rewrite-spring.version}</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.openrewrite.recipe</groupId>
+            <artifactId>rewrite-migrate-java</artifactId>
+            <version>${rewrite-migrate-java.version}</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.openrewrite.recipe</groupId>
+            <artifactId>rewrite-testing-frameworks</artifactId>
+            <version>${rewrite-testing.version}</version>
+            <optional>true</optional>
+        </dependency>
+        <!-- Spring Boot (optional - for AutoConfiguration) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Adhar Kit Commons -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-commons</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openrewrite</groupId>
+            <artifactId>rewrite-test</artifactId>
+            <version>${openrewrite.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

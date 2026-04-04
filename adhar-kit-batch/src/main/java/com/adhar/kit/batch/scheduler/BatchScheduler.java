@@ -40,6 +40,13 @@ public class BatchScheduler {
     private final ApplicationContext applicationContext;
     private final ConcurrentHashMap<String, ScheduledFuture<?>> scheduledJobs = new ConcurrentHashMap<>();
 
+    /**
+     * Constructs a new {@code BatchScheduler}.
+     *
+     * @param taskScheduler      the Spring task scheduler used for cron-based scheduling
+     * @param jobLauncher        the Spring Batch job launcher
+     * @param applicationContext the application context for looking up job beans by name
+     */
     public BatchScheduler(TaskScheduler taskScheduler, JobLauncher jobLauncher, ApplicationContext applicationContext) {
         this.taskScheduler = taskScheduler;
         this.jobLauncher = jobLauncher;

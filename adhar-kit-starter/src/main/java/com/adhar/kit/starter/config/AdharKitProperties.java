@@ -67,6 +67,7 @@ public class AdharKitProperties {
         private boolean notification = false;
         private boolean eventSourcing = false;
         private boolean perfProfiler = false;
+        private boolean rewrite = false;
     }
 }
 

@@ -16,9 +16,9 @@
 
 **Adhar Kit** is a complete enterprise microservices toolkit that works seamlessly across **Spring Boot**, **Quarkus**, and **Micronaut**. It provides **foundational production-ready modules** covering all aspects of modern cloud-native applications.
 
-### Why Adhar Kit?
+## Why Adhar Kit?
 
-**Unlock the Full Power of Adhar Platform:**
+**1. Unlock the Full Power of Adhar Platform:**
 
 Adhar Kit is the developer toolkit that bridges your applications to the **Adhar Platform** - a comprehensive cloud-native infrastructure that handles the complexity of modern distributed systems so you can focus on building business value.
 
@@ -28,7 +28,7 @@ Adhar Kit is the developer toolkit that bridges your applications to the **Adhar
 │                     (Business Logic & Features)                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                            ADHAR KIT                                        │
-│           (**27 Modules - Single Facade - Framework Agnostic)               │
+│           (**28 Modules - Single Facade - Framework Agnostic)               │
 │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐    │
 │  │ Logging │ │ Metrics │ │ Tracing │ │  Cache  │ │Security │ │   AI    │    │
 │  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘    │
@@ -46,19 +46,7 @@ Adhar Kit is the developer toolkit that bridges your applications to the **Adhar
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**How It Works Together:**
-
-| What You Need | Adhar Kit Provides | Adhar Platform Handles |
-|---------------|--------------------|-----------------------|
-| **Observability** | Simple `adhar.getMetrics()` API | Prometheus, Grafana dashboards, alerting |
-| **Distributed Tracing** | `adhar.getTracing().executeInSpan()` | OpenTelemetry collection, visualization, analysis |
-| **Service Communication** | `adhar.getDapr().invokeService()` | Dapr sidecar, mTLS, retries, circuit breaking |
-| **Secret Management** | `adhar.getSecurity().getSecret()` | HashiCorp Vault integration, rotation |
-| **Event Streaming** | `adhar.getMessaging().publish()` | Kafka clusters, partitioning, replication |
-| **AI/ML Inference** | `adhar.getAi().chat()` | Model hosting, GPU scaling, load balancing |
-| **Configuration** | `adhar.getConfig().get()` | ConfigMaps, dynamic refresh, versioning |
-
-**The Adhar Kit Advantage:**
+**2. The Adhar Kit Advantage:**
 
 ```java
 // WITHOUT Adhar Kit - You manage everything manually
@@ -95,19 +83,20 @@ public class OrderService {
     }
     
     public Order createOrder(OrderRequest request) {
-        return adhar.getTracing().executeInSpan("create-order", () ->
-            adhar.getCircuitBreaker().execute("order-service", () -> {
-                adhar.getMetrics().increment("orders.created");
+        adhar.count("orders.created");
+        return adhar.safe("create-order",                  // traced + resilient
+            () -> {
                 Order order = processOrder(request);
-                adhar.getMessaging().publish("order-events", order);
+                adhar.publish("order-events", order);      // quick publish
                 return order;
-            })
+            },
+            () -> queueForLater(request)                   // fallback
         );
     }
 }
 ```
 
-**Platform-Aware Intelligence:**
+**3. Platform-Aware Intelligence:**
 
 Adhar Kit automatically detects and adapts to your deployment environment:
 
@@ -131,9 +120,7 @@ AdharFacade adhar = AdharFacade.getInstance();
 - 📈 **Built-in Best Practices** - Enterprise patterns (resilience, security, observability) included by default
 - 🔄 **Seamless Upgrades** - Platform improvements automatically benefit your applications
 
-#### 🔄 Framework Freedom
-
-**True Portability - Not Just a Promise:**
+**4. Framework Freedom - True Portability:**
 
 Most "framework-agnostic" libraries still tie you to specific implementations. Adhar Kit is different:
 
@@ -155,14 +142,12 @@ Most "framework-agnostic" libraries still tie you to specific implementations. A
 ```java
 // This exact code works identically on Spring Boot, Quarkus, AND Micronaut
 AdharFacade adhar = AdharFacade.getInstance();
-adhar.getCache().put("users", "123", user);           // Same API
-adhar.getMessaging().publish("events", event);         // Same API
-adhar.getCircuitBreaker().execute("service", call);    // Same API
+adhar.cached("users", "123", User.class, () -> loadUser("123"));  // Same API
+adhar.publish("events", event);                                    // Same API
+adhar.resilient("service", () -> callService());                   // Same API
 ```
 
-#### 🏢 Enterprise Grade
-
-**Built for the Real World - Not Just Demos:**
+**5. Enterprise Grade - Built for the Real World:**
 
 Enterprise applications have requirements that hobby projects don't. Adhar Kit addresses them all:
 
@@ -198,11 +183,18 @@ Enterprise applications have requirements that hobby projects don't. Adhar Kit a
 - **Horizontal Scaling** - Stateless design for unlimited scalability
 
 **📊 Advanced Capabilities:**
-- **Multi-Model AI** - OpenAI, Claude, Gemini, Llama with automatic failover
+- **Multi-Model AI** - OpenAI, Claude, Gemini, Ollama with automatic failover
 - **Real-time Analytics** - Kafka Streams integration
-- **GraphQL APIs** - Modern API design with subscriptions and federation
-- **Event Sourcing** - Full event-driven architecture support
-- **CQRS Patterns** - Command-query separation for complex domains
+- **GraphQL APIs** - Schema registry, cursor pagination, query complexity limits
+- **Event Sourcing & CQRS** - Event store, aggregate repository, domain event bus
+- **Transactional Outbox** - Reliable event publishing via outbox pattern
+
+**📡 CloudEvents & Auto-Metrics:**
+- **CloudEvents 1.0** - All events (domain, notification, analytics) use CloudEvent envelope
+- **Auto-Metrics** - JVM, persistence, cache, messaging, HTTP metrics collected automatically
+- **`@Measured` Annotation** - Opt-in method-level latency/count/error tracking
+- **`PlatformMetrics`** - Pre-built metric recorders for every module
+- **Specification Builder** - Type-safe JPA queries: `.equal()`, `.like()`, `.between()`, `.in()`
 
 ---
 
@@ -232,29 +224,31 @@ import com.adhar.kit.starter.AdharFacade;
 
 @Service
 public class OrderService {
-    // ONE facade - access ALL 27 modules!
-    private final AdharFacade adhar = AdharFacade.getInstance();
-    
+    private final AdharFacade adhar;
+
+    public OrderService(AdharFacade adhar) {
+        this.adhar = adhar;
+    }
+
     public Order createOrder(OrderRequest request) {
-        // Logging & Metrics
-        adhar.getLogging().info("Creating order");
-        adhar.getMetrics().increment("orders.created");
-        
-        // Security check
-        if (!adhar.getSecurity().hasPermission("order:create")) {
+        // Security check (one-liner)
+        if (!adhar.hasPermission("order:create")) {
             throw new ForbiddenException();
         }
-        
-        // Execute with tracing, resilience, and persistence
-        return adhar.getTracing().executeInSpan("create-order", () ->
-            adhar.getCircuitBreaker().executeWithFallback("order-processor",
-                () -> adhar.getPersistence().executeInTransaction(() -> {
-                    Order order = new Order();
-                    order.setUserId(adhar.getSecurity().getCurrentUserId());
-                    return adhar.getPersistence().save(order);
-                }),
-                () -> queueForLater(request)
-            )
+
+        adhar.logInfo("Creating order for user {}", adhar.currentUserId());
+        adhar.count("orders.created");
+
+        // safe() = traced + resilient + fallback in one call
+        return adhar.safe("create-order",
+            () -> adhar.transactional(() -> {
+                Order order = new Order();
+                order.setUserId(adhar.currentUserId());
+                order = adhar.save(order);
+                adhar.publish("order-events", order);
+                return order;
+            }),
+            () -> queueForLater(request)
         );
     }
 }
@@ -262,14 +256,15 @@ public class OrderService {
 
 ---
 
-## 📦 All 27 Modules
+## 📦 All 28 Modules
 
 <details open>
-<summary><b>🔧 TIER-1: Core Foundation (6 modules)</b></summary>
+<summary><b>🔧 TIER-1: Core Foundation (7 modules)</b></summary>
 
 | Module | Description | Key Features |
 |:-------|:------------|:-------------|
 | 🧩 **commons** | Framework detection & base utilities | Auto-detection, logging foundation, common patterns |
+| 🛠️ **core** | Core utilities (`getUtils()`) | ID generation, JSON, retry with backoff, async, hashing |
 | 🛡️ **resilience** | Fault tolerance patterns | Circuit breaker, retry, rate limiter, bulkhead, time limiter |
 | 📊 **metrics** | Application metrics | Counters, timers, gauges, histograms, percentiles |
 | 🔍 **tracing** | Distributed tracing | Spans, context propagation, correlation IDs, baggage |
@@ -279,40 +274,148 @@ public class OrderService {
 </details>
 
 <details open>
-<summary><b>🔌 TIER-2: Integration & Communication (5 modules)</b></summary>
+<summary><b>🔌 TIER-2: Integration & Communication (6 modules)</b></summary>
 
 | Module | Description | Key Features |
 |:-------|:------------|:-------------|
 | 💚 **health** | Health monitoring | K8s liveness/readiness probes, custom health checks |
 | 🧪 **test-commons** | Integration testing | Testcontainers (Postgres, MongoDB, Redis, Kafka) |
 | 📨 **messaging** | Event-driven messaging | Kafka, RabbitMQ, Pub/Sub, DLQ, retry policies |
-| 📖 **docs** | API documentation | OpenAPI 3.0, Swagger UI, auto-generation, examples |
-| 📡 **grpc** | Service communication | Unary calls, streaming, metadata, interceptors, deadlines |
+| 📖 **api-docs** | API documentation (`getApiDocs()`) | OpenAPI 3.0, Swagger UI, auto-generation, examples |
+| 📡 **grpc** | gRPC communication | Unary calls, streaming, metadata, interceptors, deadlines |
+| 🔀 **graphql** | GraphQL API (`getGraphQl()`) | Schema registry, pagination, complexity limits, DataLoader |
 
 </details>
 
 <details open>
-<summary><b>🏢 TIER-3: Enterprise & Advanced (16 modules)</b></summary>
+<summary><b>🏢 TIER-3: Enterprise & Advanced (15 modules)</b></summary>
 
 | Module | Description | Key Features |
 |:-------|:------------|:-------------|
-| 🗄️ **persistence** | Data access layer | JPA, MongoDB, transactions, multi-tenancy, soft delete |
-| 🔐 **security** | Authentication & authorization | JWT, OAuth2, RBAC, password encoding, session management |
+| 🗄️ **persistence** | Data access layer | JPA, transactions, multi-tenancy, auditing, soft delete |
+| 🔐 **security** | Authentication & authorization | JWT, OAuth2, RBAC, CORS, CSRF, rate limiting |
 | ⚙️ **config** | Configuration management | Runtime refresh, type-safe properties, encrypted values |
-| 🚀 **starter** | Unified integration | Single facade for all modules, simplified development |
-| 🤖 **ai** | AI/LLM integration | Chat completions, embeddings, semantic search, image generation |
-| 📈 **analytics** | Business analytics | Event tracking, funnels, A/B testing, user behavior analysis |
+| 🤖 **ai** | AI/LLM integration | Chat, embeddings, RAG, image generation, function calling |
+| 📈 **analytics** | Business analytics | Event tracking, feature flags, A/B testing, PostHog |
 | ☸️ **kubernetes** | K8s native integration | ConfigMaps, Secrets, pod scaling, service discovery |
-| 🔄 **dapr** | Distributed runtime | State management, Pub/Sub, service invocation, bindings |
-| 🛠️ **core** | Utility library | ID generation, JSON serialization, retry logic, async execution |
-| 🔀 **graphql** | GraphQL API support | Query complexity limits, custom scalars, exception resolvers |
-| 📦 **batch** | Batch processing | Spring Batch integration, partitioning, job monitoring |
-| 🔔 **notification** | Multi-channel notifications | Email, webhook, in-app, SMS with async delivery |
-| 📜 **event-sourcing** | Event sourcing & CQRS | Event store, aggregate repository, domain event bus |
-| ⚡ **perf-profiler** | Performance profiling | Method tracing, slow detection, Micrometer metrics |
-| 🔌 **maven-plugin** | Build tooling | Versioning, release management, code generation |
+| 🔄 **dapr** | Distributed runtime | State, Pub/Sub, service invocation, actors, secrets |
+| 📦 **batch** | Batch processing (`getBatch()`) | Spring Batch, job scheduling, readers/writers, metrics |
+| 🔔 **notification** | Notifications (`getNotification()`) | Email, webhook, in-app, SMS, templates, retry |
+| 📜 **event-sourcing** | Event sourcing (`getEventStore()`) | Event store, aggregates, CQRS, domain event bus |
+| ⚡ **perf-profiler** | Profiling (`getProfiler()`) | Method tracing, hotspots, memory, Actuator endpoint |
+| 🚀 **starter** | Unified integration | AdharFacade with 40+ convenience shortcuts |
+| 🔌 **maven-plugin** | Build tooling | Release management, code generation (DTO, Controller) |
+| 🔄 **rewrite** | Code modernization (`getRewrite()`) | OpenRewrite recipes, Java/Spring migration, auto-refactoring |
 
 </details>
+
+---
+
+## 🎯 Convenience API Quick Reference
+
+AdharFacade provides **one-liner shortcuts** for the most common operations, eliminating the need to chain through module accessors:
+
+```java
+AdharFacade adhar = ...; // injected or getInstance()
+
+// --- Observability ---
+adhar.traced("op-name", () -> doWork());          // auto tracing + metrics timing
+adhar.profiled("op-name", () -> doWork());        // manual performance profiling
+adhar.count("orders.created");                    // increment counter
+adhar.logInfo("Processing order {}", orderId);    // structured logging
+adhar.log().addContext("userId", userId);          // MDC context
+
+// --- Resilience ---
+adhar.resilient("svc", () -> callApi());          // circuit breaker
+adhar.resilient("svc", () -> callApi(), () -> fallback()); // with fallback
+adhar.safe("op", () -> callApi(), () -> fallback());       // traced + resilient
+adhar.retry(() -> flakyCall(), 3);                // retry with backoff
+
+// --- Data ---
+adhar.save(entity);                               // JPA save
+adhar.findById(User.class, id);                   // JPA find
+adhar.transactional(() -> { save(a); save(b); }); // transaction
+adhar.cached("users", id, User.class, () -> db.find(id)); // cache-aside
+
+// --- Messaging ---
+adhar.publish("topic", event);                    // publish event
+adhar.publish("topic", "key", event);             // keyed publish
+adhar.subscribe("topic", Event.class, e -> handle(e));     // subscribe
+
+// --- Security ---
+adhar.hasPermission("order:write");               // permission check
+adhar.hasRole("ADMIN");                           // role check
+adhar.currentUserId();                            // current user
+adhar.isAuthenticated();                          // auth check
+
+// --- AI ---
+adhar.chat("Summarize this text: ...");           // quick AI chat
+adhar.chat("system prompt", "user message");      // chat with system prompt
+adhar.chatAsync("question");                      // async AI
+
+// --- Notification ---
+adhar.notify("user@email.com", "Subject", "Body");// send email
+adhar.webhook("https://hook.url", payload);        // webhook call
+
+// --- Config ---
+adhar.config("app.name", "default");              // string config
+adhar.configInt("app.timeout", 30);               // int config
+adhar.configBool("feature.enabled", false);       // boolean config
+
+// --- Utilities ---
+adhar.uuid();                                     // generate UUID
+adhar.shortId();                                  // generate short ID
+adhar.toJson(object);                             // serialize to JSON
+adhar.fromJson(json, MyClass.class);              // deserialize
+adhar.async(() -> heavyComputation());            // async execution
+
+// --- Event Sourcing ---
+adhar.publishEvent(domainEvent);                  // publish domain event
+adhar.onEvent("OrderCreated", e -> handle(e));    // subscribe to events
+
+// --- Kubernetes ---
+adhar.isInKubernetes();                           // environment check
+adhar.secret("db-secrets", "password");           // K8s secret value
+
+// --- Health ---
+adhar.isHealthy();                                // quick health check
+adhar.healthDetails();                            // detailed component health
+
+// --- Module Accessors (full API access) ---
+adhar.getResilience();    adhar.getMetrics();      adhar.getTracing();
+adhar.getSecurity();      adhar.getPersistence();   adhar.getConfig();
+adhar.getMessaging();     adhar.getCache("name");   adhar.getHealth();
+adhar.getAi();            adhar.getAnalytics();     adhar.getApiDocs();
+adhar.getGrpc();          adhar.getKubernetes();    adhar.getDapr();
+adhar.getGraphQl();       adhar.getBatch();         adhar.getNotification();
+adhar.getEventStore();    adhar.getProfiler();      adhar.getUtils();
+adhar.getRewrite();       // OpenRewrite code modernization
+```
+
+### OpenRewrite Code Modernization
+
+```java
+// List all available recipe sets
+adhar.getRewrite().listRecipeSetKeys();
+// → [java-25, spring-boot-4, junit-5, adhar-convenience-api, adhar-full-modernization, ...]
+
+// Get recipe details
+var recipeSet = adhar.getRewrite().getRecipeSet("adhar-full-modernization");
+// → Java 25 + Spring Boot 4 + JUnit 5 + convenience API + CloudEvents + security
+
+// Generate rewrite.yml for a migration and apply via Maven
+adhar.getRewrite().apply("spring-boot-4", Path.of("."));
+// Generates target/rewrite/rewrite.yml and prints:
+// mvn -U org.openrewrite.maven:rewrite-maven-plugin:6.35.0:run
+
+// Available recipe sets by category:
+// JAVA_MIGRATION:    java-17, java-21, java-25
+// SPRING_MIGRATION:  spring-boot-3, spring-boot-4
+// TESTING:           junit-5, assertj, mockito-5
+// SECURITY:          security-best-practices
+// CODE_QUALITY:      code-cleanup, logging-best-practices
+// ADHAR_KIT:         adhar-convenience-api, adhar-cloudevents, adhar-full-modernization
+```
 
 ---
 
@@ -323,31 +426,21 @@ public class OrderService {
 ```java
 @Service
 public class PaymentService {
-    private final AdharFacade adhar = AdharFacade.getInstance();
-    
+    private final AdharFacade adhar;
+
+    public PaymentService(AdharFacade adhar) { this.adhar = adhar; }
+
     public Payment processPayment(PaymentRequest request) {
-        // Add context to all logs in this request
-        adhar.getLogging().addContext("customerId", request.getCustomerId());
-        adhar.getLogging().addContext("amount", request.getAmount());
-        adhar.getLogging().info("Processing payment");
-        
-        // Track business metrics
-        adhar.getMetrics().increment("payments.received");
-        adhar.getMetrics().recordValue("payment.amount", request.getAmount());
-        
-        // Execute with distributed tracing and timing
-        return adhar.getMetrics().recordTime("payment.processing.duration", () ->
-            adhar.getTracing().executeInSpan("process-payment", () -> {
-                // Your business logic here
-                Payment payment = chargeCustomer(request);
-                
-                // Track success
-                adhar.getMetrics().increment("payments.success");
-                adhar.getLogging().info("Payment processed successfully");
-                
-                return payment;
-            })
-        );
+        adhar.log().addContext("customerId", request.getCustomerId());
+        adhar.count("payments.received");
+
+        // traced() = auto tracing + timing in one call
+        return adhar.traced("process-payment", () -> {
+            Payment payment = chargeCustomer(request);
+            adhar.count("payments.success");
+            adhar.logInfo("Payment processed successfully");
+            return payment;
+        });
     }
 }
 ```
@@ -358,32 +451,22 @@ public class PaymentService {
 @RestController
 @RequestMapping("/api/products")
 public class ProductController {
-    private final AdharFacade adhar = AdharFacade.getInstance();
-    
+    private final AdharFacade adhar;
+
+    public ProductController(AdharFacade adhar) { this.adhar = adhar; }
+
     @PostMapping
     public Product create(@RequestBody ProductRequest request) {
-        // Security - check user has required role
-        if (!adhar.getSecurity().hasRole("PRODUCT_MANAGER")) {
+        if (!adhar.hasRole("PRODUCT_MANAGER")) {
             throw new ForbiddenException("Insufficient permissions");
         }
-        
-        String userId = adhar.getSecurity().getCurrentUserId();
-        
-        // Persistence - save within transaction
-        return adhar.getPersistence().executeInTransaction(() -> {
+
+        return adhar.transactional(() -> {
             Product product = new Product();
             product.setName(request.getName());
-            product.setPrice(request.getPrice());
-            product.setCreatedBy(userId);
-            
-            // Save to database
-            product = adhar.getPersistence().save(product);
-            
-            // Cache for future reads
-            adhar.getCache().put("products", product.getId().toString(), product);
-            
-            // Publish event
-            adhar.getMessaging().publish("product-created", 
+            product.setCreatedBy(adhar.currentUserId());
+            product = adhar.save(product);
+            adhar.publish("product-created",
                 new ProductCreatedEvent(product.getId()));
             
             return product;
@@ -407,45 +490,24 @@ public class ProductController {
 ```java
 @Service
 public class SupportBotService {
-    private final AdharFacade adhar = AdharFacade.getInstance();
-    private final Map<String, List<String>> conversations = new ConcurrentHashMap<>();
-    
+    private final AdharFacade adhar;
+
+    public SupportBotService(AdharFacade adhar) { this.adhar = adhar; }
+
     public String chat(String sessionId, String userMessage) {
-        // Track analytics
-        adhar.getAnalytics().track("support_chat", sessionId, Map.of(
-            "message_length", userMessage.length(),
-            "timestamp", LocalDateTime.now()
-        ));
-        
-        // Get conversation history
-        List<String> history = conversations.computeIfAbsent(
-            sessionId, k -> new ArrayList<>());
-        
-        // Add system context on first message
-        if (history.isEmpty()) {
-            history.add("system: You are a helpful customer support agent. " +
-                       "Be polite, concise, and helpful.");
-        }
-        
-        // Get AI response with conversation context
-        String response = adhar.getAi().chatWithContext(history, userMessage);
-        
-        // Update conversation history
-        history.add("user: " + userMessage);
-        history.add("assistant: " + response);
-        
-        // Log for audit trail
-        adhar.getLogging().info("Support chat - Session: {}, Response length: {}", 
+        adhar.getAnalytics().track("support_chat", sessionId,
+            Map.of("message_length", userMessage.length()));
+
+        // Quick AI chat via shortcut
+        String response = adhar.chat("You are a helpful support agent", userMessage);
+
+        adhar.logInfo("Support chat - Session: {}, Response length: {}",
             sessionId, response.length());
-        
         return response;
     }
-    
+
     public List<String> searchKnowledgeBase(String query) {
-        List<String> allArticles = loadKnowledgeBaseArticles();
-        
-        // Use AI embeddings for semantic search
-        return adhar.getAi().findSimilar(query, allArticles, 5);
+        return adhar.getAi().findSimilar(query, loadKnowledgeBaseArticles(), 5);
     }
 }
 ```
@@ -1063,7 +1125,7 @@ spec:
 
 - [ ] Prometheus metrics endpoint exposed
 - [ ] Grafana dashboards configured
-- [ ] Jaeger tracing enabled
+- [ ] OpenTelemetry tracing enabled
 - [ ] ELK/EFK stack for logs
 - [ ] Alert rules configured
 - [ ] SLA monitoring active

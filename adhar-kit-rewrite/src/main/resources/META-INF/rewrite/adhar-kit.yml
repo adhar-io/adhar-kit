@@ -1,0 +1,28 @@
+# Adhar Kit OpenRewrite Recipe Definitions
+# https://docs.openrewrite.org/reference/yaml-format-reference
+#
+# These declarative recipes are discovered automatically by the OpenRewrite Maven plugin
+# when adhar-kit-rewrite is on the classpath.
+
+---
+type: specs.openrewrite.org/v1beta/recipe
+name: com.adhar.kit.rewrite.recipe.adhar.FullModernization
+displayName: Full Adhar Kit Modernization
+description: >-
+  Complete modernization pipeline for Adhar Kit applications. Applies Java 25 migration,
+  Spring Boot 4 migration, JUnit 5 conversion, Adhar convenience API adoption, and
+  CloudEvents compliance in a single pass.
+recipeList:
+  # Java 25 upgrade
+  - org.openrewrite.java.migrate.UpgradeToJava25
+  # Spring Boot 4 migration (starter renames, package moves)
+  - com.adhar.kit.rewrite.recipe.spring.MigrateToSpringBoot4
+  # JUnit 5 migration
+  - org.openrewrite.java.testing.junit5.JUnit4to5Migration
+  # Adhar Kit convenience API shortcuts
+  - com.adhar.kit.rewrite.recipe.adhar.UseConvenienceShortcuts
+  # CloudEvents adoption
+  - com.adhar.kit.rewrite.recipe.adhar.AdoptCloudEvents
+  # Code cleanup
+  - org.openrewrite.java.RemoveUnusedImports
+  - org.openrewrite.java.format.AutoFormat

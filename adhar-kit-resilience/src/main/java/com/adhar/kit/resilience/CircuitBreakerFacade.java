@@ -70,27 +70,41 @@ public class CircuitBreakerFacade implements CircuitBreakerService {
 
     @Override
     public <T> T execute(String name, Supplier<T> supplier) {
+        requireDelegate();
         return delegate.execute(name, supplier);
     }
 
     @Override
     public <T> T executeWithFallback(String name, Supplier<T> supplier, Supplier<T> fallback) {
+        requireDelegate();
         return delegate.executeWithFallback(name, supplier, fallback);
     }
 
     @Override
     public State getState(String name) {
+        requireDelegate();
         return delegate.getState(name);
     }
 
     @Override
     public Metrics getMetrics(String name) {
+        requireDelegate();
         return delegate.getMetrics(name);
     }
 
     @Override
     public void reset(String name) {
+        requireDelegate();
         delegate.reset(name);
+    }
+
+    private void requireDelegate() {
+        if (delegate == null) {
+            throw new IllegalStateException(
+                    "CircuitBreakerFacade delegate is not initialized. "
+                    + "Ensure a supported framework (Quarkus, Micronaut) is on the classpath, "
+                    + "or use Spring's @Autowired SpringCircuitBreakerAdapter directly.");
+        }
     }
 }
 

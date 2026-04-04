@@ -10,8 +10,6 @@
     <packaging>pom</packaging>
     <name>Adhar Kit</name>
     <description>Enterprise-grade microservices platform toolkit with comprehensive support for resilience, observability, and cloud-native patterns</description>
-    <url>https://github.com/adhar-io/adhar-kit</url>
-    <inceptionYear>2025</inceptionYear>
 
     <organization>
         <name>Adhar Platform</name>
@@ -85,6 +83,7 @@
         <module>adhar-kit-batch</module>
         <module>adhar-kit-notification</module>
         <module>adhar-kit-event-sourcing</module>
+        <module>adhar-kit-rewrite</module>
     </modules>
 
     <profiles>

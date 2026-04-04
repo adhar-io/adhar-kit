@@ -143,6 +143,11 @@
             <artifactId>adhar-kit-perf-profiler</artifactId>
             <version>0.0.1-SNAPSHOT</version>
         </dependency>
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-rewrite</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
 
         <!-- Spring Boot Starter -->
         <dependency>

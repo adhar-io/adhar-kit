@@ -3,7 +3,7 @@
 **Resilience patterns for microservices using Resilience4j**
 
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.java.net/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.3-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.2-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![Quarkus](https://img.shields.io/badge/Quarkus-3.17+-blue.svg)](https://quarkus.io/)
 [![Micronaut](https://img.shields.io/badge/Micronaut-4.8+-blue.svg)](https://micronaut.io/)
 [![Resilience4j](https://img.shields.io/badge/Resilience4j-2.x-blue.svg)](https://resilience4j.readme.io/)

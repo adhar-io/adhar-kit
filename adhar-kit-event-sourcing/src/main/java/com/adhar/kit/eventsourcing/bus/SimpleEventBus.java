@@ -1,5 +1,6 @@
 package com.adhar.kit.eventsourcing.bus;
 
+import com.adhar.kit.commons.event.AdharCloudEvent;
 import com.adhar.kit.eventsourcing.core.DomainEvent;
 import lombok.extern.slf4j.Slf4j;
 
@@ -42,5 +43,27 @@ public class SimpleEventBus implements EventBus {
     @Override
     public void subscribe(String eventType, Consumer<DomainEvent> handler) {
         handlers.computeIfAbsent(eventType, _ -> new CopyOnWriteArrayList<>()).add(handler);
+    }
+
+    /**
+     * Wraps a {@link DomainEvent} in an {@link AdharCloudEvent} envelope and publishes it.
+     *
+     * <p>The CloudEvent is constructed with source {@code "adhar-kit/event-sourcing"} and a
+     * type derived from the domain event's {@code eventType()} prefixed with
+     * {@code "com.adhar.eventsourcing."}. The aggregate ID is used as the CloudEvent subject.</p>
+     *
+     * @param event the domain event to wrap and publish
+     */
+    public void publishAsCloudEvent(DomainEvent event) {
+        String cloudEventType = "com.adhar.eventsourcing." + event.eventType();
+        AdharCloudEvent<DomainEvent> cloudEvent = AdharCloudEvent.of(
+                "adhar-kit/event-sourcing",
+                cloudEventType,
+                event.aggregateId(),
+                event
+        );
+        log.debug("Publishing CloudEvent [type={}, subject={}] for domain event '{}'",
+                cloudEvent.type(), cloudEvent.subject(), event.eventType());
+        publish(event);
     }
 }

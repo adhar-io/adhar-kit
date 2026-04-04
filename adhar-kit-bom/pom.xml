@@ -297,6 +297,13 @@
                 <version>${adhar-kit.version}</version>
             </dependency>
 
+            <!-- OpenRewrite Code Modernization -->
+            <dependency>
+                <groupId>com.adhar.kit</groupId>
+                <artifactId>adhar-kit-rewrite</artifactId>
+                <version>${adhar-kit.version}</version>
+            </dependency>
+
             <!-- All-in-One Starter -->
             <dependency>
                 <groupId>com.adhar.kit</groupId>

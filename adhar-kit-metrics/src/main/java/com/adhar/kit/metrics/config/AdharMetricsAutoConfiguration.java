@@ -1,6 +1,9 @@
 package com.adhar.kit.metrics.config;
 
 import com.adhar.kit.metrics.aspect.EnhancedMetricsAspect;
+import com.adhar.kit.metrics.auto.JvmMetricsCollector;
+import com.adhar.kit.metrics.auto.MetricsInterceptor;
+import com.adhar.kit.metrics.auto.PlatformMetrics;
 import com.adhar.kit.metrics.properties.AdharMetricsProperties;
 import com.adhar.kit.metrics.util.AdharMetrics;
 import com.adhar.kit.metrics.util.KubernetesMetricsUtils;
@@ -269,6 +272,48 @@ public class AdharMetricsAutoConfiguration {
     public MeterFilter uriTagLimitFilter() {
         return MeterFilter.maximumAllowableTags("http.server.requests", "uri",
                 properties.getWeb().getMaxUriTags(), MeterFilter.deny());
+    }
+
+    // -------------------------------------------------------------------------
+    // Auto-Metrics Beans
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates the PlatformMetrics singleton bean that provides pre-built metric names
+     * and auto-records common metrics across all Adhar Kit modules.
+     * <p>
+     * The bean is also accessible as a static singleton via {@link PlatformMetrics#getInstance()}.
+     * </p>
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public PlatformMetrics platformMetrics(MeterRegistry meterRegistry) {
+        log.debug("Registering PlatformMetrics auto-collection bean");
+        return new PlatformMetrics(meterRegistry);
+    }
+
+    /**
+     * Creates the MetricsInterceptor AOP aspect that auto-instruments methods
+     * annotated with {@code @Measured} or {@code @MonitorPerformance}.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.application", name = "methodTiming", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public MetricsInterceptor metricsInterceptor(MeterRegistry meterRegistry) {
+        log.debug("Registering MetricsInterceptor for @Measured and @MonitorPerformance auto-instrumentation");
+        return new MetricsInterceptor(meterRegistry);
+    }
+
+    /**
+     * Creates the JvmMetricsCollector that registers Adhar-prefixed JVM metrics
+     * and collects them on a 15-second schedule using MXBeans.
+     */
+    @Bean(destroyMethod = "shutdown")
+    @ConditionalOnProperty(prefix = "adhar.metrics.jvm", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public JvmMetricsCollector jvmMetricsCollector(MeterRegistry meterRegistry) {
+        log.debug("Registering JvmMetricsCollector with 15-second collection interval");
+        return new JvmMetricsCollector(meterRegistry);
     }
 
     /**

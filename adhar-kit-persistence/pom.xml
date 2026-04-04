@@ -13,6 +13,10 @@
     <name>adhar-kits-persistence</name>
     <description>adhar-persistence-starter</description>
 
+    <properties>
+        <jacoco.minimum.coverage>0.30</jacoco.minimum.coverage>
+    </properties>
+
     <dependencies>
         <!-- Adhar Kit Commons -->
         <dependency>
@@ -97,6 +101,13 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- Micrometer (Optional - for persistence metrics) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <optional>true</optional>
         </dependency>
 
         <!-- Spring Security (for auditing) -->

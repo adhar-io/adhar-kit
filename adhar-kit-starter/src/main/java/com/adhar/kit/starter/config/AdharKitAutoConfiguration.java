@@ -126,6 +126,7 @@ public class AdharKitAutoConfiguration {
         checkModule("Notification", modules.isNotification(), enabledModules, disabledModules);
         checkModule("Event Sourcing", modules.isEventSourcing(), enabledModules, disabledModules);
         checkModule("Perf Profiler", modules.isPerfProfiler(), enabledModules, disabledModules);
+        checkModule("Rewrite", modules.isRewrite(), enabledModules, disabledModules);
 
         // Log enabled modules
         for (String module : enabledModules) {
@@ -247,6 +248,8 @@ public class AdharKitAutoConfiguration {
                     "Event sourcing and CQRS patterns");
             registerModule("perf-profiler", "Perf Profiler", moduleConfig.isPerfProfiler(),
                     "Method-level performance profiling and bottleneck detection");
+            registerModule("rewrite", "Rewrite", moduleConfig.isRewrite(),
+                    "Automated codebase modernization with OpenRewrite recipes");
 
             log.debug("Module registry initialized with {} modules", modules.size());
         }

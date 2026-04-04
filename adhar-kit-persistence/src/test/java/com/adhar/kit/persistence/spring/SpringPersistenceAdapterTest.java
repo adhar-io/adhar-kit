@@ -1,6 +1,8 @@
 package com.adhar.kit.persistence.spring;
 
 import com.adhar.kit.commons.framework.Framework;
+import com.adhar.kit.persistence.config.PersistenceProperties;
+import com.adhar.kit.persistence.metrics.PersistenceMetricsCollector;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -10,13 +12,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.transaction.PlatformTransactionManager;
 
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -51,7 +54,11 @@ class SpringPersistenceAdapterTest {
     @Mock
     private TypedQuery<Long> longTypedQuery;
 
-    @InjectMocks
+    @Mock
+    private PlatformTransactionManager transactionManager;
+
+    private PersistenceProperties properties;
+    private PersistenceMetricsCollector metricsCollector;
     private SpringPersistenceAdapter adapter;
 
     // Test entity class
@@ -73,8 +80,15 @@ class SpringPersistenceAdapterTest {
     }
 
     @BeforeEach
-    void setUp() {
-        // Common setup if needed
+    void setUp() throws Exception {
+        properties = new PersistenceProperties();
+        metricsCollector = new PersistenceMetricsCollector(null, properties.getMetrics().getSlowQueryThresholdMs());
+        adapter = new SpringPersistenceAdapter(metricsCollector, transactionManager, properties);
+
+        // Inject mock EntityManager via reflection (simulates @PersistenceContext)
+        Field emField = SpringPersistenceAdapter.class.getDeclaredField("entityManager");
+        emField.setAccessible(true);
+        emField.set(adapter, entityManager);
     }
 
     @Test
@@ -123,9 +137,9 @@ class SpringPersistenceAdapterTest {
     @Test
     @DisplayName("Should flush and clear on batch size boundary")
     void testSaveAllBatchFlush() {
-        // Create 21 entities to trigger one flush (at 20)
-        TestEntity[] entities = new TestEntity[21];
-        for (int i = 0; i < 21; i++) {
+        // defaultBatchSize is 50, create 51 entities to trigger one flush at 50
+        TestEntity[] entities = new TestEntity[51];
+        for (int i = 0; i < 51; i++) {
             entities[i] = new TestEntity((long) i, "Test" + i);
         }
 
@@ -133,7 +147,7 @@ class SpringPersistenceAdapterTest {
 
         adapter.saveAll(Arrays.asList(entities));
 
-        verify(entityManager, times(21)).merge(any(TestEntity.class));
+        verify(entityManager, times(51)).merge(any(TestEntity.class));
         verify(entityManager, times(1)).flush();
         verify(entityManager, times(1)).clear();
     }
@@ -413,5 +427,37 @@ class SpringPersistenceAdapterTest {
         assertEquals(1, results.size());
         verify(typedQuery).setParameter(1, "Test");
         verify(typedQuery).setParameter(2, 1L);
+    }
+
+    @Test
+    @DisplayName("Should check if entity is managed")
+    void testIsManaged() {
+        TestEntity entity = new TestEntity(1L, "Test");
+        when(entityManager.contains(entity)).thenReturn(true);
+
+        assertTrue(adapter.isManaged(entity));
+    }
+
+    @Test
+    @DisplayName("Should detach entity")
+    void testDetach() {
+        TestEntity entity = new TestEntity(1L, "Test");
+
+        adapter.detach(entity);
+
+        verify(entityManager).detach(entity);
+    }
+
+    @Test
+    @DisplayName("Should return query stats")
+    void testGetQueryStats() {
+        assertNotNull(adapter.getQueryStats());
+        assertEquals(0, adapter.getQueryStats().totalQueries());
+    }
+
+    @Test
+    @DisplayName("Should reset query stats")
+    void testResetQueryStats() {
+        assertDoesNotThrow(() -> adapter.resetQueryStats());
     }
 }
