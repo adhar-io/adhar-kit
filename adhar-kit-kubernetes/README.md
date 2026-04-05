@@ -40,7 +40,7 @@ The **adhar-kit-kubernetes** module provides comprehensive Kubernetes integratio
 - 👑 **Leader Election** - Distributed leader election support
 - 🏷️ **Annotations** - Simple annotations for common tasks
 - 🛠️ **Utilities** - Helper methods for Kubernetes operations
-- 🌐 **Multi-Framework** - Works with Spring Boot, Quarkus, Micronaut
+- 🌐 **Multi-Framework** - Works with Spring Boot, Quarkus, Micronaut, Helidon, Vert.x
 - 📦 **Pod Information** - Access to current pod metadata
 
 ---

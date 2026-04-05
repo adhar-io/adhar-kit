@@ -3,24 +3,33 @@ package com.adhar.kit.commons.framework;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Detects the runtime framework automatically.
- * Supports Spring Boot, Quarkus, Micronaut, and Helidon.
+ * Detects the runtime framework automatically via classpath scanning.
+ *
+ * <p>Supports all five Adhar Kit frameworks: Spring Boot, Quarkus, Micronaut,
+ * Helidon, and Vert.x. Detection result is cached after first invocation.</p>
+ *
+ * <p>Detection order (first match wins):</p>
+ * <ol>
+ *   <li>Spring Boot - {@code org.springframework.boot.SpringApplication}</li>
+ *   <li>Quarkus - {@code io.quarkus.runtime.Quarkus}</li>
+ *   <li>Micronaut - {@code io.micronaut.context.ApplicationContext}</li>
+ *   <li>Helidon - {@code io.helidon.webserver.WebServer}</li>
+ *   <li>Vert.x - {@code io.vertx.core.Vertx}</li>
+ *   <li>OTHER - fallback when no framework detected</li>
+ * </ol>
  *
  * @author Adhar Platform Team
- * @since 1.1.0
+ * @since 1.0.0
  */
 @Slf4j
 public final class FrameworkDetector {
 
     private static volatile Framework detectedFramework;
 
-    private FrameworkDetector() {
-        // Utility class
-    }
+    private FrameworkDetector() {}
 
     /**
-     * Detect the current framework.
-     * Result is cached after first detection.
+     * Detect the current framework. Result is cached after first detection.
      *
      * @return detected framework
      */
@@ -36,64 +45,58 @@ public final class FrameworkDetector {
         return detectedFramework;
     }
 
-    /**
-     * Check if running on Spring Boot.
-     *
-     * @return true if Spring Boot is detected
-     */
+    /** @return true if running on Spring Boot */
     public static boolean isSpringBoot() {
         return detect() == Framework.SPRING_BOOT;
     }
 
-    /**
-     * Check if running on Quarkus.
-     *
-     * @return true if Quarkus is detected
-     */
+    /** @return true if running on Quarkus */
     public static boolean isQuarkus() {
         return detect() == Framework.QUARKUS;
     }
 
-    /**
-     * Check if running on Micronaut.
-     *
-     * @return true if Micronaut is detected
-     */
+    /** @return true if running on Micronaut */
     public static boolean isMicronaut() {
         return detect() == Framework.MICRONAUT;
     }
 
-    /**
-     * Perform framework detection by checking for framework-specific classes.
-     *
-     * @return detected framework
-     */
+    /** @return true if running on Helidon */
+    public static boolean isHelidon() {
+        return detect() == Framework.HELIDON;
+    }
+
+    /** @return true if running on Vert.x */
+    public static boolean isVertx() {
+        return detect() == Framework.VERTX;
+    }
+
     private static Framework performDetection() {
-        // Check Spring Boot first (most common)
+        // Spring Boot (most common in enterprise)
         if (isClassPresent("org.springframework.boot.SpringApplication")) {
             return Framework.SPRING_BOOT;
         }
-
-        // Check Quarkus
+        // Quarkus
         if (isClassPresent("io.quarkus.runtime.Quarkus")) {
             return Framework.QUARKUS;
         }
-
-        // Check Micronaut
+        // Micronaut
         if (isClassPresent("io.micronaut.context.ApplicationContext")) {
             return Framework.MICRONAUT;
         }
+        // Helidon (SE or MP)
+        if (isClassPresent("io.helidon.webserver.WebServer")
+                || isClassPresent("io.helidon.microprofile.cdi.Main")) {
+            return Framework.HELIDON;
+        }
+        // Vert.x
+        if (isClassPresent("io.vertx.core.Vertx")) {
+            return Framework.VERTX;
+        }
 
-        log.warn("No supported framework detected. Using OTHER mode.");
+        log.warn("No supported framework detected. Using standalone/fallback mode.");
         return Framework.OTHER;
     }
 
-    /**
-     * Check if a class is present on the classpath.
-     *
-     * @param className fully qualified class name
-     * @return true if class is present
-     */
     private static boolean isClassPresent(String className) {
         try {
             Class.forName(className, false, FrameworkDetector.class.getClassLoader());
@@ -103,20 +106,13 @@ public final class FrameworkDetector {
         }
     }
 
-    /**
-     * Reset detection (for testing purposes).
-     */
+    /** Reset detection (for testing). */
     static void resetDetection() {
         detectedFramework = null;
     }
 
-    /**
-     * Force a specific framework (for testing purposes).
-     *
-     * @param framework framework to force
-     */
+    /** Force a specific framework (for testing). */
     static void forceFramework(Framework framework) {
         detectedFramework = framework;
     }
 }
-

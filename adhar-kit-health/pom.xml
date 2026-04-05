@@ -127,4 +127,21 @@
             <optional>true</optional>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>**/quarkus/**/*.java</exclude>
+                        <exclude>**/micronaut/**/*.java</exclude>
+                        <exclude>**/helidon/**/*.java</exclude>
+                        <exclude>**/vertx/**/*.java</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

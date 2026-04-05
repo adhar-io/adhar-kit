@@ -4,13 +4,15 @@
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/adhar-platform/adhar-kit)
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.2-green.svg)](https://spring.io/projects/spring-boot)
-[![Quarkus](https://img.shields.io/badge/Quarkus-3.17+-blue.svg)](https://quarkus.io/)
+[![Quarkus](https://img.shields.io/badge/Quarkus-3.21+-blue.svg)](https://quarkus.io/)
 [![Micronaut](https://img.shields.io/badge/Micronaut-4.8+-purple.svg)](https://micronaut.io/)
+[![Helidon](https://img.shields.io/badge/Helidon-4.2+-red.svg)](https://helidon.io/)
+[![Vert.x](https://img.shields.io/badge/Vert.x-4.5+-yellow.svg)](https://vertx.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Build](https://img.shields.io/badge/Build-Passing-success.svg)](https://github.com/adhar-platform/adhar-kit)
 [![Coverage](https://img.shields.io/badge/Coverage-80%25+-brightgreen.svg)](https://github.com/adhar-platform/adhar-kit)
 
-> **A comprehensive, framework-agnostic enterprise microservices toolkit for Spring Boot, Quarkus, and Micronaut.**
+> **A comprehensive, framework-agnostic enterprise microservices toolkit for Spring Boot, Quarkus, Micronaut, Helidon, and Vert.x.**
 
 ## 📖 Overview
 
@@ -124,23 +126,23 @@ AdharFacade adhar = AdharFacade.getInstance();
 
 Most "framework-agnostic" libraries still tie you to specific implementations. Adhar Kit is different:
 
-| Capability | Spring Boot | Quarkus | Micronaut |
-|------------|-------------|---------|-----------|
-| Core APIs | ✅ Identical | ✅ Identical | ✅ Identical |
-| Configuration | ✅ Native YAML | ✅ Native Properties | ✅ Native YAML |
-| DI Integration | ✅ Spring DI | ✅ ArC CDI | ✅ Micronaut DI |
-| Native Image | ✅ GraalVM | ✅ GraalVM | ✅ GraalVM |
-| Performance | ✅ Optimized | ✅ Optimized | ✅ Optimized |
+| Capability | Spring Boot | Quarkus | Micronaut | Helidon | Vert.x |
+|------------|-------------|---------|-----------|---------|--------|
+| Core APIs | ✅ Identical | ✅ Identical | ✅ Identical | ✅ Identical | ✅ Identical |
+| Configuration | ✅ Native YAML | ✅ Native Props | ✅ Native YAML | ✅ MP Config | ✅ JSON/YAML |
+| DI Integration | ✅ Spring DI | ✅ ArC CDI | ✅ Micronaut DI | ✅ MP CDI / SE | ✅ Standalone |
+| Native Image | ✅ GraalVM | ✅ GraalVM | ✅ GraalVM | ✅ GraalVM | ✅ GraalVM |
+| Performance | ✅ Optimized | ✅ Optimized | ✅ Optimized | ✅ Optimized | ✅ Optimized |
 
 **Real-world benefits:**
-- **Migrate without rewriting** - Switch from Spring Boot to Quarkus? Your Adhar Kit code stays the same
+- **Migrate without rewriting** - Switch from Spring Boot to Quarkus or Helidon? Your Adhar Kit code stays the same
 - **Team flexibility** - Different teams can use different frameworks while sharing the same toolkit
-- **Future-proof architecture** - New framework emerges? We'll support it without breaking your code
-- **Framework-native performance** - We don't use lowest-common-denominator abstractions; each framework gets optimized implementations
-- **Consistent developer experience** - Learn once, apply everywhere
+- **5 frameworks, 1 API** - Spring Boot, Quarkus, Micronaut, Helidon, and Vert.x all work identically
+- **Framework-native performance** - Each framework gets optimized implementations, not lowest-common-denominator
+- **OpenRewrite migrations** - Automated cross-framework migration recipes included (`adhar.getRewrite()`)
 
 ```java
-// This exact code works identically on Spring Boot, Quarkus, AND Micronaut
+// This exact code works identically on ALL 5 frameworks
 AdharFacade adhar = AdharFacade.getInstance();
 adhar.cached("users", "123", User.class, () -> loadUser("123"));  // Same API
 adhar.publish("events", event);                                    // Same API
@@ -203,7 +205,7 @@ Enterprise applications have requirements that hobby projects don't. Adhar Kit a
 ### Prerequisites
 - Java 25 or later
 - Maven 3.9+
-- Spring Boot 4.0+ / Quarkus 3.21+ / Micronaut 4.8+
+- Spring Boot 4.0+ / Quarkus 3.21+ / Micronaut 4.8+ / Helidon 4.2+ / Vert.x 4.5+
 
 ### Installation
 
@@ -305,7 +307,7 @@ public class OrderService {
 | ⚡ **perf-profiler** | Profiling (`getProfiler()`) | Method tracing, hotspots, memory, Actuator endpoint |
 | 🚀 **starter** | Unified integration | AdharFacade with 40+ convenience shortcuts |
 | 🔌 **maven-plugin** | Build tooling | Release management, code generation (DTO, Controller) |
-| 🔄 **rewrite** | Code modernization (`getRewrite()`) | OpenRewrite recipes, Java/Spring migration, auto-refactoring |
+| 🔄 **rewrite** | Code modernization (`getRewrite()`) | 26 OpenRewrite recipes, 5 framework migrations, cross-framework |
 
 </details>
 
@@ -408,13 +410,19 @@ adhar.getRewrite().apply("spring-boot-4", Path.of("."));
 // Generates target/rewrite/rewrite.yml and prints:
 // mvn -U org.openrewrite.maven:rewrite-maven-plugin:6.35.0:run
 
-// Available recipe sets by category:
-// JAVA_MIGRATION:    java-17, java-21, java-25
-// SPRING_MIGRATION:  spring-boot-3, spring-boot-4
-// TESTING:           junit-5, assertj, mockito-5
-// SECURITY:          security-best-practices
-// CODE_QUALITY:      code-cleanup, logging-best-practices
-// ADHAR_KIT:         adhar-convenience-api, adhar-cloudevents, adhar-full-modernization
+// 26 recipe sets across 10 categories:
+// JAVA_MIGRATION:      java-17, java-21, java-25
+// SPRING_MIGRATION:    spring-boot-3, spring-boot-4
+// QUARKUS_MIGRATION:   quarkus-3, quarkus-latest
+// MICRONAUT_MIGRATION: micronaut-4
+// HELIDON_MIGRATION:   helidon-4
+// VERTX_MIGRATION:     vertx-4
+// JAKARTA_MIGRATION:   jakarta-ee-10, jakarta-ee-11
+// CROSS_FRAMEWORK:     spring-to-quarkus, spring-to-micronaut, spring-to-helidon, spring-to-vertx
+// TESTING:             junit-5, assertj, mockito-5
+// SECURITY:            security-best-practices
+// CODE_QUALITY:        code-cleanup, logging-best-practices, dependency-upgrade
+// ADHAR_KIT:           adhar-convenience-api, adhar-cloudevents, adhar-full-modernization
 ```
 
 ---
@@ -1187,7 +1195,7 @@ If you find Adhar Kit useful, please consider:
 Adhar Kit is built with ❤️ by the **Adhar Platform Team** and amazing contributors from the community.
 
 Special thanks to:
-- The Spring Boot, Quarkus, and Micronaut communities
+- The Spring Boot, Quarkus, Micronaut, Helidon, and Vert.x communities
 - All open-source projects we build upon
 - Our contributors and early adopters
 - The Java community for continuous innovation

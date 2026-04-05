@@ -139,4 +139,24 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Compiler Plugin - Exclude optional framework adapters -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <useIncrementalCompilation>false</useIncrementalCompilation>
+                    <excludes>
+                        <!-- Exclude framework-specific adapters - they need their specific dependencies -->
+                        <exclude>**/micronaut/**/*.java</exclude>
+                        <exclude>**/quarkus/**/*.java</exclude>
+                        <exclude>**/helidon/**/*.java</exclude>
+                        <exclude>**/vertx/**/*.java</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

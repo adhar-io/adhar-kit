@@ -274,7 +274,14 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <!-- Configuration inherited from parent POM -->
+                <configuration>
+                    <excludes>
+                        <exclude>**/quarkus/**/*.java</exclude>
+                        <exclude>**/micronaut/**/*.java</exclude>
+                        <exclude>**/helidon/**/*.java</exclude>
+                        <exclude>**/vertx/**/*.java</exclude>
+                    </excludes>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

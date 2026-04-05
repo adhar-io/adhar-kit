@@ -1,0 +1,92 @@
+name: Release to Maven Central
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseVersion:
+        description: 'Release version (e.g., 1.0.0)'
+        required: true
+      nextVersion:
+        description: 'Next development version (e.g., 1.0.1-SNAPSHOT)'
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: GPG_PASSPHRASE
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Set Release Version
+        run: |
+          mvn versions:set -DnewVersion=${{ github.event.inputs.releaseVersion }} --no-transfer-progress
+          mvn versions:commit
+          git add -A
+          git commit -m "release: v${{ github.event.inputs.releaseVersion }}"
+
+      - name: Build and Test
+        run: mvn verify -Djacoco.skip=true --no-transfer-progress
+
+      - name: Deploy to Maven Central
+        run: mvn deploy -Prelease -DskipTests --no-transfer-progress
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Create Git Tag
+        run: |
+          git tag -a "v${{ github.event.inputs.releaseVersion }}" -m "Release v${{ github.event.inputs.releaseVersion }}"
+          git push origin "v${{ github.event.inputs.releaseVersion }}"
+
+      - name: Set Next Development Version
+        run: |
+          mvn versions:set -DnewVersion=${{ github.event.inputs.nextVersion }} --no-transfer-progress
+          mvn versions:commit
+          git add -A
+          git commit -m "chore: prepare for next development cycle ${{ github.event.inputs.nextVersion }}"
+          git push
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ github.event.inputs.releaseVersion }}"
+          name: "Adhar Kit v${{ github.event.inputs.releaseVersion }}"
+          body: |
+            ## Adhar Kit v${{ github.event.inputs.releaseVersion }}
+
+            ### Installation
+
+            ```xml
+            <dependency>
+                <groupId>com.adhar.kit</groupId>
+                <artifactId>adhar-kit-starter</artifactId>
+                <version>${{ github.event.inputs.releaseVersion }}</version>
+            </dependency>
+            ```
+
+            See [CHANGELOG.md](CHANGELOG.md) for full release notes.
+          draft: false
+          prerelease: false

@@ -40,6 +40,8 @@ public class TracingFacade implements TracingService {
             case SPRING_BOOT -> createSpringAdapter();
             case QUARKUS -> createQuarkusAdapter();
             case MICRONAUT -> createMicronautAdapter();
+            case HELIDON -> createHelidonAdapter();
+            case VERTX -> createVertxAdapter();
             default -> throw new IllegalStateException(
                     "Unsupported framework: " + FrameworkDetector.detect()
             );
@@ -61,6 +63,28 @@ public class TracingFacade implements TracingService {
     private TracingService createMicronautAdapter() {
         // For Micronaut
         throw new UnsupportedOperationException("Micronaut adapter initialization from facade not yet supported");
+    }
+
+    private TracingService createHelidonAdapter() {
+        try {
+            log.debug("Creating Helidon tracing adapter");
+            var adapterClass = Class.forName("com.adhar.kit.tracing.helidon.HelidonTracingAdapter");
+            return (TracingService) adapterClass.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
+            log.error("Failed to create Helidon tracing adapter", e);
+            throw new IllegalStateException("Helidon tracing adapter not available. Ensure Helidon dependencies are on the classpath.", e);
+        }
+    }
+
+    private TracingService createVertxAdapter() {
+        try {
+            log.debug("Creating Vert.x tracing adapter");
+            var adapterClass = Class.forName("com.adhar.kit.tracing.vertx.VertxTracingAdapter");
+            return (TracingService) adapterClass.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
+            log.error("Failed to create Vert.x tracing adapter", e);
+            throw new IllegalStateException("Vert.x tracing adapter not available. Ensure Vert.x dependencies are on the classpath.", e);
+        }
     }
 
     @Override

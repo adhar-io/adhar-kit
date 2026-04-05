@@ -240,9 +240,11 @@ public class MetricsFacade implements MetricsService {
             case SPRING_BOOT -> createSpringAdapter();
             case QUARKUS -> createQuarkusAdapter();
             case MICRONAUT -> createMicronautAdapter();
+            case HELIDON -> createHelidonAdapter();
+            case VERTX -> createVertxAdapter();
             default -> throw new IllegalStateException(
                     "Unsupported framework: " + FrameworkDetector.detect() +
-                    ". Metrics module supports Spring Boot, Quarkus, and Micronaut."
+                    ". Metrics module supports Spring Boot, Quarkus, Micronaut, Helidon, and Vert.x."
             );
         };
     }
@@ -307,6 +309,48 @@ public class MetricsFacade implements MetricsService {
         } catch (Exception e) {
             log.error("Failed to create Micronaut metrics adapter", e);
             throw new IllegalStateException("Micronaut context not available. Ensure Micronaut is properly configured.", e);
+        }
+    }
+
+    /**
+     * Creates Helidon metrics adapter.
+     * <p>
+     * Instantiates the {@code HelidonMetricsAdapter} which internally creates its own
+     * SimpleMeterRegistry. Falls back to an error if the adapter is not on the classpath.
+     * </p>
+     *
+     * @return Helidon metrics adapter
+     * @throws IllegalStateException if the Helidon adapter is not available
+     */
+    private MetricsService createHelidonAdapter() {
+        try {
+            log.debug("Creating Helidon metrics adapter");
+            var adapterClass = Class.forName("com.adhar.kit.metrics.helidon.HelidonMetricsAdapter");
+            return (MetricsService) adapterClass.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
+            log.error("Failed to create Helidon metrics adapter", e);
+            throw new IllegalStateException("Helidon metrics adapter not available. Ensure adhar-kit-metrics Helidon dependencies are on the classpath.", e);
+        }
+    }
+
+    /**
+     * Creates Vert.x metrics adapter.
+     * <p>
+     * Instantiates the {@code VertxMetricsAdapter} which internally creates its own
+     * SimpleMeterRegistry. Falls back to an error if the adapter is not on the classpath.
+     * </p>
+     *
+     * @return Vert.x metrics adapter
+     * @throws IllegalStateException if the Vert.x adapter is not available
+     */
+    private MetricsService createVertxAdapter() {
+        try {
+            log.debug("Creating Vert.x metrics adapter");
+            var adapterClass = Class.forName("com.adhar.kit.metrics.vertx.VertxMetricsAdapter");
+            return (MetricsService) adapterClass.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
+            log.error("Failed to create Vert.x metrics adapter", e);
+            throw new IllegalStateException("Vert.x metrics adapter not available. Ensure adhar-kit-metrics Vert.x dependencies are on the classpath.", e);
         }
     }
 

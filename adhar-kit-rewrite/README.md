@@ -1,11 +1,11 @@
 # Adhar Kit Rewrite
 
-> Automated codebase modernization with OpenRewrite - Java, Spring Boot, Quarkus, Micronaut, and Jakarta EE migrations.
+> Automated codebase modernization with OpenRewrite - Java, Spring Boot, Quarkus, Micronaut, Helidon, Vert.x, and Jakarta EE migrations.
 
 ## Features
 
 - **RewriteFacade** - unified access via `adhar.getRewrite()`
-- **22 Pre-built Recipe Sets** across 8 categories
+- **26 Pre-built Recipe Sets** across 10 categories
 - **Java Migrations** - Java 17, 21, 25 upgrades with language feature adoption
 - **Spring Boot Migrations** - Spring Boot 3.x and 4.x with starter renames and package moves
 - **Quarkus Migrations** - Quarkus 3.x with extension renames and Jakarta namespace
@@ -59,8 +59,10 @@ public class ModernizationService {
 | **Spring Migration** | `spring-boot-3`, `spring-boot-4` |
 | **Quarkus Migration** | `quarkus-3`, `quarkus-latest` |
 | **Micronaut Migration** | `micronaut-4` |
+| **Helidon Migration** | `helidon-4` |
+| **Vert.x Migration** | `vertx-4` |
 | **Jakarta EE** | `jakarta-ee-10`, `jakarta-ee-11` |
-| **Cross-Framework** | `spring-to-quarkus`, `spring-to-micronaut` |
+| **Cross-Framework** | `spring-to-quarkus`, `spring-to-micronaut`, `spring-to-helidon`, `spring-to-vertx` |
 | **Testing** | `junit-5`, `assertj`, `mockito-5` |
 | **Security** | `security-best-practices` |
 | **Code Quality** | `code-cleanup`, `logging-best-practices`, `dependency-upgrade` |

@@ -662,7 +662,7 @@ public class AdharFacade {
             TIER-3 Enterprise: persistence, security, config, ai, analytics, kubernetes,
                 dapr, batch, notification, event-sourcing, perf-profiler, rewrite, starter, maven-plugin
 
-            Framework Support: Spring Boot 4.0+, Quarkus 3.21+, Micronaut 4.8+
+            Framework Support: Spring Boot 4.0+, Quarkus 3.21+, Micronaut 4.8+, Helidon 4.2+, Vert.x 4.5+
             """.formatted(getVersion());
     }
 

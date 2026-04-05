@@ -58,6 +58,8 @@ public class HealthFacade implements HealthService {
             case SPRING_BOOT -> createSpringAdapter();
             case QUARKUS -> createQuarkusAdapter();
             case MICRONAUT -> createMicronautAdapter();
+            case HELIDON -> createHelidonAdapter();
+            case VERTX -> createVertxAdapter();
             default -> throw new IllegalStateException(
                     "Unsupported framework for health: " + FrameworkDetector.detect()
             );
@@ -77,6 +79,28 @@ public class HealthFacade implements HealthService {
 
     private HealthService createMicronautAdapter() {
         throw new UnsupportedOperationException("Micronaut adapter initialization from facade not yet supported");
+    }
+
+    private HealthService createHelidonAdapter() {
+        try {
+            log.debug("Creating Helidon health adapter");
+            var adapterClass = Class.forName("com.adhar.kit.health.helidon.HelidonHealthAdapter");
+            return (HealthService) adapterClass.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
+            log.error("Failed to create Helidon health adapter", e);
+            throw new IllegalStateException("Helidon health adapter not available. Ensure Helidon dependencies are on the classpath.", e);
+        }
+    }
+
+    private HealthService createVertxAdapter() {
+        try {
+            log.debug("Creating Vert.x health adapter");
+            var adapterClass = Class.forName("com.adhar.kit.health.vertx.VertxHealthAdapter");
+            return (HealthService) adapterClass.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
+            log.error("Failed to create Vert.x health adapter", e);
+            throw new IllegalStateException("Vert.x health adapter not available. Ensure Vert.x dependencies are on the classpath.", e);
+        }
     }
 
     @Override

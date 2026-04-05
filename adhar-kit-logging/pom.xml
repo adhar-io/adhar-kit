@@ -183,9 +183,11 @@
                         <target>${java.version}</target>
                         <release>${java.version}</release>
                         <excludes>
-                            <!-- Exclude Micronaut and Quarkus adapters - they need their specific dependencies -->
+                            <!-- Exclude framework-specific adapters - they need their specific dependencies -->
                             <exclude>**/micronaut/**/*.java</exclude>
                             <exclude>**/quarkus/**/*.java</exclude>
+                            <exclude>**/helidon/**/*.java</exclude>
+                            <exclude>**/vertx/**/*.java</exclude>
                         </excludes>
                     </configuration>
                 </plugin>
@@ -273,25 +275,5 @@
         </plugins>
     </build>
 
-    <distributionManagement>
-        <snapshotRepository>
-            <id>your-nexus-snapshots</id>
-            <url>https://your-nexus-or-artifactory/repository/maven-snapshots/</url>
-        </snapshotRepository>
-        <repository>
-            <id>your-nexus-releases</id>
-            <url>https://your-nexus-or-artifactory/repository/maven-releases/</url>
-        </repository>
-    </distributionManagement>
-
-    <profiles>
-        <profile>
-            <id>releases</id>
-            <build>
-                <plugins>
-                </plugins>
-            </build>
-        </profile>
-    </profiles>
 
 </project>

@@ -33,7 +33,7 @@
 The **adhar-kit-health** module provides comprehensive health check capabilities for enterprise microservices with:
 
 - 🚀 **Auto-discovery** - Automatic health indicator registration
-- 🔄 **Multi-Framework** - Works with Spring Boot, Quarkus, Micronaut
+- 🔄 **Multi-Framework** - Works with Spring Boot, Quarkus, Micronaut, Helidon, Vert.x
 - 📊 **Built-in Indicators** - Database, Redis, Kafka, MongoDB, etc.
 - 🎯 **Custom Indicators** - Easy creation of custom health checks
 - ⚡ **Parallel Execution** - Fast health checks with concurrent execution

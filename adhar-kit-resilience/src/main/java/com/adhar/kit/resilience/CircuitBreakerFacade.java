@@ -2,9 +2,6 @@ package com.adhar.kit.resilience;
 
 import com.adhar.kit.commons.framework.FrameworkDetector;
 import com.adhar.kit.resilience.api.CircuitBreakerService;
-import com.adhar.kit.resilience.micronaut.MicronautCircuitBreakerAdapter;
-import com.adhar.kit.resilience.quarkus.QuarkusCircuitBreakerAdapter;
-import com.adhar.kit.resilience.spring.SpringCircuitBreakerAdapter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.function.Supplier;
@@ -12,6 +9,9 @@ import java.util.function.Supplier;
 /**
  * Universal Circuit Breaker facade that works across all frameworks.
  * Auto-detects the framework and delegates to the appropriate adapter.
+ *
+ * <p>Framework-specific adapters are loaded via reflection to avoid compile-time
+ * dependencies on framework-specific modules that are excluded during compilation.</p>
  *
  * Usage:
  * <pre>
@@ -53,12 +53,36 @@ public class CircuitBreakerFacade implements CircuitBreakerService {
     private CircuitBreakerService createDelegate() {
         return switch (FrameworkDetector.detect()) {
             case SPRING_BOOT -> createSpringAdapter();
-            case QUARKUS -> new QuarkusCircuitBreakerAdapter();
-            case MICRONAUT -> new MicronautCircuitBreakerAdapter();
+            case QUARKUS -> createAdapterByReflection(
+                    "com.adhar.kit.resilience.quarkus.QuarkusCircuitBreakerAdapter");
+            case MICRONAUT -> createAdapterByReflection(
+                    "com.adhar.kit.resilience.micronaut.MicronautCircuitBreakerAdapter");
+            case HELIDON -> createAdapterByReflection(
+                    "com.adhar.kit.resilience.helidon.HelidonResilienceAdapter");
+            case VERTX -> createAdapterByReflection(
+                    "com.adhar.kit.resilience.vertx.VertxResilienceAdapter");
             default -> throw new IllegalStateException(
                     "Unsupported framework: " + FrameworkDetector.detect()
             );
         };
+    }
+
+    /**
+     * Creates a framework-specific adapter via reflection.
+     * This avoids compile-time dependencies on excluded framework adapter classes.
+     *
+     * @param className fully qualified class name of the adapter
+     * @return the adapter instance as a CircuitBreakerService
+     */
+    private CircuitBreakerService createAdapterByReflection(String className) {
+        try {
+            Class<?> adapterClass = Class.forName(className);
+            return (CircuitBreakerService) adapterClass.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "Failed to create adapter: " + className + ". "
+                    + "Ensure the adapter class is on the classpath.", e);
+        }
     }
 
     private CircuitBreakerService createSpringAdapter() {
@@ -102,9 +126,8 @@ public class CircuitBreakerFacade implements CircuitBreakerService {
         if (delegate == null) {
             throw new IllegalStateException(
                     "CircuitBreakerFacade delegate is not initialized. "
-                    + "Ensure a supported framework (Quarkus, Micronaut) is on the classpath, "
+                    + "Ensure a supported framework (Quarkus, Micronaut, Helidon, Vert.x) is on the classpath, "
                     + "or use Spring's @Autowired SpringCircuitBreakerAdapter directly.");
         }
     }
 }
-

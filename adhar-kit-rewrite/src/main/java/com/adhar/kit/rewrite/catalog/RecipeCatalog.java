@@ -240,6 +240,41 @@ public final class RecipeCatalog {
         ));
 
         // =====================================================================
+        // Helidon Migrations
+        // =====================================================================
+        register("helidon-4", new RecipeSet(
+                "Upgrade to Helidon 4.x",
+                "Migrates Helidon 3.x to 4.x with Jakarta namespace, new WebServer API, and config changes",
+                Category.HELIDON_MIGRATION,
+                List.of("com.adhar.kit.rewrite.recipe.helidon.MigrateToHelidon4")
+        ));
+
+        // =====================================================================
+        // Vert.x Migrations
+        // =====================================================================
+        register("vertx-4", new RecipeSet(
+                "Upgrade to Vert.x 4.x",
+                "Migrates Vert.x 3.x to 4.x with Future-based API, removed callbacks, and package renames",
+                Category.VERTX_MIGRATION,
+                List.of("com.adhar.kit.rewrite.recipe.vertx.MigrateToVertx4")
+        ));
+
+        // Cross-framework: Spring to Helidon/Vert.x
+        register("spring-to-helidon", new RecipeSet(
+                "Migrate Spring Boot to Helidon",
+                "Converts Spring Boot patterns to Helidon MP equivalents",
+                Category.CROSS_FRAMEWORK,
+                List.of("com.adhar.kit.rewrite.recipe.cross.SpringToHelidon")
+        ));
+
+        register("spring-to-vertx", new RecipeSet(
+                "Migrate Spring Boot to Vert.x",
+                "Converts Spring Boot patterns to Vert.x reactive equivalents",
+                Category.CROSS_FRAMEWORK,
+                List.of("com.adhar.kit.rewrite.recipe.cross.SpringToVertx")
+        ));
+
+        // =====================================================================
         // Dependency Management
         // =====================================================================
         register("dependency-upgrade", new RecipeSet(
@@ -323,6 +358,8 @@ public final class RecipeCatalog {
         QUARKUS_MIGRATION("Quarkus Migrations"),
         MICRONAUT_MIGRATION("Micronaut Migrations"),
         JAKARTA_MIGRATION("Jakarta EE Migrations"),
+        HELIDON_MIGRATION("Helidon Migrations"),
+        VERTX_MIGRATION("Vert.x Migrations"),
         CROSS_FRAMEWORK("Cross-Framework Migration"),
         ADHAR_KIT("Adhar Kit Specific");
 

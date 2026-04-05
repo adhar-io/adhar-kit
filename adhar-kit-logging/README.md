@@ -34,7 +34,7 @@
 
 The **adhar-kit-logging** module provides enterprise-grade logging capabilities for microservices with:
 
-- 📝 **Universal Logging Facade** - Works across Spring Boot, Quarkus, and Micronaut
+- 📝 **Universal Logging Facade** - Works across Spring Boot, Quarkus, Micronaut, Helidon, Vert.x
 - 🎭 **AOP-based Logging** - Declarative logging using annotations
 - 🔒 **Sensitive Data Masking** - Automatic PII/credential masking
 - 🔗 **Distributed Tracing** - Seamless integration with OpenTelemetry/Zipkin
@@ -51,7 +51,7 @@ The **adhar-kit-logging** module provides enterprise-grade logging capabilities 
 ### Core Features
 
 ✅ **Multi-Framework Logging Facade**
-- Universal API across Spring Boot, Quarkus, Micronaut
+- Universal API across Spring Boot, Quarkus, Micronaut, Helidon, Vert.x
 - Framework-agnostic logging interface
 - Automatic framework detection
 

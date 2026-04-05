@@ -1,33 +1,32 @@
 package com.adhar.kit.commons.framework;
 
 /**
- * Enum representing supported frameworks for Adhar Kit.
+ * Enum representing all supported frameworks for Adhar Kit.
  *
- * <p>This enum identifies which framework an application or component is running on,
- * enabling framework-specific adapters and behaviors.</p>
+ * <p>Adhar Kit provides framework-agnostic APIs with framework-specific adapters
+ * for each of these runtime environments. The {@link FrameworkDetector} automatically
+ * identifies which framework is active at runtime.</p>
  *
  * @author Adhar Platform Team
  * @since 1.0.0
  */
 public enum Framework {
-    /**
-     * Spring Boot framework.
-     */
+
+    /** Spring Boot 4.0+ (Spring Framework 7.0+). */
     SPRING_BOOT,
 
-    /**
-     * Quarkus framework.
-     */
+    /** Quarkus 3.21+ with CDI (ArC) and SmallRye. */
     QUARKUS,
 
-    /**
-     * Micronaut framework.
-     */
+    /** Micronaut 4.8+ with compile-time DI. */
     MICRONAUT,
 
-    /**
-     * Other/Unknown framework.
-     */
+    /** Oracle Helidon 4.x (SE and MP). */
+    HELIDON,
+
+    /** Eclipse Vert.x 4.x (reactive toolkit). */
+    VERTX,
+
+    /** Other/Unknown framework - uses standalone/fallback implementations. */
     OTHER
 }
-

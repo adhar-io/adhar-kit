@@ -86,12 +86,30 @@
         <module>adhar-kit-rewrite</module>
     </modules>
 
+    <!-- ================================================================= -->
+    <!-- Distribution Management for Maven Central                       -->
+    <!-- ================================================================= -->
+    <distributionManagement>
+        <snapshotRepository>
+            <id>central</id>
+            <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+        </snapshotRepository>
+        <repository>
+            <id>central</id>
+            <url>https://central.sonatype.com/repository/maven-releases/</url>
+        </repository>
+    </distributionManagement>
+
     <profiles>
-        <!-- Release Profile -->
+        <!-- ============================================================= -->
+        <!-- Release Profile - Source JARs, JavaDoc JARs, GPG Signing      -->
+        <!-- Activated via: mvn deploy -Prelease                           -->
+        <!-- ============================================================= -->
         <profile>
             <id>release</id>
             <build>
                 <plugins>
+                    <!-- Source JAR (required by Maven Central) -->
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
@@ -105,6 +123,8 @@
                             </execution>
                         </executions>
                     </plugin>
+
+                    <!-- JavaDoc JAR (required by Maven Central) -->
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-javadoc-plugin</artifactId>
@@ -122,11 +142,42 @@
                             </execution>
                         </executions>
                     </plugin>
+
+                    <!-- GPG Signing (required by Maven Central) -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.7</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Central Publishing Plugin (Sonatype) -->
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.7.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>published</waitUntil>
+                        </configuration>
+                    </plugin>
                 </plugins>
             </build>
         </profile>
 
-        <!-- Coverage Profile -->
+        <!-- ============================================================= -->
+        <!-- Coverage Profile - JaCoCo aggregate report                    -->
+        <!-- ============================================================= -->
         <profile>
             <id>coverage</id>
             <build>

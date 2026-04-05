@@ -20,7 +20,7 @@ The **adhar-kit-metrics** module provides a robust, framework-agnostic metrics i
 
 ### 🌟 Key Highlights
 
-- 🔄 **Full Framework Parity** - Identical functionality across Spring Boot, Quarkus, and Micronaut
+- 🔄 **Full Framework Parity** - Identical functionality across Spring Boot, Quarkus, Micronaut, Helidon, Vert.x
 - 📊 **CloudEvents Integration** - Publish metric events for observability
 - 🎯 **Annotation-Driven** - 9 powerful annotations for declarative metrics
 - 🔧 **Programmatic API** - Comprehensive fluent API for manual metrics
