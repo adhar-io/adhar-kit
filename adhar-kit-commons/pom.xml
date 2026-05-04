@@ -6,13 +6,13 @@
     <parent>
         <groupId>com.adhar.kit</groupId>
         <artifactId>adhar-kit-parent</artifactId>
-        <version>0.0.1-SNAPSHOT</version>
+        <version>0.1.0-SNAPSHOT</version>
         <relativePath>../adhar-kit-parent/pom.xml</relativePath>
     </parent>
 
     <artifactId>adhar-kit-commons</artifactId>
     <name>adhar-kit-commons</name>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.1.0-SNAPSHOT</version>
     <description>Core Common Library (DTOs/Records, Utils, Exceptions, Error DTO etc)</description>
 
     <dependencies>

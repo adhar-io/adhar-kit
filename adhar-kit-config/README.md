@@ -8,7 +8,7 @@
 [![Micronaut](https://img.shields.io/badge/Micronaut-4.x-blue.svg)](https://micronaut.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**Version:** 1.0.0  
+**Version:** 0.1.0-SNAPSHOT  
 **Status:** ✅ Production Ready
 
 ---
@@ -49,13 +49,13 @@ Enterprise-grade configuration management for microservices supporting multiple 
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-config</artifactId>
-    <version>1.0.0</version>
+    <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 
 ### Gradle
 ```gradle
-implementation 'com.adhar.kit:adhar-kit-config:1.0.0'
+implementation 'com.adhar.kit:adhar-kit-config:0.1.0-SNAPSHOT'
 ```
 
 ---
@@ -665,7 +665,7 @@ public class MyService {
         log.info("Server port: {}", appConfig.getServer().getPort());
         log.info("DB pool size: {}", appConfig.getDatabase().getPoolSize());
         // Output:
-        // Starting my-service v1.0.0
+        // Starting my-service v0.1.0-SNAPSHOT
         // Server port: 9090
         // DB pool size: 50
     }

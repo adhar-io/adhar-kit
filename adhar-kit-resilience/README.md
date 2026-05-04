@@ -9,7 +9,7 @@
 [![Resilience4j](https://img.shields.io/badge/Resilience4j-2.x-blue.svg)](https://resilience4j.readme.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**Version:** 1.0.0  
+**Version:** 0.1.0-SNAPSHOT  
 **Status:** ✅ Production Ready
 
 ---
@@ -36,7 +36,7 @@ Enterprise-grade resilience patterns for microservices using Resilience4j.
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-resilience</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 

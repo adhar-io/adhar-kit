@@ -9,7 +9,7 @@
 [![Dapr](https://img.shields.io/badge/Dapr-1.12+-blue.svg)](https://dapr.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**Version:** 1.0.0  
+**Version:** 0.1.0-SNAPSHOT  
 **Status:** ✅ Production Ready
 
 ---
@@ -35,7 +35,7 @@ The **adhar-kit-dapr** module provides easy-to-use wrappers for Dapr building bl
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-dapr</artifactId>
-    <version>1.0.0</version>
+    <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 

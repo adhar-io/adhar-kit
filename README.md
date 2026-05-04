@@ -1,7 +1,7 @@
 # 🏆 Adhar Kit - Enterprise Microservices Toolkit
 
 ---
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/adhar-platform/adhar-kit)
+[![Version](https://img.shields.io/badge/version-0.1.0--SNAPSHOT-blue.svg)](https://github.com/adhar-platform/adhar-kit)
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.2-green.svg)](https://spring.io/projects/spring-boot)
 [![Quarkus](https://img.shields.io/badge/Quarkus-3.21+-blue.svg)](https://quarkus.io/)
@@ -30,7 +30,7 @@ Adhar Kit is the developer toolkit that bridges your applications to the **Adhar
 │                     (Business Logic & Features)                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                            ADHAR KIT                                        │
-│           (30+ Modules - Single Facade - Framework Agnostic)                │
+│ (30 Maven Modules: 28 Production + BOM + Parent - Single Facade - Agnostic) │
 │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐    │
 │  │ Logging │ │ Metrics │ │ Tracing │ │  Cache  │ │Security │ │   AI    │    │
 │  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘    │
@@ -215,7 +215,7 @@ Add the starter dependency to your project:
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-starter</artifactId>
-    <version>1.0.0</version>
+    <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 

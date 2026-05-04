@@ -18,7 +18,7 @@
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-perf-profiler</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 

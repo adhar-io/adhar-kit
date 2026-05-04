@@ -9,7 +9,7 @@
 [![Testcontainers](https://img.shields.io/badge/Testcontainers-1.19+-blue.svg)](https://www.testcontainers.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**Version:** 1.0.0  
+**Version:** 0.1.0-SNAPSHOT  
 **Status:** ✅ Production Ready
 
 ---
@@ -35,7 +35,7 @@ Comprehensive testing utilities and base classes for microservices integration a
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-test-commons</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.1.0-SNAPSHOT</version>
     <scope>test</scope>
 </dependency>
 ```

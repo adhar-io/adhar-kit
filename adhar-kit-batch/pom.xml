@@ -5,12 +5,12 @@
     <parent>
         <groupId>com.adhar.kit</groupId>
         <artifactId>adhar-kit-parent</artifactId>
-        <version>0.0.1-SNAPSHOT</version>
+        <version>0.1.0-SNAPSHOT</version>
         <relativePath>../adhar-kit-parent/pom.xml</relativePath>
     </parent>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-batch</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.1.0-SNAPSHOT</version>
     <name>Adhar Kit Batch</name>
     <description>Enterprise batch processing with Spring Batch - Job execution, partitioning, and monitoring</description>
 
@@ -24,7 +24,7 @@
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-commons</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <version>0.1.0-SNAPSHOT</version>
         </dependency>
 
         <!-- Spring Batch -->

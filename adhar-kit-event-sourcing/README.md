@@ -19,7 +19,7 @@
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-event-sourcing</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 

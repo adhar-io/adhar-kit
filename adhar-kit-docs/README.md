@@ -9,7 +9,7 @@
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-brightgreen.svg)](https://www.openapis.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**Version:** 1.0.0  
+**Version:** 0.1.0-SNAPSHOT  
 **Status:** ✅ Production Ready
 
 ---
@@ -74,13 +74,13 @@ The **adhar-kit-docs** module provides comprehensive OpenAPI/Swagger integration
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-docs</artifactId>
-    <version>1.0.0</version>
+    <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 
 **Gradle:**
 ```gradle
-implementation 'com.adhar.kit:adhar-kit-docs:1.0.0'
+implementation 'com.adhar.kit:adhar-kit-docs:0.1.0-SNAPSHOT'
 ```
 
 ### 2. Configure Application

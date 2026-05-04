@@ -9,7 +9,7 @@
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-1.28%2B-blue.svg)](https://kubernetes.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**Version:** 1.0.0  
+**Version:** 0.1.0-SNAPSHOT  
 **Status:** ✅ Production Ready
 
 ---
@@ -103,7 +103,7 @@ The **adhar-kit-kubernetes** module provides comprehensive Kubernetes integratio
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-kubernetes</artifactId>
-    <version>1.0.0</version>
+    <version>0.1.0-SNAPSHOT</version>
 </dependency>
 
 <!-- Kubernetes Client -->

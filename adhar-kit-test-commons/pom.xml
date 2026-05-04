@@ -6,12 +6,12 @@
     <parent>
         <groupId>com.adhar.kit</groupId>
         <artifactId>adhar-kit-parent</artifactId>
-        <version>0.0.1-SNAPSHOT</version>
+        <version>0.1.0-SNAPSHOT</version>
         <relativePath>../adhar-kit-parent/pom.xml</relativePath>
     </parent>
 
     <artifactId>adhar-kit-test-commons</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.1.0-SNAPSHOT</version>
     <name>adhar-test-commons</name>
     <description>Adhar Platform - Common Test Utilities</description>
 
@@ -112,7 +112,7 @@
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-commons</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <version>0.1.0-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
 

@@ -9,7 +9,7 @@
 [![gRPC](https://img.shields.io/badge/gRPC-1.60+-brightgreen.svg)](https://grpc.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**Version:** 1.0.0  
+**Version:** 0.1.0-SNAPSHOT  
 **Status:** ✅ Production Ready
 
 ---
@@ -87,7 +87,7 @@ The **adhar-kit-grpc** module provides enterprise-grade gRPC support for microse
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-grpc</artifactId>
-    <version>1.0.0</version>
+    <version>0.1.0-SNAPSHOT</version>
 </dependency>
 
 <!-- gRPC dependencies -->

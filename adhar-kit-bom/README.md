@@ -8,9 +8,6 @@
 [![Micronaut](https://img.shields.io/badge/Micronaut-4.8+-blue.svg)](https://micronaut.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**Version:** 1.0.0  
-**Status:** ✅ Production Ready
-
 ---
 
 ## 📖 Overview
@@ -27,8 +24,7 @@ A Bill of Materials (BOM) is a Maven POM that centralizes dependency version man
 ✅ **Simplified Configuration** - No need to specify versions  
 ✅ **Dependency Conflict Resolution** - Prevents version conflicts  
 ✅ **Easy Upgrades** - Update BOM version to upgrade all modules  
-✅ **Production Tested** - All versions are tested together  
-✅ **Java 25 LTS Compatible** - Tested with Java 25 LTS
+✅ **Production Tested** - All versions are tested together
 
 ---
 
@@ -46,7 +42,7 @@ Add the BOM to your project's `pom.xml`:
             <dependency>
                 <groupId>com.adhar.kit</groupId>
                 <artifactId>adhar-kit-bom</artifactId>
-                <version>1.0.0</version>
+                <version>0.1.0-SNAPSHOT</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -107,7 +103,7 @@ Add the BOM to your project's `pom.xml`:
 | Module | Artifact ID | Description |
 |--------|-------------|-------------|
 | **Messaging** | `adhar-kit-messaging` | Kafka, RabbitMQ, event-driven patterns |
-| **MERS** | `adhar-kit-mers` | Microservices Event-driven Reactive Streaming |
+| **Event Sourcing** | `adhar-kit-event-sourcing` | Event sourcing patterns, aggregates, and replay support |
 
 ### Observability (4 modules)
 
@@ -152,7 +148,17 @@ Add the BOM to your project's `pom.xml`:
 |--------|-------------|-------------|
 | **Starter** | `adhar-kit-starter` | Includes all commonly used modules |
 
-**Total: 23 Production-Ready Modules**
+### Platform Extensions (5 modules)
+
+| Module | Artifact ID | Description |
+|--------|-------------|-------------|
+| **Batch** | `adhar-kit-batch` | Batch orchestration, retries, and scheduling patterns |
+| **Notification** | `adhar-kit-notification` | Notification channels and delivery abstractions |
+| **Perf Profiler** | `adhar-kit-perf-profiler` | Performance profiling and runtime diagnostics |
+| **Rewrite** | `adhar-kit-rewrite` | Automated code modernization and migration recipes |
+| **Maven Plugin** | `adhar-kit-maven-plugin` | Build tooling for release and governance workflows |
+
+**Total: 28 Production-Ready Modules (excluding BOM + parent POM)**
 
 ---
 
@@ -251,7 +257,7 @@ Add the BOM to your project's `pom.xml`:
             <dependency>
                 <groupId>com.adhar.kit</groupId>
                 <artifactId>adhar-kit-bom</artifactId>
-                <version>1.0.0</version>
+                <version>0.1.0-SNAPSHOT</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -350,8 +356,8 @@ Add the BOM to your project's `pom.xml`:
         <artifactId>adhar-kit-messaging</artifactId>
     </dependency>
     <dependency>
-        <groupId>com.dbs</groupId>
-        <artifactId>adhar-kit-mers</artifactId>
+        <groupId>com.adhar.kit</groupId>
+        <artifactId>adhar-kit-event-sourcing</artifactId>
     </dependency>
 
     <!-- Adhar Kit - Core -->
@@ -447,7 +453,7 @@ If needed, you can override specific versions:
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-bom</artifactId>
-            <version>1.0.0</version>
+            <version>0.1.0-SNAPSHOT</version>
             <type>pom</type>
             <scope>import</scope>
         </dependency>
@@ -466,7 +472,7 @@ Combine Adhar Kit BOM with other BOMs:
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-bom</artifactId>
-            <version>1.0.0</version>
+            <version>0.1.0-SNAPSHOT</version>
             <type>pom</type>
             <scope>import</scope>
         </dependency>
@@ -544,7 +550,7 @@ adhar-kit-tracing
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-bom</artifactId>
-            <version>1.0.0</version>
+            <version>0.1.0-SNAPSHOT</version>
             <type>pom</type>
             <scope>import</scope>
         </dependency>
@@ -564,7 +570,7 @@ adhar-kit-tracing
     <dependency>
         <groupId>com.adhar.kit</groupId>
         <artifactId>adhar-kit-commons</artifactId>
-        <version>1.0.0</version> <!-- Don't specify version! -->
+        <version>0.1.0-SNAPSHOT</version> <!-- Don't specify version! -->
     </dependency>
 </dependencies>
 ```
@@ -574,11 +580,11 @@ adhar-kit-tracing
 Update BOM version to get all module updates:
 
 ```xml
-<!-- Update from 1.0.0 to 1.1.0 -->
+<!-- Example: bump from an older snapshot to the latest snapshot -->
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-bom</artifactId>
-    <version>1.1.0</version> <!-- Changed -->
+    <version>0.1.0-SNAPSHOT</version> <!-- Changed -->
     <type>pom</type>
     <scope>import</scope>
 </dependency>
@@ -622,12 +628,12 @@ Update BOM version to get all module updates:
     <dependency>
         <groupId>com.adhar.kit</groupId>
         <artifactId>adhar-kit-commons</artifactId>
-        <version>0.0.1-SNAPSHOT</version>
+        <version>0.1.0-SNAPSHOT</version>
     </dependency>
     <dependency>
         <groupId>com.adhar.kit</groupId>
         <artifactId>adhar-kit-logging</artifactId>
-        <version>0.0.1-SNAPSHOT</version>
+        <version>0.1.0-SNAPSHOT</version>
     </dependency>
 </dependencies>
 ```
@@ -639,7 +645,7 @@ Update BOM version to get all module updates:
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-bom</artifactId>
-            <version>1.0.0</version>
+            <version>0.1.0-SNAPSHOT</version>
             <type>pom</type>
             <scope>import</scope>
         </dependency>
@@ -666,7 +672,7 @@ Update BOM version to get all module updates:
 
 | Adhar Kit BOM | Java | Spring Boot | Spring Cloud |
 |---------------|------|-------------|--------------|
-| 1.0.0 | 25 | 4.0.2 | 2025.0.0 |
+| 0.1.0-SNAPSHOT | 25 | 4.0.2 | 2025.0.0 |
 
 ### Framework Compatibility
 
@@ -682,10 +688,10 @@ Update BOM version to get all module updates:
 
 **The Adhar Kit BOM provides:**
 
-✅ **23 Production-Ready Modules** - Complete microservices toolkit
+✅ **28 Production-Ready Modules** - Complete microservices toolkit
 ✅ **Centralized Version Management** - No version conflicts
 ✅ **Java 25 Compatible** - Latest Java support
-✅ **Spring Boot 3.5+** - Modern Spring ecosystem  
+✅ **Spring Boot 4.0+** - Modern Spring ecosystem  
 ✅ **Cloud Native** - Kubernetes, Dapr ready  
 ✅ **AI Ready** - Spring AI, LangChain4j  
 ✅ **Analytics Ready** - PostHog integration  

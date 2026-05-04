@@ -6,12 +6,12 @@
     <parent>
         <groupId>com.adhar.kit</groupId>
         <artifactId>adhar-kit-parent</artifactId>
-        <version>0.0.1-SNAPSHOT</version>
+        <version>0.1.0-SNAPSHOT</version>
         <relativePath>../adhar-kit-parent/pom.xml</relativePath>
     </parent>
 
     <artifactId>adhar-kit-logging</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.1.0-SNAPSHOT</version>
     <name>adhar-kit-logging</name>
     <description>AdharKit Logging Starter for standardized enterprise logging (Java 25 LTS/Spring Boot 4.0+)</description>
 
@@ -48,7 +48,7 @@
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-commons</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <version>0.1.0-SNAPSHOT</version>
         </dependency>
 
         <!-- Lombok -->

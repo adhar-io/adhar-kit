@@ -23,7 +23,7 @@
 <dependency>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-rewrite</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.1.0-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -96,7 +96,7 @@ For direct Maven execution without the facade:
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-rewrite</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <version>0.1.0-SNAPSHOT</version>
         </dependency>
     </dependencies>
 </plugin>
