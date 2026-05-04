@@ -114,8 +114,8 @@ class AiServiceImplTest {
         String query = "search query";
         int limit = 5;
         var mockDocument = org.springframework.ai.document.Document.builder()
-                .withId("doc1")
-                .withContent("Sample document content")
+                .id("doc1")
+                .text("Sample document content")
                 .build();
 
         when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class)))
@@ -127,8 +127,8 @@ class AiServiceImplTest {
         // Then
         assertThat(results).isNotNull();
         assertThat(results).hasSize(1);
-        assertThat(results.get(0).id()).isEqualTo("doc1");
-        assertThat(results.get(0).content()).isEqualTo("Sample document content");
+        assertThat(results.getFirst().id()).isEqualTo("doc1");
+        assertThat(results.getFirst().content()).isEqualTo("Sample document content");
         verify(vectorStore).similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class));
     }
 
@@ -142,8 +142,8 @@ class AiServiceImplTest {
 
         // Mock similarity search
         var mockDocument = org.springframework.ai.document.Document.builder()
-                .withId("ml-doc-1")
-                .withContent("Machine learning is a subset of AI...")
+                .id("ml-doc-1")
+                .text("Machine learning is a subset of AI...")
                 .build();
         when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class)))
                 .thenReturn(List.of(mockDocument));
@@ -220,6 +220,129 @@ class AiServiceImplTest {
         verify(chatModel).call(any(org.springframework.ai.chat.prompt.Prompt.class));
     }
 
+    @Test
+    void testChatAsyncSuccess() {
+        AiChatRequest request = AiChatRequest.builder()
+                .message("async hello")
+                .model("gpt-3.5-turbo")
+                .build();
+        ChatResponse mockResponse = mock(ChatResponse.class);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(mockResponse);
+        when(mockResponse.getResults()).thenReturn(List.of(createMockResult("async response")));
+
+        AiChatResponse response = aiService.chatAsync(request).block();
+
+        assertThat(response).isNotNull();
+        assertThat(response.getContent()).isEqualTo("async response");
+    }
+
+    @Test
+    void testChatStreamSuccess() {
+        AiChatRequest request = AiChatRequest.builder()
+                .message("stream hello")
+                .model("gpt-3.5-turbo")
+                .build();
+        ChatResponse mockResponse = mock(ChatResponse.class);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(mockResponse);
+        when(mockResponse.getResults()).thenReturn(List.of(createMockResult("stream response")));
+
+        List<AiChatResponse> responses = aiService.chatStream(request).collectList().block();
+
+        assertThat(responses).isNotNull();
+        assertThat(responses).hasSize(1);
+        assertThat(responses.getFirst().getContent()).isEqualTo("stream response");
+        assertThat(responses.getFirst().getRequestId()).isNotBlank();
+    }
+
+    @Test
+    void testChatStreamValidationError() {
+        AiChatRequest request = AiChatRequest.builder().message(" ").build();
+
+        assertThatThrownBy(() -> aiService.chatStream(request))
+                .isInstanceOf(com.adhar.kit.commons.exception.ValidationException.class);
+    }
+
+    @Test
+    void testChatThrowsServiceExceptionOnModelFailure() {
+        AiChatRequest request = AiChatRequest.builder()
+                .message("fail me")
+                .model("gpt-3.5-turbo")
+                .build();
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("provider unavailable"));
+
+        assertThatThrownBy(() -> aiService.chat(request))
+                .isInstanceOf(com.adhar.kit.commons.exception.ServiceException.class)
+                .hasMessageContaining("Failed to process chat request");
+    }
+
+    @Test
+    void testEmbedThrowsServiceExceptionOnModelFailure() {
+        when(embeddingModel.embedForResponse(any())).thenThrow(new RuntimeException("embed failed"));
+
+        assertThatThrownBy(() -> aiService.embed("text"))
+                .isInstanceOf(com.adhar.kit.commons.exception.ServiceException.class)
+                .hasMessageContaining("Failed to generate embeddings");
+    }
+
+    @Test
+    void testSearchThrowsServiceExceptionOnVectorStoreFailure() {
+        when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class)))
+                .thenThrow(new RuntimeException("search failed"));
+
+        assertThatThrownBy(() -> aiService.search("query", 3))
+                .isInstanceOf(com.adhar.kit.commons.exception.ServiceException.class)
+                .hasMessageContaining("Similarity search failed");
+    }
+
+    @Test
+    void testRagChatThrowsServiceExceptionWhenSearchFails() {
+        AiChatRequest request = AiChatRequest.builder().message("question").build();
+        when(vectorStore.similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class)))
+                .thenThrow(new RuntimeException("vector failure"));
+
+        assertThatThrownBy(() -> aiService.ragChat(request, "kb"))
+                .isInstanceOf(com.adhar.kit.commons.exception.ServiceException.class)
+                .hasMessageContaining("RAG processing failed");
+    }
+
+    @Test
+    void testAddDocumentsThrowsServiceExceptionOnVectorStoreFailure() {
+        List<AiService.DocumentChunk> documents = List.of(
+                new AiService.DocumentChunk("doc1", "Content", "source", Map.of())
+        );
+        doThrow(new RuntimeException("vector add failed")).when(vectorStore).add(any());
+
+        assertThatThrownBy(() -> aiService.addDocuments(documents, "kb"))
+                .isInstanceOf(com.adhar.kit.commons.exception.ServiceException.class)
+                .hasMessageContaining("Failed to add documents");
+    }
+
+    @Test
+    void testValidateRequestRejectsNullRequest() {
+        assertThatThrownBy(() -> aiService.validateRequest(null))
+                .isInstanceOf(com.adhar.kit.commons.exception.ValidationException.class)
+                .hasMessageContaining("Request cannot be null");
+    }
+
+    @Test
+    void testValidateRequestRejectsLongMessage() {
+        String longMessage = "a".repeat(10001);
+        AiChatRequest request = AiChatRequest.builder().message(longMessage).build();
+
+        assertThatThrownBy(() -> aiService.validateRequest(request))
+                .isInstanceOf(com.adhar.kit.commons.exception.ValidationException.class)
+                .hasMessageContaining("Message too long");
+    }
+
+    @Test
+    void testHealthCheckReturnsFalseOnFailure() {
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenThrow(new RuntimeException("health failure"));
+
+        assertThat(aiService.isHealthy()).isFalse();
+    }
+
     private AiProperties.Security createSecurityProperties() {
         AiProperties.Security security = new AiProperties.Security();
         security.setEnabled(true);
@@ -238,17 +361,9 @@ class AiServiceImplTest {
         var assistantMessage = new org.springframework.ai.chat.messages.AssistantMessage(content);
 
         // Create Generation with the message
-        var metadata = new org.springframework.ai.chat.metadata.ChatGenerationMetadata() {
-            @Override
-            public String getFinishReason() {
-                return "stop";
-            }
-
-            @Override
-            public <T> T getContentFilterMetadata() {
-                return null;
-            }
-        };
+        var metadata = org.springframework.ai.chat.metadata.ChatGenerationMetadata.builder()
+                .finishReason("stop")
+                .build();
 
         return new org.springframework.ai.chat.model.Generation(assistantMessage, metadata);
     }

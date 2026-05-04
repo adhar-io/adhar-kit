@@ -30,20 +30,20 @@ Adhar Kit is the developer toolkit that bridges your applications to the **Adhar
 │                     (Business Logic & Features)                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                            ADHAR KIT                                        │
-│           (**28 Modules - Single Facade - Framework Agnostic)               │
+│           (30+ Modules - Single Facade - Framework Agnostic)                │
 │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐    │
 │  │ Logging │ │ Metrics │ │ Tracing │ │  Cache  │ │Security │ │   AI    │    │
 │  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                          ADHAR PLATFORM                                     │
-│     (Managed Infrastructure - Service Mesh - Observability - Security)      │
+│     (Cloud Infrastructure - Service Mesh - Observability - Security)        │
 │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐    │
 │  │  Kubernetes   │ │     Dapr      │ │  Prometheus   │ │   Cilium      │    │
 │  │   Cluster     │ │   Runtime     │ │   + Grafana   │ │  eBPF Mesh    │    │
 │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘    │
 │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐    │
 │  │  Crossplane   │ │   Vault       │ │    Kafka      │ │   ArgoCD      │    │
-│  │  Control Plane│ │   Secrets     │ │   Streaming   │ │    GitOps     │    │
+│  │  Control Plane│ │   Secrets     │ │   Streaming   │ │   GitOps      │    │
 │  └───────────────┘ └───────────────┘ └───────────────┘ └───────────────┘    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -89,7 +89,7 @@ public class OrderService {
         return adhar.safe("create-order",                  // traced + resilient
             () -> {
                 Order order = processOrder(request);
-                adhar.publish("order-events", order);      // quick publish
+                adhar.publish("order-events", order);      // publish events
                 return order;
             },
             () -> queueForLater(request)                   // fallback
