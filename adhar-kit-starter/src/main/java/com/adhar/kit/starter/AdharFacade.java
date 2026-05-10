@@ -5,6 +5,8 @@ import com.adhar.adharkit.logging.LoggingFacade;
 import com.adhar.kit.ai.AiFacade;
 import com.adhar.kit.analytics.AnalyticsFacade;
 import com.adhar.kit.batch.BatchFacade;
+import com.adhar.kit.commons.framework.Framework;
+import com.adhar.kit.commons.framework.FrameworkDetector;
 import com.adhar.kit.config.ConfigFacade;
 import com.adhar.kit.core.CoreFacade;
 import com.adhar.kit.dapr.DaprFacade;
@@ -24,7 +26,6 @@ import com.adhar.kit.rewrite.facade.RewriteFacade;
 import com.adhar.kit.security.SecurityFacade;
 import com.adhar.kit.tracing.TracingFacade;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.Optional;
@@ -32,47 +33,38 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 /**
- * Unified Adhar Facade - Single entry point for all 27 Adhar Kit modules.
+ * Unified Adhar Facade - single entry point for all Adhar Kit modules across
+ * Spring Boot, Quarkus, Micronaut, Helidon, and Vert.x.
  *
- * <p>Provides both module accessors and convenience shortcuts that eliminate
- * boilerplate for the most common cross-cutting operations.</p>
+ * <p>The facade itself is framework-neutral: it has no DI annotations and no
+ * compile-time coupling to any framework. Each supported runtime ships a thin
+ * adapter (in {@code starter.spring}, {@code starter.quarkus},
+ * {@code starter.micronaut}, {@code starter.helidon}, {@code starter.vertx})
+ * that exposes {@code AdharFacade} as a managed bean. Outside a managed
+ * container use {@link #getInstance()}.</p>
  *
- * <h3>Module Accessors</h3>
+ * <h3>Module accessors</h3>
  * <pre>{@code
  * adhar.getMetrics().increment("orders.created");
  * adhar.getResilience().execute("svc", () -> callService());
  * adhar.getSecurity().hasPermission("order:create");
  * }</pre>
  *
- * <h3>Convenience Shortcuts</h3>
+ * <h3>Convenience shortcuts</h3>
  * <pre>{@code
- * // Traced + timed operation (auto metrics + tracing in one call)
  * Order order = adhar.traced("create-order", () -> processOrder(req));
- *
- * // Resilient call with fallback
- * Result r = adhar.resilient("payment", () -> charge(req), () -> queuePayment(req));
- *
- * // Cache-aside pattern
- * User user = adhar.cached("users", id, User.class, () -> db.findUser(id));
- *
- * // Quick notifications
- * adhar.notify("user@example.com", "Order Confirmed", "Your order #123 is confirmed");
- *
- * // Quick publish
+ * Result r    = adhar.resilient("payment", () -> charge(req), () -> queue(req));
+ * User user   = adhar.cached("users", id, User.class, () -> db.findUser(id));
+ * adhar.notify("user@example.com", "Order Confirmed", "Order #123 confirmed");
  * adhar.publish("order-events", orderEvent);
- *
- * // Quick AI chat
  * String answer = adhar.chat("Summarize this document: " + text);
- *
- * // Quick config
- * int timeout = adhar.configInt("app.timeout", 30);
+ * int timeout   = adhar.configInt("app.timeout", 30);
  * }</pre>
  *
  * @author Tapas Jena
- * @since 1.0.0
+ * @since 0.1.0
  */
 @Slf4j
-@Component
 public class AdharFacade {
 
     private static volatile AdharFacade instance;
@@ -109,7 +101,8 @@ public class AdharFacade {
     private volatile RewriteFacade rewrite;
 
     public AdharFacade() {
-        log.info("Initializing Adhar Facade - unified access to all 27 modules");
+        Framework fw = FrameworkDetector.detect();
+        log.info("Initializing Adhar Facade on {} - unified access to all modules", fw);
 
         this.logging = LoggingFacade.getLogger(AdharFacade.class);
         this.metrics = MetricsFacade.getInstance();
@@ -126,7 +119,12 @@ public class AdharFacade {
             instance = this;
         }
 
-        log.info("Adhar Facade initialized - 27 modules available (10 eager, 12 lazy)");
+        log.info("Adhar Facade ready on {} - 10 eager facades + 13 lazy facades", fw);
+    }
+
+    /** Returns the framework Adhar Kit detected at runtime. */
+    public Framework currentFramework() {
+        return FrameworkDetector.detect();
     }
 
     public static AdharFacade getInstance() {
@@ -651,11 +649,11 @@ public class AdharFacade {
     // ========================================================================
 
     /**
-     * Returns comprehensive information about all 27 available modules.
+     * Returns information about Adhar Kit modules and the detected runtime framework.
      */
     public String getModuleInfo() {
         return """
-            Adhar Kit v%s - 28 Production-Ready Modules:
+            Adhar Kit v%s - Production-Ready Modules running on %s:
 
             TIER-1 Core: commons, core/utils, resilience, metrics, tracing, logging, cache
             TIER-2 Integration: health, test-commons, messaging, apiDocs, grpc, graphql
@@ -663,7 +661,7 @@ public class AdharFacade {
                 dapr, batch, notification, event-sourcing, perf-profiler, rewrite, starter, maven-plugin
 
             Framework Support: Spring Boot 4.0+, Quarkus 3.21+, Micronaut 4.8+, Helidon 4.2+, Vert.x 4.5+
-            """.formatted(getVersion());
+            """.formatted(getVersion(), currentFramework());
     }
 
     public String getVersion() {

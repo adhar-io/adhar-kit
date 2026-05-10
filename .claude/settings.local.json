@@ -9,7 +9,11 @@
       "Bash(mvn install:*)",
       "Bash(mvn compile:*)",
       "Bash(mvn dependency:resolve -f adhar-kit-batch/pom.xml -DskipTests -U)",
-      "Bash(mvn dependency:tree -f adhar-kit-batch/pom.xml1khjjhkyikmfgi)"
+      "Bash(mvn dependency:tree -f adhar-kit-batch/pom.xml1khjjhkyikmfgi)",
+      "Bash(mvn -q -o -pl adhar-kit-starter -am test)",
+      "Bash(mvn -q -o -pl adhar-kit-starter -am package -DskipTests)",
+      "Bash(jar tf *)",
+      "Bash(mvn -q -o -pl adhar-kit-starter -am clean package)"
     ]
   }
 }

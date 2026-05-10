@@ -1,7 +1,8 @@
 package com.adhar.kit.starter.config;
 
+import com.adhar.kit.commons.framework.Framework;
+import com.adhar.kit.commons.framework.FrameworkDetector;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -89,12 +90,15 @@ public class AdharKitAutoConfiguration {
             activeProfiles = "default";
         }
 
+        Framework runtime = FrameworkDetector.detect();
+
         log.info("");
         log.info("===============================================================================");
         log.info("                       ADHAR KIT - Enterprise Framework                        ");
         log.info("===============================================================================");
         log.info("  Application   : {}", appName);
         log.info("  Version       : {}", VERSION);
+        log.info("  Runtime       : {}", runtime);
         log.info("  Profile       : {}", properties.getProfile());
         log.info("  Spring Profile: {}", activeProfiles);
         log.info("  Started at    : {}", startTime);

@@ -10,7 +10,31 @@
     </parent>
     <artifactId>adhar-kit-starter</artifactId>
     <name>adhar-kit-starter</name>
-    <description>adhar kit starter module</description>
+    <description>Single-dependency entry point for Adhar Kit on Spring Boot, Quarkus, Micronaut, Helidon and Vert.x</description>
+
+    <properties>
+        <quarkus.version>3.21.0</quarkus.version>
+        <micronaut.version>4.8.0</micronaut.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-bom</artifactId>
+                <version>${quarkus.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.micronaut.platform</groupId>
+                <artifactId>micronaut-platform</artifactId>
+                <version>${micronaut.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- Core Adhar Kit Modules -->
@@ -149,14 +173,53 @@
             <version>0.1.0-SNAPSHOT</version>
         </dependency>
 
-        <!-- Spring Boot Starter -->
+        <!-- Spring Boot (optional - active when Spring Boot is on the classpath) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Quarkus (optional - active when Quarkus is on the classpath) -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Micronaut (optional - active when Micronaut is on the classpath) -->
+        <dependency>
+            <groupId>io.micronaut</groupId>
+            <artifactId>micronaut-inject</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Helidon MP (optional - active when Helidon MP is on the classpath) -->
+        <dependency>
+            <groupId>jakarta.enterprise</groupId>
+            <artifactId>jakarta.enterprise.cdi-api</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.inject</groupId>
+            <artifactId>jakarta.inject-api</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Vert.x (optional - active when Vert.x is on the classpath) -->
+        <dependency>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-core</artifactId>
             <optional>true</optional>
         </dependency>
 
@@ -167,6 +230,7 @@
             <optional>true</optional>
         </dependency>
     </dependencies>
+
 
     <build>
         <resources>
@@ -186,6 +250,17 @@
             </resource>
         </resources>
         <plugins>
+            <!--
+                All framework adapters are compiled into the starter JAR. Their
+                Quarkus / Micronaut / Helidon / Vert.x dependencies are declared
+                <optional>true</optional> so consumers only pull the framework
+                they actually use. Adapter classes load lazily and stay inert
+                when their host framework is absent.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
             <!-- Skip JaCoCo coverage check for this facade module -->
             <plugin>
                 <groupId>org.jacoco</groupId>

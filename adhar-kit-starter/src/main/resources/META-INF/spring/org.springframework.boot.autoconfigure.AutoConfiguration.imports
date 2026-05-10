@@ -1,1 +1,2 @@
 com.adhar.kit.starter.config.AdharKitAutoConfiguration
+com.adhar.kit.starter.spring.SpringAdharFacadeConfiguration

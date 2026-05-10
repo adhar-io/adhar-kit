@@ -162,84 +162,6 @@ Add the BOM to your project's `pom.xml`:
 
 ---
 
-## 📚 Version Matrix
-
-### Spring Ecosystem
-
-| Dependency | Version | Notes |
-|------------|---------|-------|
-| Spring Boot | 4.0.2 | Java 25 compatible (Latest Stable) |
-| Spring Framework | 6.2.6 | Included with Boot |
-| Spring Cloud | 2025.0.0 | Latest release |
-| Spring Kafka | 3.3.4 | Kafka integration |
-| Spring AMQP | 3.2.4 | RabbitMQ support |
-
-### Core Libraries
-
-| Dependency | Version | Notes |
-|------------|---------|-------|
-| Lombok | 1.18.34 | Java 25 compatible |
-| MapStruct | 1.6.0 | Object mapping |
-| Jakarta Persistence | 3.2.0 | JPA 3.2 |
-| Jakarta Validation | 3.1.0 | Bean Validation |
-| QueryDSL | 5.1.0 | Type-safe queries |
-
-### Observability
-
-| Dependency | Version | Notes |
-|------------|---------|-------|
-| Micrometer | 1.15.0 | Metrics |
-| Micrometer Tracing | 1.5.0 | Distributed tracing |
-| OpenTelemetry | 1.45.0 | OTLP exporter |
-| Logstash Encoder | 7.4 | JSON logging |
-| Janino | 3.1.10 | Logback conditions |
-
-### Resilience
-
-| Dependency | Version | Notes |
-|------------|---------|-------|
-| Resilience4j | 2.3.0 | Circuit breakers |
-
-### API & Communication
-
-| Dependency | Version | Notes |
-|------------|---------|-------|
-| SpringDoc OpenAPI | 2.8.0 | Swagger UI |
-| gRPC | 1.70.0 | RPC framework |
-| Protocol Buffers | 4.29.0 | Serialization |
-
-### Cloud Native
-
-| Dependency | Version | Notes |
-|------------|---------|-------|
-| Dapr SDK | 1.14.0 | Dapr integration |
-| Kubernetes Client | 7.1.0 | K8s Java client |
-
-### AI & ML
-
-| Dependency | Version | Notes |
-|------------|---------|-------|
-| Spring AI | 1.0.0 | OpenAI, Azure AI (GA) |
-| LangChain4j | 0.38.0 | LLM framework |
-
-### Analytics
-
-| Dependency | Version | Notes |
-|------------|---------|-------|
-| PostHog | 3.1.1 | Product analytics |
-
-### Testing
-
-| Dependency | Version | Notes |
-|------------|---------|-------|
-| Testcontainers | 1.20.4 | Docker containers |
-| Mockito | 5.15.2 | Java 25 compatible |
-| Byte Buddy | 1.17.0 | Java agent |
-| WireMock | 3.10.0 | HTTP mocking |
-| Awaitility | 4.2.2 | Async testing |
-
----
-
 ## 💡 Usage Examples
 
 ### Basic Spring Boot Application
@@ -491,51 +413,6 @@ Combine Adhar Kit BOM with other BOMs:
 
 ---
 
-## 📋 Module Dependencies Chart
-
-```
-adhar-kit-starter
-├── adhar-kit-commons
-├── adhar-kit-logging
-├── adhar-kit-metrics
-├── adhar-kit-resilience
-├── adhar-kit-config
-├── adhar-kit-cache
-├── adhar-kit-persistence
-└── adhar-kit-docs
-
-adhar-kit-ai
-├── adhar-kit-commons
-└── spring-ai-*
-
-adhar-kit-analytics
-├── adhar-kit-commons
-├── adhar-kit-persistence
-└── posthog
-
-adhar-kit-messaging
-├── adhar-kit-commons
-├── spring-kafka
-└── spring-rabbit
-
-adhar-kit-persistence
-├── adhar-kit-commons
-├── spring-data-jpa
-└── querydsl
-
-adhar-kit-cache
-├── adhar-kit-commons
-├── spring-data-redis
-└── caffeine
-
-adhar-kit-tracing
-├── adhar-kit-commons
-├── micrometer-tracing
-└── opentelemetry
-```
-
----
-
 ## 🎯 Best Practices
 
 ### 1. Always Use BOM
@@ -618,79 +495,13 @@ Update BOM version to get all module updates:
 
 ---
 
-## 🚀 Migration Guide
-
-### From Individual Module Versions
-
-**Before:**
-```xml
-<dependencies>
-    <dependency>
-        <groupId>com.adhar.kit</groupId>
-        <artifactId>adhar-kit-commons</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
-    </dependency>
-    <dependency>
-        <groupId>com.adhar.kit</groupId>
-        <artifactId>adhar-kit-logging</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
-    </dependency>
-</dependencies>
-```
-
-**After:**
-```xml
-<dependencyManagement>
-    <dependencies>
-        <dependency>
-            <groupId>com.adhar.kit</groupId>
-            <artifactId>adhar-kit-bom</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
-            <type>pom</type>
-            <scope>import</scope>
-        </dependency>
-    </dependencies>
-</dependencyManagement>
-
-<dependencies>
-    <dependency>
-        <groupId>com.adhar.kit</groupId>
-        <artifactId>adhar-kit-commons</artifactId>
-        <!-- Version managed by BOM -->
-    </dependency>
-    <dependency>
-        <groupId>com.adhar.kit</groupId>
-        <artifactId>adhar-kit-logging</artifactId>
-        <!-- Version managed by BOM -->
-    </dependency>
-</dependencies>
-```
-
----
-
-## 📊 Version Compatibility
-
-| Adhar Kit BOM | Java | Spring Boot | Spring Cloud |
-|---------------|------|-------------|--------------|
-| 0.1.0-SNAPSHOT | 25 | 4.0.2 | 2025.0.0 |
-
-### Framework Compatibility
-
-| Framework | Supported | Notes |
-|-----------|-----------|-------|
-| Spring Boot | ✅ | Primary framework |
-| Quarkus | 🔄 | Adapters available |
-| Micronaut | 🔄 | Adapters available |
-
----
-
 ## 🎊 Summary
 
 **The Adhar Kit BOM provides:**
 
-✅ **28 Production-Ready Modules** - Complete microservices toolkit
-✅ **Centralized Version Management** - No version conflicts
-✅ **Java 25 Compatible** - Latest Java support
+✅ **28 Production-Ready Modules** - Complete microservices toolkit  
+✅ **Centralized Version Management** - No version conflicts  
+✅ **Java 25 Compatible** - Latest Java support  
 ✅ **Spring Boot 4.0+** - Modern Spring ecosystem  
 ✅ **Cloud Native** - Kubernetes, Dapr ready  
 ✅ **AI Ready** - Spring AI, LangChain4j  
