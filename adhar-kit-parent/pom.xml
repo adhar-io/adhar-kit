@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.0.2</version>
+        <version>4.1.0</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.adhar.kit</groupId>
@@ -51,35 +51,12 @@
     </issueManagement>
 
     <repositories>
+        <!-- Lombok edge build for Java 25 support (still pre-release) -->
         <repository>
             <id>projectlombok.org</id>
             <url>https://projectlombok.org/edge-releases</url>
         </repository>
-        <repository>
-            <id>spring-milestones</id>
-            <name>Spring Milestones</name>
-            <url>https://repo.spring.io/milestone</url>
-            <snapshots>
-                <enabled>false</enabled>
-            </snapshots>
-        </repository>
-        <repository>
-            <id>spring-snapshots</id>
-            <name>Spring Snapshots</name>
-            <url>https://repo.spring.io/snapshot</url>
-            <releases>
-                <enabled>false</enabled>
-            </releases>
-        </repository>
     </repositories>
-
-    <pluginRepositories>
-        <pluginRepository>
-            <id>spring-milestones</id>
-            <name>Spring Milestones</name>
-            <url>https://repo.spring.io/milestone</url>
-        </pluginRepository>
-    </pluginRepositories>
 
     <properties>
         <!-- ===================================================================== -->
@@ -90,6 +67,10 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
+
+        <!-- Default empty argLine so surefire's @{argLine} resolves when JaCoCo
+             (which sets this property) is inactive, e.g. plain `mvn test`. -->
+        <argLine></argLine>
 
         <!-- ===================================================================== -->
         <!-- Adhar Kit Version Management                                          -->
@@ -102,48 +83,44 @@
         <!-- Lombok - Java 25 compatible edge version -->
         <lombok.version>edge-SNAPSHOT</lombok.version>
 
-        <!-- Spring Boot components (explicit versions for Spring Boot 4.0.x) -->
-        <spring-boot.version>4.0.2</spring-boot.version>
+        <!-- Spring Boot components (explicit versions for Spring Boot 4.1.x) -->
+        <spring-boot.version>4.1.0</spring-boot.version>
 
         <!-- Framework Support -->
-        <helidon.version>4.2.0</helidon.version>
-        <vertx.version>4.5.13</vertx.version>
+        <helidon.version>4.5.0</helidon.version>
+        <vertx.version>5.1.2</vertx.version>
 
         <!-- Testing dependencies -->
-        <rest-assured.version>5.5.1</rest-assured.version>
+        <rest-assured.version>6.0.0</rest-assured.version>
 
         <!-- ===================================================================== -->
         <!-- API Technologies                                                       -->
         <!-- ===================================================================== -->
-        <!-- GraphQL support for flexible APIs -->
-        <graphql-java.version>22.3</graphql-java.version>
+        <!-- GraphQL support for flexible APIs (aligned with Spring GraphQL 2.0.x) -->
+        <graphql-java.version>25.0</graphql-java.version>
 
         <!-- ===================================================================== -->
         <!-- Native Compilation                                                     -->
         <!-- ===================================================================== -->
         <!-- GraalVM Native Image for fast startup and low memory -->
-        <native-maven-plugin.version>0.10.6</native-maven-plugin.version>
+        <native-maven-plugin.version>1.1.2</native-maven-plugin.version>
 
         <!-- ===================================================================== -->
         <!-- Cloud Provider SDKs                                                    -->
         <!-- ===================================================================== -->
         <!-- Multi-cloud support: AWS, Azure, GCP -->
-        <aws-sdk.version>2.31.1</aws-sdk.version>
+        <aws-sdk.version>2.46.14</aws-sdk.version>
         <azure-sdk.version>1.18.0</azure-sdk.version>
-        <google-cloud.version>26.58.0</google-cloud.version>
+        <google-cloud.version>26.84.0</google-cloud.version>
 
         <!-- ===================================================================== -->
         <!-- Observability & Tracing                                                -->
         <!-- ===================================================================== -->
         <!-- OpenTelemetry for vendor-neutral observability -->
-        <opentelemetry.version>1.51.0</opentelemetry.version>
-        <opentelemetry-instrumentation.version>2.14.0</opentelemetry-instrumentation.version>
+        <opentelemetry.version>1.63.0</opentelemetry.version>
+        <opentelemetry-instrumentation.version>2.29.0</opentelemetry-instrumentation.version>
 
-        <!-- ===================================================================== -->
-        <!-- Streaming & Analytics                                                  -->
-        <!-- ===================================================================== -->
-        <!-- Real-time data processing with Kafka Streams -->
-        <kafka-streams.version>3.9.0</kafka-streams.version>
+        <!-- Kafka Streams is managed by the Spring Boot 4.1 BOM -->
 
         <!-- ===================================================================== -->
         <!-- Maven Plugin Versions                                                  -->
@@ -164,8 +141,9 @@
         <!-- ===================================================================== -->
         <!-- Quality & Testing Configuration                                        -->
         <!-- ===================================================================== -->
-        <!-- Minimum 80% code coverage required -->
-        <jacoco.minimum.coverage>0.50</jacoco.minimum.coverage>
+        <!-- Minimum 80% instruction coverage enforced for every module
+             (tests target >90%; the gate sits at 80% for build stability). -->
+        <jacoco.minimum.coverage>0.80</jacoco.minimum.coverage>
     </properties>
     
     <dependencyManagement>
@@ -333,13 +311,7 @@
             <!-- ================================================================= -->
             <!-- Streaming & Analytics                                             -->
             <!-- ================================================================= -->
-
-            <!-- Kafka Streams - Stream processing on Kafka -->
-            <dependency>
-                <groupId>org.apache.kafka</groupId>
-                <artifactId>kafka-streams</artifactId>
-                <version>${kafka-streams.version}</version>
-            </dependency>
+            <!-- Kafka Streams version is managed by the Spring Boot 4.1 BOM       -->
 
             <!-- ================================================================= -->
             <!-- Spring Boot Dependencies                                          -->
@@ -432,6 +404,14 @@
                             <include>**/*Test.java</include>
                             <include>**/*Tests.java</include>
                         </includes>
+                        <!-- Global per-test timeout: a hung test (e.g. an unbounded
+                             future join) fails fast instead of blocking the whole
+                             build indefinitely, keeping 'mvn clean install' reliable. -->
+                        <properties>
+                            <configurationParameters>
+                                junit.jupiter.execution.timeout.default = 5 m
+                            </configurationParameters>
+                        </properties>
                     </configuration>
                 </plugin>
 

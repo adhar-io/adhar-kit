@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.slf4j.MDC;
 
 import java.io.IOException;
@@ -21,6 +23,9 @@ import static org.mockito.Mockito.*;
  * Unit tests for {@link MdcLoggingFilter}.
  */
 @ExtendWith(MockitoExtension.class)
+// The filter probes several correlation-id headers via request.getHeader(...); tests stub
+// only the relevant one, so lenient strictness avoids PotentialStubbingProblem on the rest.
+@MockitoSettings(strictness = Strictness.LENIENT)
 class MdcLoggingFilterTest {
 
     @Mock

@@ -3,7 +3,7 @@ package com.adhar.kit.test.container;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
@@ -18,14 +18,14 @@ public class KafkaTestContainer {
     private static final Logger log = LoggerFactory.getLogger(KafkaTestContainer.class);
     private static final String KAFKA_IMAGE = "confluentinc/cp-kafka:7.5.0";
 
-    private static KafkaContainer container;
+    private static ConfluentKafkaContainer container;
 
     /**
      * Get a singleton Kafka container instance.
      */
-    public static KafkaContainer getInstance() {
+    public static ConfluentKafkaContainer getInstance() {
         if (container == null) {
-            container = new KafkaContainer(DockerImageName.parse(KAFKA_IMAGE))
+            container = new ConfluentKafkaContainer(DockerImageName.parse(KAFKA_IMAGE))
                     .withReuse(true);
         }
         return container;

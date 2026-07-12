@@ -15,7 +15,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -35,11 +35,14 @@ import static org.junit.jupiter.api.Assertions.*;
 @EmbeddedKafka(partitions = 1, topics = {"test-topic"})
 class KafkaIntegrationTest {
 
-    private static final String TEST_TOPIC = "test-topic";
+    // Unique per test (assigned in setUp) so tests never read each other's messages
+    // from the shared static broker — a shared topic/group caused stale reads and
+    // offset races (manifesting as "header null" and "message not received" timeouts).
+    private String TEST_TOPIC;
     private static final String TEST_PAYLOAD = "Test message";
 
     @Container
-    private static final KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:latest"));
+    private static final ConfluentKafkaContainer kafka = new ConfluentKafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
 
     private EmbeddedKafkaBroker embeddedKafka;
     private KafkaMessagePublisher publisher;
@@ -49,10 +52,14 @@ class KafkaIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        // Unique topic + consumer group per test => full isolation on the shared broker.
+        TEST_TOPIC = "itest-topic-" + java.util.UUID.randomUUID();
+
         // Set up properties
         properties = new AdharMessagingProperties();
         properties.getKafka().setBootstrapServers(kafka.getBootstrapServers());
         properties.getKafka().setDefaultTopic(TEST_TOPIC);
+        properties.getKafka().getConsumer().setGroupId("itest-group-" + java.util.UUID.randomUUID());
 
         // Set up producer factory and template
         Map<String, Object> producerProps = KafkaTestUtils.producerProps(kafka.getBootstrapServers());
@@ -60,7 +67,9 @@ class KafkaIntegrationTest {
         kafkaTemplate = new KafkaTemplate<>(producerFactory);
 
         // Set up consumer factory and container factory
-        Map<String, Object> consumerProps = KafkaTestUtils.consumerProps("test-group", "true", kafka.getBootstrapServers());
+        // Note: in spring-kafka-test 4.x the consumerProps(String, String, String) overload takes
+        // (bootstrapServers, groupId, autoCommit) - the argument order changed from 3.x.
+        Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(kafka.getBootstrapServers(), "test-group", "true");
         DefaultKafkaConsumerFactory<String, Object> consumerFactory = new DefaultKafkaConsumerFactory<>(consumerProps);
         ConcurrentKafkaListenerContainerFactory<String, Object> containerFactory = new ConcurrentKafkaListenerContainerFactory<>();
         containerFactory.setConsumerFactory(consumerFactory);
@@ -191,15 +200,13 @@ class KafkaIntegrationTest {
 
     @Test
     void testPauseAndResume() throws Exception {
-        // Set up a latch to wait for the message
-        CountDownLatch latch = new CountDownLatch(1);
-        Map<String, String> receivedMessages = new HashMap<>();
+        // Collect every payload received; the message published while paused is not
+        // dropped by Kafka — it is delivered once the consumer resumes — so we wait
+        // until the post-resume message has been delivered.
+        java.util.List<String> received = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
         // Subscribe to the topic
-        String consumerId = listener.subscribe(TEST_TOPIC, String.class, payload -> {
-            receivedMessages.put("payload", payload);
-            latch.countDown();
-        });
+        String consumerId = listener.subscribe(TEST_TOPIC, String.class, received::add);
 
         // Pause the consumer
         boolean pauseResult = listener.pause(consumerId);
@@ -209,22 +216,28 @@ class KafkaIntegrationTest {
         boolean publishResult = publisher.publish(TEST_PAYLOAD + "-paused");
         assertTrue(publishResult);
 
-        // Wait a bit to ensure the message is not received
+        // Wait a bit to ensure nothing is delivered while paused
         Thread.sleep(5000);
-        assertEquals(0, receivedMessages.size());
+        assertTrue(received.isEmpty(), "No messages should be delivered while paused");
 
         // Resume the consumer
         boolean resumeResult = listener.resume(consumerId);
         assertTrue(resumeResult);
 
-        // Publish another message (should be received)
+        // Publish another message (delivered after resume, along with the paused one)
         boolean publishResult2 = publisher.publish(TEST_PAYLOAD + "-resumed");
         assertTrue(publishResult2);
 
-        // Wait for the message to be received
-        boolean messageReceived = latch.await(30, TimeUnit.SECONDS);
-        assertTrue(messageReceived, "Message was not received within timeout");
-        assertEquals(TEST_PAYLOAD + "-resumed", receivedMessages.get("payload"));
+        // Wait until the post-resume message has been delivered
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (!received.contains(TEST_PAYLOAD + "-resumed") && System.currentTimeMillis() < deadline) {
+            Thread.sleep(200);
+        }
+        assertTrue(received.contains(TEST_PAYLOAD + "-resumed"),
+                "Resumed message was not received within timeout");
+        // The message published while paused is delivered too (not dropped).
+        assertTrue(received.contains(TEST_PAYLOAD + "-paused"),
+                "Message published while paused should be delivered after resume");
 
         // Unsubscribe
         listener.unsubscribe(consumerId);

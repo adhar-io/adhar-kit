@@ -1,10 +1,16 @@
 package com.adhar.kit.ai;
 
+import com.adhar.kit.ai.api.AiService;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for AiFacade.
@@ -145,6 +151,206 @@ class AiFacadeTest {
             assertTrue(message.contains("not configured") || message.contains("failed"),
                 "Message should indicate configuration issue");
         }
+    }
+
+    // ==================== Chat overloads ====================
+
+    @Test
+    void testChatWithSystemPromptThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, () -> ai.chat("system prompt", "user message"));
+    }
+
+    @Test
+    void testChatWithContextThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, () -> ai.chatWithContext(List.of(), "message"));
+    }
+
+    @Test
+    void testAdvancedChatWithMessagesThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        AiService.ChatRequest request = mock(AiService.ChatRequest.class);
+        when(request.getMessages()).thenReturn(List.of());
+        assertThrows(AiFacade.AiException.class, () -> ai.chat(request));
+    }
+
+    @Test
+    void testAdvancedChatWithNullMessagesThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        // getMessages() returns null by default -> exercises the null branch of the log statement
+        AiService.ChatRequest request = mock(AiService.ChatRequest.class);
+        assertThrows(AiFacade.AiException.class, () -> ai.chat(request));
+    }
+
+    @Test
+    void testChatStreamStringThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, () -> ai.chatStream("message", chunk -> { }));
+    }
+
+    @Test
+    void testChatStreamRequestThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        AiService.ChatRequest request = mock(AiService.ChatRequest.class);
+        assertThrows(AiFacade.AiException.class, () -> ai.chatStream(request, chunk -> { }));
+    }
+
+    @Test
+    void testChatAsyncPropagatesException() {
+        AiFacade ai = AiFacade.getInstance();
+        CompletableFuture<String> future = ai.chatAsync("message");
+        ExecutionException ex = assertThrows(ExecutionException.class, future::get);
+        assertInstanceOf(AiFacade.AiException.class, ex.getCause());
+    }
+
+    // ==================== Embeddings ====================
+
+    @Test
+    void testEmbedBatchThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, () -> ai.embedBatch(List.of("a", "b")));
+    }
+
+    @Test
+    void testSimilarityThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        // similarity() delegates to embed(), which fails with default provider
+        assertThrows(AiFacade.AiException.class, () -> ai.similarity("text one", "text two"));
+    }
+
+    @Test
+    void testFindSimilarThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, () -> ai.findSimilar("query", List.of("a", "b"), 2));
+    }
+
+    // ==================== Image Generation ====================
+
+    @Test
+    void testGenerateImageFromPromptThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, () -> ai.generateImage("a sunset over mountains"));
+    }
+
+    @Test
+    void testGenerateImageFromRequestThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        AiService.ImageRequest request = mock(AiService.ImageRequest.class);
+        when(request.getPrompt()).thenReturn("a sunset");
+        assertThrows(AiFacade.AiException.class, () -> ai.generateImage(request));
+    }
+
+    @Test
+    void testAnalyzeImageThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class,
+            () -> ai.analyzeImage("http://example.com/img.png", "what is this?"));
+    }
+
+    // ==================== Function Calling ====================
+
+    @Test
+    void testChatWithFunctionsThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, () -> ai.chatWithFunctions("message", List.of()));
+    }
+
+    @Test
+    void testExecuteFunctionThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        AiService.FunctionCall call = mock(AiService.FunctionCall.class);
+        when(call.getName()).thenReturn("get_weather");
+        assertThrows(AiFacade.AiException.class, () -> ai.executeFunction(call));
+    }
+
+    // ==================== RAG ====================
+
+    @Test
+    void testStoreDocumentThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class,
+            () -> ai.storeDocument("doc1", "content", Map.of("k", "v")));
+    }
+
+    @Test
+    void testStoreDocumentsThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, () -> ai.storeDocuments(List.of()));
+    }
+
+    @Test
+    void testQueryDocumentsThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, () -> ai.queryDocuments("question", 3));
+    }
+
+    @Test
+    void testDeleteDocumentThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, () -> ai.deleteDocument("doc1"));
+    }
+
+    // ==================== Model Management ====================
+
+    @Test
+    void testGetModelInfoThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, ai::getModelInfo);
+    }
+
+    @Test
+    void testUseModelThrows() {
+        AiFacade ai = AiFacade.getInstance();
+        assertThrows(AiFacade.AiException.class, () -> ai.useModel("gpt-4"));
+    }
+
+    // ==================== Utilities ====================
+
+    @Test
+    void testIsAvailableWithDefaultProvider() {
+        AiFacade ai = AiFacade.getInstance();
+        // Default provider's test() is a no-op, so the facade reports available.
+        assertTrue(ai.isAvailable());
+    }
+
+    @Test
+    void testProviderNameIsDefault() {
+        AiFacade ai = AiFacade.getInstance();
+        assertEquals("default", ai.getProvider());
+    }
+
+    @Test
+    void testHealthIncludesProviderStatus() {
+        AiFacade ai = AiFacade.getInstance();
+        Map<String, Object> health = ai.health();
+        assertEquals("default", health.get("provider"));
+        assertEquals(Boolean.TRUE, health.get("available"));
+        // Default provider contributes its own status entry.
+        assertEquals("not_configured", health.get("status"));
+    }
+
+    @Test
+    void testEstimateCostReturnsZero() {
+        AiFacade ai = AiFacade.getInstance();
+        assertEquals(0.0, ai.estimateCost("some text"));
+    }
+
+    // ==================== AiException ====================
+
+    @Test
+    void testAiExceptionMessageOnlyConstructor() {
+        AiFacade.AiException ex = new AiFacade.AiException("boom");
+        assertEquals("boom", ex.getMessage());
+        assertNull(ex.getCause());
+    }
+
+    @Test
+    void testAiExceptionMessageAndCauseConstructor() {
+        Throwable cause = new IllegalStateException("root");
+        AiFacade.AiException ex = new AiFacade.AiException("boom", cause);
+        assertEquals("boom", ex.getMessage());
+        assertSame(cause, ex.getCause());
     }
 }
 

@@ -6,14 +6,22 @@ import com.adhar.adharkit.logging.filter.MdcLoggingFilter;
 import com.adhar.adharkit.logging.properties.AdharLoggingProperties;
 import com.adhar.adharkit.logging.util.AdharLogger;
 import com.adhar.adharkit.logging.util.LoggingUtils;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.OutputStreamAppender;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+
+import java.nio.charset.StandardCharsets;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.mock.web.MockFilterChain;
@@ -21,7 +29,6 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -33,7 +40,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class AdharLoggingIntegrationTest {
 
+    // Provide a Jackson ObjectMapper (as Spring Boot's Jackson auto-configuration would in
+    // a real application) so the logging beans that depend on it can be created.
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+            .withBean(ObjectMapper.class)
             .withConfiguration(AutoConfigurations.of(AdharLoggingAutoConfiguration.class));
 
     private static final Logger log = LoggerFactory.getLogger(AdharLoggingIntegrationTest.class);
@@ -109,14 +119,22 @@ class AdharLoggingIntegrationTest {
 
     @Test
     void shouldProcessHttpRequestWithMdcFilter() throws Exception {
-        contextRunner
+        // The MdcLoggingFilter is registered via a FilterRegistrationBean and only
+        // in a web application context (@ConditionalOnWebApplication), so use a
+        // WebApplicationContextRunner and unwrap the filter from its registration.
+        new WebApplicationContextRunner()
+                .withBean(ObjectMapper.class)
+                .withConfiguration(AutoConfigurations.of(AdharLoggingAutoConfiguration.class))
                 .withPropertyValues(
                         "adhar.logging.enabled=true",
                         "adhar.logging.mdc.enabled=true"
                 )
                 .run(context -> {
-                    // Get the filter from the context
-                    MdcLoggingFilter filter = context.getBean(MdcLoggingFilter.class);
+                    // Unwrap the filter from its FilterRegistrationBean
+                    @SuppressWarnings("unchecked")
+                    FilterRegistrationBean<MdcLoggingFilter> registration =
+                            context.getBean(FilterRegistrationBean.class);
+                    MdcLoggingFilter filter = registration.getFilter();
                     
                     // Create mock request and response
                     MockHttpServletRequest request = new MockHttpServletRequest();
@@ -152,24 +170,39 @@ class AdharLoggingIntegrationTest {
                         "adhar.logging.masking.enabled=true"
                 )
                 .run(context -> {
-                    // Capture System.out to verify log output
-                    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-                    PrintStream originalOut = System.out;
-                    System.setOut(new PrintStream(outputStream));
-                    
-                    try {
-                        // Get the logging utils
-                        LoggingUtils loggingUtils = context.getBean(LoggingUtils.class);
+                    // Wire the context's MaskingJsonEncoder into a logback appender so
+                    // the captured output actually flows through the masking encoder
+                    // (creating the bean alone does not reconfigure logback).
+                    MaskingJsonEncoder encoder = context.getBean(MaskingJsonEncoder.class);
+                    LoggingUtils loggingUtils = context.getBean(LoggingUtils.class);
 
-                        // Set correlation ID and other MDC values
+                    LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+                    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+                    encoder.setContext(loggerContext);
+                    encoder.start();
+                    OutputStreamAppender<ILoggingEvent> appender = new OutputStreamAppender<>();
+                    appender.setContext(loggerContext);
+                    appender.setEncoder(encoder);
+                    appender.setOutputStream(outputStream);
+                    appender.start();
+
+                    ch.qos.logback.classic.Logger maskingLogger =
+                            loggerContext.getLogger("masking-it-logger");
+                    maskingLogger.addAppender(appender);
+                    maskingLogger.setLevel(Level.INFO);
+                    maskingLogger.setAdditive(false);
+
+                    try {
+                        // Set correlation ID and other MDC values (included in JSON output)
                         loggingUtils.setCorrelationId("test-correlation-id");
                         loggingUtils.putMdc("testKey", "testValue");
-                        
+
                         // Log a message with sensitive data
-                        log.info("User authentication with password=secret123 and token=abc456");
-                        
-                        // Verify log output
-                        String logOutput = outputStream.toString();
+                        maskingLogger.info("User authentication with password=secret123 and token=abc456");
+                        appender.stop();
+
+                        // Verify log output is masked and includes MDC context
+                        String logOutput = outputStream.toString(StandardCharsets.UTF_8);
                         assertThat(logOutput).doesNotContain("secret123");
                         assertThat(logOutput).doesNotContain("abc456");
                         assertThat(logOutput).contains("password=********");
@@ -178,10 +211,7 @@ class AdharLoggingIntegrationTest {
                         assertThat(logOutput).contains("testKey");
                         assertThat(logOutput).contains("testValue");
                     } finally {
-                        // Restore System.out
-                        System.setOut(originalOut);
-                        
-                        // Clear MDC
+                        maskingLogger.detachAndStopAllAppenders();
                         MDC.clear();
                     }
                 });
@@ -195,37 +225,47 @@ class AdharLoggingIntegrationTest {
                         "adhar.logging.masking.enabled=true"
                 )
                 .run(context -> {
-                    // Get the encoder
+                    // Get the encoder and register custom masked keys
                     MaskingJsonEncoder encoder = context.getBean(MaskingJsonEncoder.class);
-                    
-                    // Add custom masked keys
                     Set<String> additionalKeys = new HashSet<>();
                     additionalKeys.add("customSecret");
                     additionalKeys.add("sensitiveData");
                     encoder.addMaskedKeys(additionalKeys);
-                    
+
                     // Verify the keys were added
                     Set<String> maskedKeys = encoder.getMaskedKeys();
                     assertThat(maskedKeys).contains("customSecret", "sensitiveData");
-                    
-                    // Capture System.out to verify log output
+
+                    // Wire the encoder into a logback appender to capture masked output
+                    LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
                     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-                    PrintStream originalOut = System.out;
-                    System.setOut(new PrintStream(outputStream));
-                    
+                    encoder.setContext(loggerContext);
+                    encoder.start();
+                    OutputStreamAppender<ILoggingEvent> appender = new OutputStreamAppender<>();
+                    appender.setContext(loggerContext);
+                    appender.setEncoder(encoder);
+                    appender.setOutputStream(outputStream);
+                    appender.start();
+
+                    ch.qos.logback.classic.Logger maskingLogger =
+                            loggerContext.getLogger("custom-masking-it-logger");
+                    maskingLogger.addAppender(appender);
+                    maskingLogger.setLevel(Level.INFO);
+                    maskingLogger.setAdditive(false);
+
                     try {
                         // Log a message with the custom sensitive data
-                        log.info("Custom data: customSecret=mySecret, sensitiveData=sensitive123");
-                        
-                        // Verify log output
-                        String logOutput = outputStream.toString();
+                        maskingLogger.info("Custom data: customSecret=mySecret, sensitiveData=sensitive123");
+                        appender.stop();
+
+                        // Verify log output is masked for the custom keys
+                        String logOutput = outputStream.toString(StandardCharsets.UTF_8);
                         assertThat(logOutput).doesNotContain("mySecret");
                         assertThat(logOutput).doesNotContain("sensitive123");
                         assertThat(logOutput).contains("customSecret=********");
                         assertThat(logOutput).contains("sensitiveData=********");
                     } finally {
-                        // Restore System.out
-                        System.setOut(originalOut);
+                        maskingLogger.detachAndStopAllAppenders();
                     }
                 });
     }

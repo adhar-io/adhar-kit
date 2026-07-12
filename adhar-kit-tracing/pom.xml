@@ -15,17 +15,28 @@
     <description>Adhar Platform - Distributed Tracing Starter with OpenTelemetry, Zipkin, and Jaeger support</description>
 
     <properties>
-        <opentelemetry.version>1.51.0</opentelemetry.version>
-        <opentelemetry-instrumentation.version>2.14.0</opentelemetry-instrumentation.version>
-        <micrometer-tracing.version>1.5.0</micrometer-tracing.version>
-        <zipkin-reporter.version>3.5.0</zipkin-reporter.version>
-        <brave.version>6.0.3</brave.version>
-        <quarkus.version>3.21.0</quarkus.version>
-        <micronaut.version>4.8.0</micronaut.version>
+        <opentelemetry.version>1.63.0</opentelemetry.version>
+        <opentelemetry-instrumentation.version>2.29.0</opentelemetry-instrumentation.version>
+        <micrometer-tracing.version>1.7.0</micrometer-tracing.version>
+        <zipkin-reporter.version>3.5.3</zipkin-reporter.version>
+        <brave.version>6.3.1</brave.version>
+        <quarkus.version>3.37.0</quarkus.version>
+        <micronaut.version>5.0.2</micronaut.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <!-- Align ALL OpenTelemetry artifacts to a single version. Must come first so it
+                 wins over the older OTel versions imported transitively by the Quarkus and
+                 Micronaut BOMs (which otherwise drag opentelemetry-exporter-common down to
+                 1.60.1, causing NoClassDefFoundError: io/opentelemetry/exporter/internal/EndpointUtil). -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-bom</artifactId>
@@ -76,6 +87,14 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
             <optional>true</optional>
+            <!-- quarkus-core drags in slf4j-jboss-logmanager which provides a competing
+                 SLF4J binding and breaks Spring Boot's Logback setup during tests. -->
+            <exclusions>
+                <exclusion>
+                    <groupId>org.jboss.slf4j</groupId>
+                    <artifactId>slf4j-jboss-logmanager</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -254,7 +273,7 @@
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

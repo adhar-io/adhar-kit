@@ -3,17 +3,12 @@ package com.adhar.kit.ai.config;
 import com.adhar.kit.ai.service.AiModelFactory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.embedding.EmbeddingModel;
-import org.springframework.ai.openai.OpenAiChatModel;
-import org.springframework.ai.openai.OpenAiEmbeddingModel;
-import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
@@ -22,6 +17,15 @@ import java.util.concurrent.Executor;
 /**
  * Main configuration class for AI services.
  * Sets up Spring AI clients, vector stores, and enterprise features.
+ *
+ * <p><b>Spring AI 2.0 note:</b> the {@link ChatModel} and {@link EmbeddingModel}
+ * beans are provided by Spring AI's model auto-configuration (the
+ * {@code spring-ai-starter-model-*} starters). Configure a provider through the
+ * native Spring AI properties, e.g. {@code spring.ai.openai.api-key},
+ * {@code spring.ai.anthropic.api-key} or {@code spring.ai.ollama.base-url}.
+ * Spring AI 2.0 rebuilt the OpenAI integration on top of the official
+ * {@code com.openai:openai-java} SDK, so the client is no longer constructed by
+ * hand here.</p>
  */
 @Configuration
 @EnableCaching
@@ -32,29 +36,6 @@ public class AiConfiguration {
 
     public AiConfiguration(AiProperties aiProperties) {
         this.aiProperties = aiProperties;
-    }
-
-    /**
-     * Primary OpenAI Chat Model for text generation.
-     */
-    @Bean
-    @Primary
-    @ConditionalOnProperty(name = "adhar.ai.openai.api-key")
-    @ConditionalOnMissingBean(ChatModel.class)
-    public ChatModel openAiChatModel() {
-        var openAiApi = OpenAiApi.builder().apiKey(aiProperties.getOpenAi().getApiKey()).build();
-        return OpenAiChatModel.builder().openAiApi(openAiApi).build();
-    }
-
-    /**
-     * OpenAI Embedding Model for vector embeddings.
-     */
-    @Bean
-    @ConditionalOnProperty(name = "adhar.ai.openai.api-key")
-    @ConditionalOnMissingBean(EmbeddingModel.class)
-    public EmbeddingModel openAiEmbeddingModel() {
-        var openAiApi = OpenAiApi.builder().apiKey(aiProperties.getOpenAi().getApiKey()).build();
-        return new OpenAiEmbeddingModel(openAiApi);
     }
 
     /**

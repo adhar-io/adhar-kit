@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.Ordered;
@@ -22,6 +23,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -114,9 +116,7 @@ public class AdharSecurityAutoConfiguration {
                     csrf.ignoringRequestMatchers(properties.getCsrf().getIgnoreAntMatchers().toArray(new String[0]));
                 }
 
-                if (properties.getCsrf().isCookieEnabled()) {
-                    csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse());
-                }
+                csrf.csrfTokenRepository(csrfTokenRepository());
             });
             log.debug("CSRF protection enabled");
         } else {
@@ -124,8 +124,10 @@ public class AdharSecurityAutoConfiguration {
             log.debug("CSRF protection disabled");
         }
 
-        // Configure OAuth2 resource server if enabled
-        if (properties.getOauth2().isEnabled() && properties.getJwt().isEnabled()) {
+        // Configure OAuth2 resource server only when a JWT endpoint is configured.
+        // Without an issuer/JWK set URI there is no JwtDecoder bean, so wiring the
+        // resource server here would fail the filter chain build.
+        if (properties.getOauth2().isEnabled() && properties.getJwt().isEnabled() && isJwtConfigured()) {
             http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> {}));
         }
 
@@ -174,12 +176,40 @@ public class AdharSecurityAutoConfiguration {
     }
 
     /**
+     * Configures the CSRF token repository.
+     * <p>
+     * A cookie-based repository (readable by JavaScript) is exposed so that SPA
+     * clients can echo the token back, which is the common pattern for stateless
+     * APIs. Only created when CSRF protection is enabled.
+     * </p>
+     *
+     * @return the configured CsrfTokenRepository
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.security.csrf", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public CsrfTokenRepository csrfTokenRepository() {
+        return CookieCsrfTokenRepository.withHttpOnlyFalse();
+    }
+
+    /**
+     * Whether a JWT validation endpoint (issuer or JWK set URI) has been configured.
+     *
+     * @return {@code true} if JWT decoding can be performed
+     */
+    private boolean isJwtConfigured() {
+        return (properties.getJwt().getIssuerUri() != null && !properties.getJwt().getIssuerUri().isEmpty())
+            || (properties.getJwt().getJwkSetUri() != null && !properties.getJwt().getJwkSetUri().isEmpty());
+    }
+
+    /**
      * Configures the JWT decoder.
      *
      * @return the configured JwtDecoder
      */
     @Bean
     @ConditionalOnMissingBean
+    @Conditional(OnJwtConfiguredCondition.OnBeanMethod.class)
     @ConditionalOnProperty(prefix = "adhar.security.jwt", name = "enabled", havingValue = "true", matchIfMissing = true)
     public JwtDecoder jwtDecoder() {
         if (properties.getJwt().getJwkSetUri() != null && !properties.getJwt().getJwkSetUri().isEmpty()) {

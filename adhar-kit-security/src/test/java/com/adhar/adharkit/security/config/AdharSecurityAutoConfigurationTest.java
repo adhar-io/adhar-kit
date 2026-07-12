@@ -10,6 +10,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -59,7 +60,9 @@ public class AdharSecurityAutoConfigurationTest {
                 .withUserConfiguration(MockConfiguration.class)
                 .withPropertyValues(
                         "adhar.security.jwt.enabled=true",
-                        "adhar.security.jwt.issuer-uri=https://example.com/issuer"
+                        // Use jwk-set-uri: the decoder is built lazily (no network call),
+                        // unlike issuer-uri which eagerly resolves OIDC metadata.
+                        "adhar.security.jwt.jwk-set-uri=https://example.com/jwks"
                 )
                 .run(context -> {
                     assertThat(context).hasSingleBean(JwtDecoder.class);
@@ -78,14 +81,17 @@ public class AdharSecurityAutoConfigurationTest {
 
     @Configuration
     static class MockConfiguration {
-        @Bean
-        public AdharSecurityProperties adharSecurityProperties() {
-            return new AdharSecurityProperties();
-        }
+        // AdharSecurityProperties is contributed by the auto-configuration via
+        // @EnableConfigurationProperties; defining it again here would create a
+        // duplicate bean and break constructor injection.
 
+        // @EnableWebSecurity also contributes a (real) HttpSecurity prototype bean,
+        // so mark this lightweight mock as primary to drive the filter-chain beans
+        // without standing up full servlet security infrastructure.
         @Bean
+        @Primary
         public HttpSecurity httpSecurity() throws Exception {
-            return mock(HttpSecurity.class);
+            return mock(HttpSecurity.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
         }
     }
 }

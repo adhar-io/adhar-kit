@@ -8,6 +8,8 @@ import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for GrpcServerLifecycle.
@@ -82,6 +84,18 @@ class GrpcServerLifecycleTest {
         lifecycle.stop(() -> callbackInvoked[0] = true);
 
         assertThat(callbackInvoked[0]).isTrue();
+        assertThat(lifecycle.isRunning()).isFalse();
+    }
+
+    @Test
+    void start_whenServerFailsToStart_throwsRuntimeException() throws IOException {
+        Server server = mock(Server.class);
+        when(server.start()).thenThrow(new IOException("bind failed"));
+        GrpcServerLifecycle lifecycle = new GrpcServerLifecycle(server);
+
+        assertThatThrownBy(lifecycle::start)
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Failed to start gRPC server");
         assertThat(lifecycle.isRunning()).isFalse();
     }
 

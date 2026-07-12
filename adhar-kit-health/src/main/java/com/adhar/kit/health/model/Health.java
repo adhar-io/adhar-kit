@@ -48,8 +48,14 @@ public class Health {
 
     /**
      * Health details.
+     *
+     * <p>Note: {@code @Builder.Default} is intentionally omitted here. The custom
+     * {@link HealthBuilder} declares its own {@code details} field that
+     * {@link HealthBuilder#withDetail(String, Object)} populates; using
+     * {@code @Builder.Default} would make Lombok generate a separate
+     * {@code details$value} field that {@code build()} reads instead, silently
+     * discarding any details added via {@code withDetail}.</p>
      */
-    @Builder.Default
     private Map<String, Object> details = new HashMap<>();
 
     /**

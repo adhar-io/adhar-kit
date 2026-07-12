@@ -218,11 +218,14 @@ public class SpecificationBuilder<T> {
     /**
      * Builds the combined specification by ANDing all predicates.
      *
-     * @return a composed Specification, or {@code Specification.where(null)} if empty
+     * @return a composed Specification, or a no-op specification producing a
+     *         {@code null} predicate if empty
      */
     public Specification<T> build() {
         if (specifications.isEmpty()) {
-            return Specification.where((Specification<T>) null);
+            // Spring Data 4's Specification.where(null) now rejects null; return a
+            // no-op specification that contributes no predicate instead.
+            return (root, query, criteriaBuilder) -> null;
         }
         Specification<T> result = Specification.where(specifications.getFirst());
         for (int i = 1; i < specifications.size(); i++) {

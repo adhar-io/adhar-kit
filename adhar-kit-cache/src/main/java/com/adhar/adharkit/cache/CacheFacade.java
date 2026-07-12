@@ -169,7 +169,11 @@ public class CacheFacade {
     public <T> T get(Object key) {
         Objects.requireNonNull(key, "Cache key must not be null");
 
-        Object value = cache.getIfPresent(key);
+        // For a loading cache, get(key) triggers the loader on a miss; a plain
+        // cache only peeks via getIfPresent.
+        Object value = (cache instanceof LoadingCache<Object, Object> loadingCache)
+            ? loadingCache.get(key)
+            : cache.getIfPresent(key);
         log.trace("Getting from cache '{}': key={}, found={}", cacheName, key, value != null);
         return (T) value;
     }

@@ -14,7 +14,7 @@
     <description>adhar-config-starter</description>
 
     <properties>
-        <spring-cloud.version>2025.0.0</spring-cloud.version>
+        <spring-cloud.version>2025.1.2</spring-cloud.version>
     </properties>
 
     <dependencyManagement>

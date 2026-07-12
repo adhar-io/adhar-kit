@@ -15,8 +15,8 @@
     <description>Adhar Platform - Health Check Starter (Custom Indicators)</description>
 
     <properties>
-        <quarkus.version>3.21.0</quarkus.version>
-        <micronaut.version>4.8.0</micronaut.version>
+        <quarkus.version>3.37.0</quarkus.version>
+        <micronaut.version>5.0.2</micronaut.version>
     </properties>
 
     <dependencyManagement>

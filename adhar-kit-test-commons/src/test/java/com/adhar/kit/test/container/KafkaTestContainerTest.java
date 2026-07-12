@@ -3,7 +3,7 @@ package com.adhar.kit.test.container;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -20,8 +20,8 @@ class KafkaTestContainerTest {
     @DisplayName("Should create singleton instance")
     void testGetInstance() {
         // When
-        KafkaContainer instance1 = KafkaTestContainer.getInstance();
-        KafkaContainer instance2 = KafkaTestContainer.getInstance();
+        ConfluentKafkaContainer instance1 = KafkaTestContainer.getInstance();
+        ConfluentKafkaContainer instance2 = KafkaTestContainer.getInstance();
 
         // Then
         assertNotNull(instance1, "First instance should not be null");
@@ -33,7 +33,7 @@ class KafkaTestContainerTest {
     @DisplayName("Should have correct Docker image")
     void testDockerImage() {
         // When
-        KafkaContainer container = KafkaTestContainer.getInstance();
+        ConfluentKafkaContainer container = KafkaTestContainer.getInstance();
 
         // Then
         assertNotNull(container, "Container should not be null");
@@ -46,9 +46,9 @@ class KafkaTestContainerTest {
     @DisplayName("Should return consistent instance across multiple calls")
     void testConsistentSingleton() {
         // When
-        KafkaContainer instance1 = KafkaTestContainer.getInstance();
-        KafkaContainer instance2 = KafkaTestContainer.getInstance();
-        KafkaContainer instance3 = KafkaTestContainer.getInstance();
+        ConfluentKafkaContainer instance1 = KafkaTestContainer.getInstance();
+        ConfluentKafkaContainer instance2 = KafkaTestContainer.getInstance();
+        ConfluentKafkaContainer instance3 = KafkaTestContainer.getInstance();
 
         // Then
         assertSame(instance1, instance2, "First and second instances should be same");
@@ -71,7 +71,7 @@ class KafkaTestContainerTest {
         try {
             // When
             KafkaTestContainer.start();
-            KafkaContainer container = KafkaTestContainer.getInstance();
+            ConfluentKafkaContainer container = KafkaTestContainer.getInstance();
             String bootstrapServers = KafkaTestContainer.getBootstrapServers();
 
             // Then

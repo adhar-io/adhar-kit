@@ -141,7 +141,9 @@ public class AiCacheAspect {
 
         public boolean isExpired(int ttlSeconds) {
             long ttlMillis = ttlSeconds * 1000L;
-            return (System.currentTimeMillis() - timestamp) > ttlMillis;
+            // Use >= so a ttl of 0 means "never cache" (entry is immediately expired)
+            // even when read within the same millisecond it was written.
+            return (System.currentTimeMillis() - timestamp) >= ttlMillis;
         }
     }
 }

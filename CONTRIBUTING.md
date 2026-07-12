@@ -113,7 +113,7 @@ fix(cache): handle null keys in CacheFacade.get()
 docs(readme): update module count to 28
 refactor(metrics): extract PlatformMetrics from MetricsFacade
 test(notification): add NotificationRetryHandler tests
-chore(deps): update Spring Boot to 4.0.2
+chore(deps): update Spring Boot to 4.1.0
 ```
 
 ## Pull Request Process

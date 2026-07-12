@@ -13,8 +13,8 @@
     <description>Single-dependency entry point for Adhar Kit on Spring Boot, Quarkus, Micronaut, Helidon and Vert.x</description>
 
     <properties>
-        <quarkus.version>3.21.0</quarkus.version>
-        <micronaut.version>4.8.0</micronaut.version>
+        <quarkus.version>3.37.0</quarkus.version>
+        <micronaut.version>5.0.2</micronaut.version>
     </properties>
 
     <dependencyManagement>

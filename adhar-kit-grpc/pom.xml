@@ -15,9 +15,25 @@
     <description>gRPC services and utilities for the Adhar Microservices Platform</description>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <grpc.version>1.73.0</grpc.version>
-        <protobuf.version>4.29.5</protobuf.version>
+        <grpc.version>1.82.0</grpc.version>
+        <protobuf.version>4.35.1</protobuf.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Align all io.grpc:* artifacts to ${grpc.version}. Spring Boot's
+                 dependency management pins grpc-core/api/util to an older version
+                 than grpc-netty-shaded, causing NoSuchFieldError at runtime.
+                 Importing grpc-bom here (closer than the parent) realigns them. -->
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-bom</artifactId>
+                <version>${grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- Lombok -->

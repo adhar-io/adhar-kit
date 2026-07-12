@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Platform
 
 - Java 25 baseline with records, sealed interfaces, virtual threads, pattern matching
-- Spring Boot 4.0.2 with Spring Framework 7.0.2
+- Spring Boot 4.1.0 with Spring Framework 7.1.0
 - Spring Cloud 2025.0.0
 - Quarkus 3.21+ and Micronaut 4.8+ framework support
 - 28 production-ready modules with unified AdharFacade entry point
@@ -66,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Library | Version |
 |---------|---------|
-| Spring Boot | 4.0.2 |
+| Spring Boot | 4.1.0 |
 | Spring Cloud | 2025.0.0 |
 | OpenTelemetry | 1.51.0 |
 | Resilience4j | 2.3.0 |

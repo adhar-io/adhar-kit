@@ -3,7 +3,7 @@
 ---
 [![Version](https://img.shields.io/badge/version-0.1.0--SNAPSHOT-blue.svg)](https://github.com/adhar-platform/adhar-kit)
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.org/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.2-green.svg)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.0-green.svg)](https://spring.io/projects/spring-boot)
 [![Quarkus](https://img.shields.io/badge/Quarkus-3.21+-blue.svg)](https://quarkus.io/)
 [![Micronaut](https://img.shields.io/badge/Micronaut-4.8+-purple.svg)](https://micronaut.io/)
 [![Helidon](https://img.shields.io/badge/Helidon-4.2+-red.svg)](https://helidon.io/)

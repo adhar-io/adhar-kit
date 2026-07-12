@@ -3,7 +3,7 @@ package com.adhar.kit.test;
 import com.adhar.kit.test.api.TestContainerService;
 import lombok.extern.slf4j.Slf4j;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -44,7 +44,7 @@ public class TestContainerFacade implements TestContainerService {
     private PostgreSQLContainer<?> postgresContainer;
     private MongoDBContainer mongoContainer;
     private GenericContainer<?> redisContainer;
-    private KafkaContainer kafkaContainer;
+    private ConfluentKafkaContainer kafkaContainer;
 
     private TestContainerFacade() {
         log.info("Initialized TestContainerFacade");
@@ -157,7 +157,7 @@ public class TestContainerFacade implements TestContainerService {
         }
 
         log.info("Starting Kafka container");
-        kafkaContainer = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
+        kafkaContainer = new ConfluentKafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
         kafkaContainer.start();
         containers.put("kafka", kafkaContainer);
 

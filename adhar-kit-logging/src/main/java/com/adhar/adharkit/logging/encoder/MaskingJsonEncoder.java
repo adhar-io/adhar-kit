@@ -1,25 +1,36 @@
 package com.adhar.adharkit.logging.encoder;
 
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.IThrowableProxy;
+import ch.qos.logback.classic.spi.StackTraceElementProxy;
 import net.logstash.logback.encoder.LogstashEncoder;
 // Removed direct provider customizations to maintain compatibility across logstash-logback versions
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * A custom JSON encoder that extends LogstashEncoder to provide masking capabilities
  * for sensitive data in log messages.
+ *
+ * <p>Masking is applied to the formatted message, MDC values whose key is configured
+ * as sensitive, and the message of any associated throwable (so secrets cannot leak
+ * through a stack trace).
  */
 public class MaskingJsonEncoder extends LogstashEncoder {
 
     @Override
     public byte[] encode(ILoggingEvent event) {
-        String original = event.getFormattedMessage();
-        String masked = maskSensitiveData(original);
-        ILoggingEvent wrapped = new MaskedLoggingEvent(event, masked);
+        ILoggingEvent wrapped = new MaskedLoggingEvent(
+                event,
+                maskSensitiveData(event.getFormattedMessage()),
+                maskMdc(event.getMDCPropertyMap()),
+                maskThrowable(event.getThrowableProxy()));
         return super.encode(wrapped);
     }
 
@@ -29,7 +40,9 @@ public class MaskingJsonEncoder extends LogstashEncoder {
     ));
 
     private static final String MASK_VALUE = "********";
-    private Set<String> maskedKeys = DEFAULT_MASKED_KEYS;
+    // Copy the defaults so addMaskedKeys()/setMaskedKeys() never mutate the shared
+    // static set (which would leak masked keys across encoder instances).
+    private Set<String> maskedKeys = new HashSet<>(DEFAULT_MASKED_KEYS);
     private Set<Pattern> maskedPatterns = new HashSet<>();
 
     public MaskingJsonEncoder() {
@@ -39,12 +52,18 @@ public class MaskingJsonEncoder extends LogstashEncoder {
 
 
     /**
-     * Compile mask patterns for efficient matching
+     * Compile mask patterns for efficient matching.
+     *
+     * <p>Each pattern captures the key and its separator (group 1) so they can be
+     * preserved, while the value (optionally surrounded by quotes) is dropped and
+     * replaced by the mask. e.g. {@code password="secret"} becomes
+     * {@code password=********}.
      */
     private void compileMaskPatterns() {
         maskedPatterns.clear();
         for (String key : maskedKeys) {
-            maskedPatterns.add(Pattern.compile("(?i)\\b" + key + "\\b[^\\w\\s]*\\s*[:=]\\s*[\"']?([^\"',;\\s]+)[\"']?", 
+            maskedPatterns.add(Pattern.compile(
+                    "(\\b" + Pattern.quote(key) + "\\b\\s*[:=]\\s*)[\"']?([^\"',;\\s]+)[\"']?",
                     Pattern.CASE_INSENSITIVE));
         }
     }
@@ -86,12 +105,51 @@ public class MaskingJsonEncoder extends LogstashEncoder {
         if (text == null) {
             return null;
         }
-        
+
         String maskedText = text;
         for (Pattern pattern : maskedPatterns) {
-            maskedText = pattern.matcher(maskedText).replaceAll("$1=" + MASK_VALUE);
+            maskedText = pattern.matcher(maskedText)
+                    .replaceAll("$1" + Matcher.quoteReplacement(MASK_VALUE));
         }
         return maskedText;
+    }
+
+    /**
+     * Return a copy of the MDC map with the values of sensitive keys masked.
+     * @param mdc original MDC property map
+     * @return masked MDC map (or the original reference if nothing needs masking)
+     */
+    private Map<String, String> maskMdc(Map<String, String> mdc) {
+        if (mdc == null || mdc.isEmpty()) {
+            return mdc;
+        }
+        Map<String, String> masked = new HashMap<>(mdc.size());
+        for (Map.Entry<String, String> entry : mdc.entrySet()) {
+            masked.put(entry.getKey(),
+                    isSensitiveKey(entry.getKey()) ? MASK_VALUE : entry.getValue());
+        }
+        return masked;
+    }
+
+    private boolean isSensitiveKey(String key) {
+        if (key == null) {
+            return false;
+        }
+        for (String masked : maskedKeys) {
+            if (masked.equalsIgnoreCase(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Wrap a throwable proxy so that its (and its causes') messages are masked.
+     * @param proxy original throwable proxy
+     * @return masked throwable proxy, or {@code null} if there is no throwable
+     */
+    private IThrowableProxy maskThrowable(IThrowableProxy proxy) {
+        return proxy == null ? null : new MaskedThrowableProxy(proxy);
     }
 
     /**
@@ -100,10 +158,15 @@ public class MaskingJsonEncoder extends LogstashEncoder {
     private static class MaskedLoggingEvent implements ILoggingEvent {
         private final ILoggingEvent delegate;
         private final String maskedMessage;
+        private final Map<String, String> maskedMdc;
+        private final IThrowableProxy maskedThrowable;
 
-        public MaskedLoggingEvent(ILoggingEvent delegate, String maskedMessage) {
+        public MaskedLoggingEvent(ILoggingEvent delegate, String maskedMessage,
+                                  Map<String, String> maskedMdc, IThrowableProxy maskedThrowable) {
             this.delegate = delegate;
             this.maskedMessage = maskedMessage;
+            this.maskedMdc = maskedMdc;
+            this.maskedThrowable = maskedThrowable;
         }
 
         @Override
@@ -139,7 +202,7 @@ public class MaskingJsonEncoder extends LogstashEncoder {
 
         @Override
         public ch.qos.logback.classic.spi.IThrowableProxy getThrowableProxy() {
-            return delegate.getThrowableProxy();
+            return maskedThrowable;
         }
 
         @Override
@@ -174,12 +237,12 @@ public class MaskingJsonEncoder extends LogstashEncoder {
 
         @Override
         public java.util.Map<String, String> getMDCPropertyMap() {
-            return delegate.getMDCPropertyMap();
+            return maskedMdc;
         }
 
         @Override
         public java.util.Map<String, String> getMdc() {
-            return delegate.getMdc();
+            return maskedMdc;
         }
 
         @Override
@@ -200,6 +263,66 @@ public class MaskingJsonEncoder extends LogstashEncoder {
         @Override
         public java.util.List<org.slf4j.event.KeyValuePair> getKeyValuePairs() {
             return delegate.getKeyValuePairs();
+        }
+    }
+
+    /**
+     * Wrapper that masks the message of a throwable proxy (and its causes/suppressed)
+     * so sensitive data cannot leak through a rendered stack trace.
+     */
+    private class MaskedThrowableProxy implements IThrowableProxy {
+        private final IThrowableProxy delegate;
+
+        MaskedThrowableProxy(IThrowableProxy delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public String getMessage() {
+            return maskSensitiveData(delegate.getMessage());
+        }
+
+        @Override
+        public String getOverridingMessage() {
+            return maskSensitiveData(delegate.getOverridingMessage());
+        }
+
+        @Override
+        public String getClassName() {
+            return delegate.getClassName();
+        }
+
+        @Override
+        public StackTraceElementProxy[] getStackTraceElementProxyArray() {
+            return delegate.getStackTraceElementProxyArray();
+        }
+
+        @Override
+        public int getCommonFrames() {
+            return delegate.getCommonFrames();
+        }
+
+        @Override
+        public IThrowableProxy getCause() {
+            return maskThrowable(delegate.getCause());
+        }
+
+        @Override
+        public IThrowableProxy[] getSuppressed() {
+            IThrowableProxy[] suppressed = delegate.getSuppressed();
+            if (suppressed == null) {
+                return null;
+            }
+            IThrowableProxy[] masked = new IThrowableProxy[suppressed.length];
+            for (int i = 0; i < suppressed.length; i++) {
+                masked[i] = maskThrowable(suppressed[i]);
+            }
+            return masked;
+        }
+
+        @Override
+        public boolean isCyclic() {
+            return delegate.isCyclic();
         }
     }
 }

@@ -26,6 +26,30 @@
         </dependencies>
     </dependencyManagement>
 
+    <build>
+        <plugins>
+            <!-- Surefire: provide deterministic Kubernetes downward-API style
+                 environment variables so env-dependent code paths (pod identity,
+                 in-cluster detection) are exercised by unit tests without a
+                 real cluster. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <environmentVariables>
+                        <HOSTNAME>test-pod</HOSTNAME>
+                        <POD_NAMESPACE>test-namespace</POD_NAMESPACE>
+                        <POD_IP>10.1.2.3</POD_IP>
+                        <NODE_NAME>test-node</NODE_NAME>
+                        <SERVICE_ACCOUNT>test-sa</SERVICE_ACCOUNT>
+                        <KUBERNETES_SERVICE_HOST>10.96.0.1</KUBERNETES_SERVICE_HOST>
+                        <KUBERNETES_SERVICE_PORT>443</KUBERNETES_SERVICE_PORT>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
     <dependencies>
         <!-- Fabric8 Kubernetes Client -->
         <dependency>

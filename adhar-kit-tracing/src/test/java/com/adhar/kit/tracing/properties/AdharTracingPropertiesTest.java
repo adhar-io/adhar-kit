@@ -2,6 +2,7 @@ package com.adhar.kit.tracing.properties;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.TestPropertySource;
 
@@ -13,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Tests for {@link AdharTracingProperties}.
  */
-@SpringBootTest(classes = {AdharTracingProperties.class})
+@SpringBootTest(classes = {AdharTracingPropertiesTest.TestConfig.class})
 @TestPropertySource(properties = {
     "adhar.tracing.enabled=true",
     "adhar.tracing.open-telemetry.endpoint=http://custom-otel:4317",
@@ -26,6 +27,15 @@ class AdharTracingPropertiesTest {
 
     @Autowired
     private AdharTracingProperties properties;
+
+    /**
+     * Minimal test configuration that activates {@code @ConfigurationProperties} binding
+     * for {@link AdharTracingProperties} so the {@code @TestPropertySource} overrides are
+     * actually bound (registering the class as a plain bean does not trigger binding).
+     */
+    @EnableConfigurationProperties(AdharTracingProperties.class)
+    static class TestConfig {
+    }
 
     @Test
     void testDefaultValues() {

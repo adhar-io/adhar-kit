@@ -16,13 +16,26 @@
 
     <properties>
         <java.version>25</java.version>
-        <caffeine.version>3.2.0</caffeine.version>
-        <quarkus.version>3.21.0</quarkus.version>
-        <micronaut.version>4.8.0</micronaut.version>
+        <caffeine.version>3.2.4</caffeine.version>
+        <quarkus.version>3.37.0</quarkus.version>
+        <micronaut.version>5.0.2</micronaut.version>
+        <!-- Aligned with the Netty managed by Spring Boot 4.1 (Lettuce/Redis needs
+             Netty 4.2's MultiThreadIoEventLoopGroup). -->
+        <netty.version>4.2.15.Final</netty.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <!-- Imported FIRST so Spring Boot's Netty 4.2 wins over the older Netty
+                 pinned by the Quarkus/Micronaut platform BOMs below (Maven uses
+                 first-declared-wins for imported BOMs). -->
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>${netty.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-bom</artifactId>
@@ -167,12 +180,12 @@
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>junit-jupiter</artifactId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
-            <artifactId>kafka</artifactId>
+            <artifactId>testcontainers-kafka</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

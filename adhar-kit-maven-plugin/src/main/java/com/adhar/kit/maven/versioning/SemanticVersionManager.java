@@ -64,6 +64,11 @@ public class SemanticVersionManager {
                 .readEnvironment()
                 .findGitDir()
                 .build();
+        // FileRepositoryBuilder.build() succeeds even when no repository exists;
+        // fail fast so callers get a clear error for non-Git directories.
+        if (repository.getObjectDatabase() == null || !repository.getObjectDatabase().exists()) {
+            throw new IllegalStateException("Not a Git repository: " + gitDirectory);
+        }
         git = new Git(repository);
     }
 

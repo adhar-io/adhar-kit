@@ -234,9 +234,7 @@ public class ReleaseManager {
 
             if (!tags.isEmpty()) {
                 Ref latestTag = tags.get(tags.size() - 1);
-                sinceCommit = latestTag.getPeeledObjectId() != null
-                        ? latestTag.getPeeledObjectId()
-                        : latestTag.getObjectId();
+                sinceCommit = peelToCommit(repository, latestTag);
                 log.info("Generating changelog since tag: " + latestTag.getName());
             }
 
@@ -326,9 +324,7 @@ public class ReleaseManager {
 
             if (!tags.isEmpty()) {
                 Ref latestTag = tags.get(tags.size() - 1);
-                sinceCommit = latestTag.getPeeledObjectId() != null
-                        ? latestTag.getPeeledObjectId()
-                        : latestTag.getObjectId();
+                sinceCommit = peelToCommit(repository, latestTag);
                 previousTag = latestTag.getName().replace("refs/tags/", "");
             }
 
@@ -448,6 +444,22 @@ public class ReleaseManager {
     }
 
     // ---- Helper methods ----
+
+    /**
+     * Resolves a tag ref to the commit it points at. Annotated tags resolve to a
+     * tag object rather than a commit, so the ref must be peeled before it can be
+     * used as a commit boundary in a {@code git log} range.
+     *
+     * @param repository the repository the ref belongs to
+     * @param tag        the tag ref to resolve
+     * @return the commit {@link ObjectId} the tag ultimately points to
+     */
+    private ObjectId peelToCommit(Repository repository, Ref tag) throws IOException {
+        Ref peeled = repository.getRefDatabase().peel(tag);
+        return peeled.getPeeledObjectId() != null
+                ? peeled.getPeeledObjectId()
+                : peeled.getObjectId();
+    }
 
     private Repository openRepository() throws IOException {
         File baseDir = project.getBasedir();

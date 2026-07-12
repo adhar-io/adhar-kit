@@ -16,7 +16,6 @@
 
     <properties>
         <java.version>25</java.version>
-        <jacoco.minimum.coverage>0.20</jacoco.minimum.coverage>
     </properties>
 
     <dependencies>

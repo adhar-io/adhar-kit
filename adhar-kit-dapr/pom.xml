@@ -14,7 +14,7 @@
     <description>Comprehensive Dapr integration - State, Pub/Sub, Service Invocation, Bindings, Actors, Secrets, Configuration</description>
 
     <properties>
-        <dapr-sdk.version>1.14.1</dapr-sdk.version>
+        <dapr-sdk.version>1.18.0</dapr-sdk.version>
     </properties>
 
     <dependencies>

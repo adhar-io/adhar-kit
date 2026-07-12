@@ -146,7 +146,10 @@ public class JwtUtilsTest {
         headers.put("alg", "RS256");
         headers.put("typ", "JWT");
 
+        // Non-empty claims (Spring Security's Jwt requires at least one claim),
+        // but deliberately without an "aud" claim.
         Map<String, Object> claims = new HashMap<>();
+        claims.put("sub", "user");
 
         Jwt jwt = new Jwt("token", Instant.now(), Instant.now().plusSeconds(3600), headers, claims);
 

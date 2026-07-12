@@ -3,7 +3,9 @@ package com.adhar.adharkit.security.properties;
 import com.adhar.kit.security.properties.AdharSecurityProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.test.context.TestPropertySource;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -11,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests for {@link AdharSecurityProperties}.
  */
-@SpringBootTest(classes = {AdharSecurityProperties.class})
+@SpringBootTest(classes = {AdharSecurityPropertiesTest.TestConfig.class})
 @TestPropertySource(properties = {
     "adhar.security.enabled=true",
     "adhar.security.jwt.enabled=true",
@@ -55,6 +57,15 @@ public class AdharSecurityPropertiesTest {
 
     @Autowired
     private AdharSecurityProperties properties;
+
+    /**
+     * Minimal context that enables binding of {@link AdharSecurityProperties}
+     * from the configured {@link TestPropertySource}.
+     */
+    @Configuration
+    @EnableConfigurationProperties(AdharSecurityProperties.class)
+    static class TestConfig {
+    }
 
     @Test
     public void testDefaultProperties() {

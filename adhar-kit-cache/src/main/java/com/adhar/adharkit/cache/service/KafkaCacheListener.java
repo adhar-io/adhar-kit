@@ -49,8 +49,8 @@ public class KafkaCacheListener {
      * @param message the cache message
      */
     @KafkaListener(
-            topics = "#{T(com.adhar.adharkit.cache.properties.AdharCacheProperties).getKafka().getTopicPrefix() + '-put'}",
-            groupId = "#{T(com.adhar.adharkit.cache.properties.AdharCacheProperties).getKafka().getGroupId()}",
+            topics = "${adhar.cache.kafka.topic-prefix:adhar-cache}-put",
+            groupId = "${adhar.cache.kafka.group-id:adhar-cache-group}",
             containerFactory = "kafkaCacheListenerContainerFactory"
     )
     public void listenForPutMessages(CacheMessage message) {
@@ -93,8 +93,8 @@ public class KafkaCacheListener {
      * @param message the cache message
      */
     @KafkaListener(
-            topics = "#{T(com.adhar.adharkit.cache.properties.AdharCacheProperties).getKafka().getTopicPrefix() + '-evict'}",
-            groupId = "#{T(com.adhar.adharkit.cache.properties.AdharCacheProperties).getKafka().getGroupId()}",
+            topics = "${adhar.cache.kafka.topic-prefix:adhar-cache}-evict",
+            groupId = "${adhar.cache.kafka.group-id:adhar-cache-group}",
             containerFactory = "kafkaCacheListenerContainerFactory"
     )
     public void listenForEvictMessages(CacheMessage message) {
@@ -134,8 +134,8 @@ public class KafkaCacheListener {
      * @param message the cache message
      */
     @KafkaListener(
-            topics = "#{T(com.adhar.adharkit.cache.properties.AdharCacheProperties).getKafka().getTopicPrefix() + '-clear'}",
-            groupId = "#{T(com.adhar.adharkit.cache.properties.AdharCacheProperties).getKafka().getGroupId()}",
+            topics = "${adhar.cache.kafka.topic-prefix:adhar-cache}-clear",
+            groupId = "${adhar.cache.kafka.group-id:adhar-cache-group}",
             containerFactory = "kafkaCacheListenerContainerFactory"
     )
     public void listenForClearMessages(CacheMessage message) {

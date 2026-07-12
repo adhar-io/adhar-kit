@@ -1,6 +1,7 @@
 package com.adhar.kit.messaging.cloudevents;
 
 import com.adhar.kit.messaging.core.Message;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.cloudevents.CloudEvent;
 import io.cloudevents.core.builder.CloudEventBuilder;
 
@@ -66,6 +67,8 @@ import java.util.UUID;
  * @since 1.0.0
  */
 public final class CloudEventUtils {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private CloudEventUtils() {
         throw new UnsupportedOperationException("Utility class");
@@ -367,7 +370,10 @@ public final class CloudEventUtils {
                 builder.withTime(time.atOffset(java.time.ZoneOffset.UTC));
             }
             if (data != null) {
-                builder.withData(io.cloudevents.core.data.PojoCloudEventData.wrap(data, null));
+                // A serializer mapper is required; passing null throws inside
+                // PojoCloudEventData. Serialize the payload to JSON bytes lazily,
+                // matching CloudEventAdapter's behaviour.
+                builder.withData(io.cloudevents.core.data.PojoCloudEventData.wrap(data, OBJECT_MAPPER::writeValueAsBytes));
             }
 
             extensions.forEach((key, value) -> {

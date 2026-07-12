@@ -77,8 +77,8 @@ class KubernetesUtilsTest {
     void testSanitizeResourceName() {
         assertEquals("my-service", KubernetesUtils.sanitizeResourceName("My_Service"));
         assertEquals("order-service", KubernetesUtils.sanitizeResourceName("Order@Service"));
-        assertEquals("xabc", KubernetesUtils.sanitizeResourceName("abc-"));
-        assertEquals("xabcx", KubernetesUtils.sanitizeResourceName("-abc-"));
+        assertEquals("abc", KubernetesUtils.sanitizeResourceName("abc-"));
+        assertEquals("abc", KubernetesUtils.sanitizeResourceName("-abc-"));
     }
 
     @Test

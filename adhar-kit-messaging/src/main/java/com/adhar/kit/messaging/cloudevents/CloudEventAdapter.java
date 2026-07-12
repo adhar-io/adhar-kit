@@ -1,6 +1,7 @@
 package com.adhar.kit.messaging.cloudevents;
 
 import com.adhar.kit.messaging.core.Message;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.cloudevents.CloudEvent;
 import io.cloudevents.CloudEventData;
 import io.cloudevents.core.builder.CloudEventBuilder;
@@ -20,6 +21,9 @@ import java.util.Set;
  * See https://cloudevents.io/ for more information.
  */
 public class CloudEventAdapter {
+
+    /** Serializes POJO payloads to bytes when a CloudEvent is written to the wire. */
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     /**
      * Converts a Message to a CloudEvent.
@@ -49,17 +53,33 @@ public class CloudEventAdapter {
         }
 
         if (message.getPayload() != null) {
-            builder.withData(PojoCloudEventData.wrap(message.getPayload(), null));
+            builder.withData(PojoCloudEventData.wrap(message.getPayload(), OBJECT_MAPPER::writeValueAsBytes));
         }
 
-        // Add any additional headers as extensions
+        // Add any additional headers as extensions. CloudEvents 1.0 (strictly
+        // enforced since cloudevents-sdk 3.x/4.x) requires extension names to be
+        // lowercase alphanumeric, so header keys are normalized accordingly.
         message.getHeaders().forEach((key, value) -> {
             if (value != null) {
-                builder.withExtension(key, value.toString());
+                String extensionName = sanitizeExtensionName(key);
+                if (!extensionName.isEmpty()) {
+                    builder.withExtension(extensionName, value.toString());
+                }
             }
         });
 
         return builder.build();
+    }
+
+    /**
+     * Normalizes an arbitrary header key into a CloudEvents-compliant extension
+     * name (lowercase {@code a-z0-9} only), as mandated by the CloudEvents spec.
+     *
+     * @param key the original header key
+     * @return a spec-compliant extension name (possibly empty if no valid characters)
+     */
+    private String sanitizeExtensionName(String key) {
+        return key == null ? "" : key.toLowerCase().replaceAll("[^a-z0-9]", "");
     }
 
     /**
@@ -77,7 +97,9 @@ public class CloudEventAdapter {
             if (data instanceof PojoCloudEventData) {
                 payload = (T) ((PojoCloudEventData<?>) data).getValue();
             } else {
-                payload = (T) data;
+                // CloudEvents 4.x wraps raw bytes in BytesCloudEventData (and other
+                // CloudEventData implementations); expose the underlying byte[] payload.
+                payload = (T) data.toBytes();
             }
         }
 
@@ -90,7 +112,8 @@ public class CloudEventAdapter {
         builder.header("ce-id", cloudEvent.getId());
         builder.header("ce-source", cloudEvent.getSource().toString());
         builder.header("ce-type", cloudEvent.getType());
-        builder.header("ce-specversion", cloudEvent.getSpecVersion());
+        // getSpecVersion() returns the SpecVersion enum; store its String form ("1.0").
+        builder.header("ce-specversion", cloudEvent.getSpecVersion().toString());
 
         if (cloudEvent.getDataContentType() != null) {
             builder.header("ce-datacontenttype", cloudEvent.getDataContentType());
@@ -109,29 +132,17 @@ public class CloudEventAdapter {
             builder.header("ce-time", cloudEvent.getTime().toString());
         }
 
-        // Add any extensions as headers
-        Set<String> attributeNames = cloudEvent.getAttributeNames();
-        for (String name : attributeNames) {
-            if (!isStandardAttribute(name)) {
-                Object value = cloudEvent.getAttribute(name);
-                if (value != null) {
-                    builder.header(name, value);
-                }
+        // Add any extensions as headers. In CloudEvents 4.x extensions are exposed
+        // via getExtensionNames()/getExtension() - separate from the context
+        // attributes returned by getAttributeNames().
+        Set<String> extensionNames = cloudEvent.getExtensionNames();
+        for (String name : extensionNames) {
+            Object value = cloudEvent.getExtension(name);
+            if (value != null) {
+                builder.header(name, value);
             }
         }
 
         return builder.build();
-    }
-
-    /**
-     * Checks if an attribute name is a standard CloudEvent attribute.
-     *
-     * @param name the attribute name
-     * @return true if the attribute is a standard CloudEvent attribute, false otherwise
-     */
-    private boolean isStandardAttribute(String name) {
-        return name.equals("id") || name.equals("source") || name.equals("type") || 
-               name.equals("specversion") || name.equals("datacontenttype") || 
-               name.equals("dataschema") || name.equals("subject") || name.equals("time");
     }
 }

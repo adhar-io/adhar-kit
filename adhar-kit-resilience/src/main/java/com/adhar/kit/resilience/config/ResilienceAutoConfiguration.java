@@ -22,7 +22,14 @@ import io.github.resilience4j.timelimiter.TimeLimiterRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import io.github.resilience4j.springboot3.bulkhead.autoconfigure.BulkheadAutoConfiguration;
+import io.github.resilience4j.springboot3.circuitbreaker.autoconfigure.CircuitBreakerAutoConfiguration;
+import io.github.resilience4j.springboot3.ratelimiter.autoconfigure.RateLimiterAutoConfiguration;
+import io.github.resilience4j.springboot3.retry.autoconfigure.RetryAutoConfiguration;
+import io.github.resilience4j.springboot3.timelimiter.autoconfigure.TimeLimiterAutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -84,6 +91,27 @@ public class ResilienceAutoConfiguration {
     @PostConstruct
     public void logResilienceConfiguration() {
         log.info("Adhar Resilience module initialized with Resilience4j patterns (CircuitBreaker, Retry, RateLimiter, Bulkhead, TimeLimiter)");
+    }
+
+    /**
+     * Imports the Resilience4j Spring Boot aspect auto-configurations so that the
+     * {@code io.github.resilience4j.*.annotation.*} annotations (CircuitBreaker, Retry,
+     * RateLimiter, Bulkhead, TimeLimiter) are intercepted and applied.
+     *
+     * <p>Activated only when {@code resilience4j-spring-boot3} is on the classpath; otherwise
+     * this configuration silently backs off so the module remains usable in non-Spring
+     * runtimes (Quarkus, Micronaut, Helidon, Vert.x).</p>
+     */
+    @Configuration
+    @ConditionalOnClass(CircuitBreakerAutoConfiguration.class)
+    @ImportAutoConfiguration({
+            CircuitBreakerAutoConfiguration.class,
+            RetryAutoConfiguration.class,
+            RateLimiterAutoConfiguration.class,
+            BulkheadAutoConfiguration.class,
+            TimeLimiterAutoConfiguration.class
+    })
+    public static class Resilience4jAspectConfiguration {
     }
 
     @Bean
@@ -262,6 +290,7 @@ public class ResilienceAutoConfiguration {
 
     @Configuration
     @ConditionalOnClass(MeterRegistry.class)
+    @ConditionalOnBean(MeterRegistry.class)
     @ConditionalOnProperty(prefix = "adhar.resilience.metrics", name = "enabled", havingValue = "true", matchIfMissing = true)
     public static class ResilienceMetricsConfiguration {
 

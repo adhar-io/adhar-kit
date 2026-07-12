@@ -290,6 +290,16 @@ public class DaprFacade {
         }
     }
 
+    /**
+     * Package-private constructor for testing with an injected Dapr client.
+     *
+     * @param daprClient the Dapr client (typically a mock in tests)
+     */
+    DaprFacade(DaprClient daprClient) {
+        this.daprClient = daprClient;
+        this.available = true;
+    }
+
     public static DaprFacade getInstance() {
         if (instance == null) {
             synchronized (DaprFacade.class) {

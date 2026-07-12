@@ -11,25 +11,10 @@
     <description>Bill of Materials for Adhar Kit - Enterprise Microservices Foundation</description>
 
     <repositories>
+        <!-- Lombok edge build for Java 25 support (still pre-release) -->
         <repository>
             <id>projectlombok.org</id>
             <url>https://projectlombok.org/edge-releases</url>
-        </repository>
-        <repository>
-            <id>spring-milestones</id>
-            <name>Spring Milestones</name>
-            <url>https://repo.spring.io/milestone</url>
-            <snapshots>
-                <enabled>false</enabled>
-            </snapshots>
-        </repository>
-        <repository>
-            <id>spring-snapshots</id>
-            <name>Spring Snapshots</name>
-            <url>https://repo.spring.io/snapshot</url>
-            <releases>
-                <enabled>false</enabled>
-            </releases>
         </repository>
     </repositories>
 
@@ -42,65 +27,51 @@
         <!-- Adhar Kit Version -->
         <adhar-kit.version>0.1.0-SNAPSHOT</adhar-kit.version>
 
-        <!-- Spring Ecosystem - Spring Boot 4.0.x + Spring Framework 7.0.x -->
-        <spring-boot.version>4.0.2</spring-boot.version>
-        <spring-framework.version>7.0.2</spring-framework.version>
-        <spring-cloud.version>2025.0.0</spring-cloud.version>
-        <spring-kafka.version>3.3.7</spring-kafka.version>
-        <spring-rabbit.version>3.2.5</spring-rabbit.version>
+        <!-- Spring Ecosystem - Spring Boot 4.1.0 ships with Spring Framework 7.0.8 -->
+        <!-- spring-kafka/spring-amqp, micrometer, jakarta APIs, flyway, liquibase,
+             mockito, byte-buddy, awaitility, janino and testcontainers are all
+             managed by the Spring Boot 4.1 BOM - do not override them here. -->
+        <spring-boot.version>4.1.0</spring-boot.version>
+        <spring-framework.version>7.0.8</spring-framework.version>
+        <spring-cloud.version>2025.1.2</spring-cloud.version>
 
         <!-- Code Generation -->
         <lombok.version>edge-SNAPSHOT</lombok.version>
         <mapstruct.version>1.6.3</mapstruct.version>
 
         <!-- Resilience & Observability -->
-        <resilience4j.version>2.3.0</resilience4j.version>
-        <micrometer.version>1.15.0</micrometer.version>
-        <micrometer-tracing.version>1.5.0</micrometer-tracing.version>
-        <opentelemetry.version>1.51.0</opentelemetry.version>
+        <resilience4j.version>2.4.0</resilience4j.version>
+        <opentelemetry.version>1.63.0</opentelemetry.version>
 
         <!-- Logging -->
-        <logstash-logback-encoder.version>8.1</logstash-logback-encoder.version>
-        <janino.version>3.1.12</janino.version>
+        <logstash-logback-encoder.version>9.0</logstash-logback-encoder.version>
 
         <!-- Persistence -->
-        <jakarta-persistence.version>3.2.0</jakarta-persistence.version>
-        <jakarta-validation.version>3.1.0</jakarta-validation.version>
         <querydsl.version>5.1.0</querydsl.version>
-        <flyway.version>11.8.2</flyway.version>
-        <liquibase.version>4.32.0</liquibase.version>
 
         <!-- API Documentation -->
-        <springdoc-openapi.version>2.8.6</springdoc-openapi.version>
+        <springdoc-openapi.version>3.0.3</springdoc-openapi.version>
 
         <!-- gRPC -->
-        <grpc.version>1.73.0</grpc.version>
-        <protobuf.version>4.29.5</protobuf.version>
-        <grpc-spring-boot-starter.version>3.4.0</grpc-spring-boot-starter.version>
+        <grpc.version>1.82.0</grpc.version>
+        <protobuf.version>4.35.1</protobuf.version>
 
         <!-- Cloud Native -->
-        <dapr-sdk.version>1.14.1</dapr-sdk.version>
-        <kubernetes-client.version>7.3.1</kubernetes-client.version>
+        <dapr-sdk.version>1.18.0</dapr-sdk.version>
+        <kubernetes-client.version>7.7.0</kubernetes-client.version>
 
         <!-- AI Integration -->
-        <spring-ai.version>1.0.0-SNAPSHOT</spring-ai.version>
-        <langchain4j.version>1.0.0</langchain4j.version>
+        <spring-ai.version>2.0.0</spring-ai.version>
+        <langchain4j.version>1.16.3</langchain4j.version>
 
         <!-- Analytics -->
-        <posthog.version>3.8.1</posthog.version>
-
-        <!-- Notification -->
-        <jakarta-mail.version>2.1.3</jakarta-mail.version>
+        <posthog.version>1.2.0</posthog.version>
 
         <!-- Testing -->
-        <testcontainers.version>1.21.3</testcontainers.version>
-        <mockito.version>5.18.0</mockito.version>
-        <byte-buddy.version>1.17.5</byte-buddy.version>
         <wiremock.version>3.13.1</wiremock.version>
-        <awaitility.version>4.2.2</awaitility.version>
 
         <!-- CloudEvents -->
-        <cloudevents.version>2.5.0</cloudevents.version>
+        <cloudevents.version>4.1.1</cloudevents.version>
     </properties>
 
     <dependencyManagement>
@@ -123,14 +94,7 @@
                 <scope>import</scope>
             </dependency>
 
-            <!-- Testcontainers BOM -->
-            <dependency>
-                <groupId>org.testcontainers</groupId>
-                <artifactId>testcontainers-bom</artifactId>
-                <version>${testcontainers.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
+            <!-- Testcontainers is managed by the Spring Boot 4.1 BOM (2.x) -->
 
             <!-- ========== ADHAR KIT MODULES ========== -->
 
@@ -369,18 +333,7 @@
                 <scope>import</scope>
             </dependency>
 
-            <!-- Micrometer -->
-            <dependency>
-                <groupId>io.micrometer</groupId>
-                <artifactId>micrometer-core</artifactId>
-                <version>${micrometer.version}</version>
-            </dependency>
-
-            <dependency>
-                <groupId>io.micrometer</groupId>
-                <artifactId>micrometer-tracing</artifactId>
-                <version>${micrometer-tracing.version}</version>
-            </dependency>
+            <!-- Micrometer & Micrometer Tracing are managed by the Spring Boot 4.1 BOM -->
 
             <!-- OpenTelemetry -->
             <dependency>
@@ -422,8 +375,7 @@
                 <version>${kubernetes-client.version}</version>
             </dependency>
 
-            <!-- Spring AI - Optional, managed in AI module -->
-            <!--
+            <!-- Spring AI 2.0 BOM - manages all spring-ai-* artifact versions -->
             <dependency>
                 <groupId>org.springframework.ai</groupId>
                 <artifactId>spring-ai-bom</artifactId>
@@ -431,7 +383,6 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            -->
 
             <!-- LangChain4j -->
             <dependency>
@@ -454,26 +405,7 @@
                 <version>${logstash-logback-encoder.version}</version>
             </dependency>
 
-            <!-- Janino (for Logback conditions) -->
-            <dependency>
-                <groupId>org.codehaus.janino</groupId>
-                <artifactId>janino</artifactId>
-                <version>${janino.version}</version>
-            </dependency>
-
-            <!-- Byte Buddy (for testing with Java 25) -->
-            <dependency>
-                <groupId>net.bytebuddy</groupId>
-                <artifactId>byte-buddy</artifactId>
-                <version>${byte-buddy.version}</version>
-            </dependency>
-
-            <!-- Mockito (Java 25 compatible) -->
-            <dependency>
-                <groupId>org.mockito</groupId>
-                <artifactId>mockito-core</artifactId>
-                <version>${mockito.version}</version>
-            </dependency>
+            <!-- Janino, Byte Buddy and Mockito are managed by the Spring Boot 4.1 BOM -->
 
             <!-- WireMock -->
             <dependency>
@@ -482,12 +414,7 @@
                 <version>${wiremock.version}</version>
             </dependency>
 
-            <!-- Awaitility -->
-            <dependency>
-                <groupId>org.awaitility</groupId>
-                <artifactId>awaitility</artifactId>
-                <version>${awaitility.version}</version>
-            </dependency>
+            <!-- Awaitility is managed by the Spring Boot 4.1 BOM -->
         </dependencies>
     </dependencyManagement>
 </project>

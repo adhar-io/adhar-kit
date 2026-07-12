@@ -9,14 +9,21 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import com.adhar.kit.commons.model.ApiResponse;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -36,11 +43,12 @@ class AiControllerTest {
     private AiService aiService;
 
     private ObjectMapper objectMapper;
+    private AiController aiController;
 
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        AiController aiController = new AiController(aiService);
+        aiController = new AiController(aiService);
         mockMvc = MockMvcBuilders.standaloneSetup(aiController).build();
     }
 
@@ -175,5 +183,218 @@ class AiControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").isArray())
                 .andExpect(jsonPath("$.data.length()").value(3));
+    }
+
+    // ==================== Error paths ====================
+
+    @Test
+    void testChatEndpointReturns500OnServiceFailure() throws Exception {
+        AiChatRequest request = AiChatRequest.builder().message("Hello").build();
+        when(aiService.chat(any(AiChatRequest.class)))
+                .thenThrow(new RuntimeException("provider down"));
+
+        mockMvc.perform(post("/api/v1/ai/chat")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Failed to process chat request"));
+    }
+
+    @Test
+    void testEmbedEndpointMissingTextReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/ai/embed")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("notText", "x"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Text parameter is required"));
+    }
+
+    @Test
+    void testEmbedEndpointBlankTextReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/ai/embed")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("text", "   "))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void testEmbedEndpointReturns500OnServiceFailure() throws Exception {
+        when(aiService.embed(anyString())).thenThrow(new RuntimeException("embed failed"));
+
+        mockMvc.perform(post("/api/v1/ai/embed")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("text", "hello"))))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Failed to generate embeddings"));
+    }
+
+    @Test
+    void testSearchEndpointMissingQueryReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/ai/search")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("limit", 5))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Query parameter is required"));
+    }
+
+    @Test
+    void testSearchEndpointReturns500OnServiceFailure() throws Exception {
+        when(aiService.search(anyString(), any(Integer.class)))
+                .thenThrow(new RuntimeException("search boom"));
+
+        mockMvc.perform(post("/api/v1/ai/search")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("query", "hi"))))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Failed to perform search"));
+    }
+
+    @Test
+    void testRagChatEndpointReturns500OnServiceFailure() throws Exception {
+        AiChatRequest request = AiChatRequest.builder().message("q").build();
+        when(aiService.ragChat(any(AiChatRequest.class), anyString()))
+                .thenThrow(new RuntimeException("rag boom"));
+
+        mockMvc.perform(post("/api/v1/ai/rag/chat")
+                .param("knowledgeBase", "kb")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Failed to process RAG chat request"));
+    }
+
+    @Test
+    void testAddDocumentsSuccess() throws Exception {
+        List<AiService.DocumentChunk> docs = List.of(
+                new AiService.DocumentChunk("d1", "content", "src", Map.of()));
+
+        mockMvc.perform(post("/api/v1/ai/rag/documents")
+                .param("knowledgeBase", "kb")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(docs)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+    }
+
+    @Test
+    void testAddDocumentsEmptyReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/ai/rag/documents")
+                .param("knowledgeBase", "kb")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(List.of())))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Documents cannot be empty"));
+    }
+
+    @Test
+    void testAddDocumentsReturns500OnServiceFailure() throws Exception {
+        List<AiService.DocumentChunk> docs = List.of(
+                new AiService.DocumentChunk("d1", "content", "src", Map.of()));
+        org.mockito.Mockito.doThrow(new RuntimeException("ingest boom"))
+                .when(aiService).addDocuments(any(), anyString());
+
+        mockMvc.perform(post("/api/v1/ai/rag/documents")
+                .param("knowledgeBase", "kb")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(docs)))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Failed to add documents to knowledge base"));
+    }
+
+    @Test
+    void testGetModelsReturns500OnServiceFailure() throws Exception {
+        when(aiService.getAvailableModels()).thenThrow(new RuntimeException("models boom"));
+
+        mockMvc.perform(get("/api/v1/ai/models"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Failed to retrieve available models"));
+    }
+
+    @Test
+    void testHealthEndpointReturnsServiceUnavailableWhenDown() throws Exception {
+        when(aiService.isHealthy()).thenReturn(false);
+
+        mockMvc.perform(get("/api/v1/ai/health"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("AI services are not responding"));
+    }
+
+    @Test
+    void testHealthEndpointReturns500OnServiceFailure() throws Exception {
+        when(aiService.isHealthy()).thenThrow(new RuntimeException("health boom"));
+
+        mockMvc.perform(get("/api/v1/ai/health"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message").value("Health check failed"));
+    }
+
+    // ==================== Reactive endpoints (invoked directly) ====================
+
+    @Test
+    void testChatAsyncEndpointSuccess() {
+        AiChatRequest request = AiChatRequest.builder().message("hi").build();
+        AiChatResponse response = AiChatResponse.builder().content("hello back").build();
+        when(aiService.chatAsync(any(AiChatRequest.class))).thenReturn(Mono.just(response));
+
+        ResponseEntity<ApiResponse<AiChatResponse>> result =
+                aiController.chatAsync(request, null).block();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody()).isNotNull();
+        assertThat(result.getBody().isSuccess()).isTrue();
+        assertThat(result.getBody().getData().getContent()).isEqualTo("hello back");
+    }
+
+    @Test
+    void testChatAsyncEndpointErrorReturns500() {
+        AiChatRequest request = AiChatRequest.builder().message("hi").build();
+        when(aiService.chatAsync(any(AiChatRequest.class)))
+                .thenReturn(Mono.error(new RuntimeException("async boom")));
+
+        ResponseEntity<ApiResponse<AiChatResponse>> result =
+                aiController.chatAsync(request, null).block();
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(result.getBody()).isNotNull();
+        assertThat(result.getBody().isSuccess()).isFalse();
+        assertThat(result.getBody().getMessage()).isEqualTo("Failed to process async chat request");
+    }
+
+    @Test
+    void testChatStreamEndpointSuccess() {
+        AiChatRequest request = AiChatRequest.builder().message("hi").build();
+        AiChatResponse chunk = AiChatResponse.builder().content("chunk").requestId("r1").build();
+        when(aiService.chatStream(any(AiChatRequest.class))).thenReturn(Flux.just(chunk));
+
+        List<AiChatResponse> chunks = aiController.chatStream(request, null).collectList().block();
+
+        assertThat(chunks).hasSize(1);
+        assertThat(chunks.get(0).getContent()).isEqualTo("chunk");
+    }
+
+    @Test
+    void testChatStreamEndpointPropagatesError() {
+        AiChatRequest request = AiChatRequest.builder().message("hi").build();
+        when(aiService.chatStream(any(AiChatRequest.class)))
+                .thenReturn(Flux.error(new RuntimeException("stream boom")));
+
+        Flux<AiChatResponse> flux = aiController.chatStream(request, null);
+
+        assertThatThrownBy(() -> flux.collectList().block())
+                .hasMessageContaining("stream boom");
     }
 }

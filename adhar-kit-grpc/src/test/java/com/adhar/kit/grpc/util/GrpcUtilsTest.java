@@ -186,5 +186,146 @@ class GrpcUtilsTest {
         assertEquals("IllegalArgumentException",
             metadata.get(Metadata.Key.of("error-type", Metadata.ASCII_STRING_MARSHALLER)));
     }
+
+    @Test
+    void testCreateErrorMetadata_NullMessage() {
+        Exception exception = new RuntimeException();
+
+        Metadata metadata = GrpcUtils.createErrorMetadata(exception);
+
+        assertEquals("Unknown error",
+            metadata.get(Metadata.Key.of("error-message", Metadata.ASCII_STRING_MARSHALLER)));
+        assertEquals("RuntimeException",
+            metadata.get(Metadata.Key.of("error-type", Metadata.ASCII_STRING_MARSHALLER)));
+    }
+
+    @Test
+    void testGetAuthorizationToken() {
+        Metadata headers = new Metadata();
+        headers.put(GrpcUtils.AUTHORIZATION_KEY, "Bearer token");
+
+        assertEquals("Bearer token", GrpcUtils.getAuthorizationToken(headers));
+    }
+
+    @Test
+    void testGetAuthorizationToken_Missing() {
+        assertNull(GrpcUtils.getAuthorizationToken(new Metadata()));
+    }
+
+    @Test
+    void testAddUserId() {
+        Metadata headers = new Metadata();
+
+        GrpcUtils.addUserId(headers, "user-1");
+
+        assertEquals("user-1", headers.get(GrpcUtils.USER_ID_KEY));
+    }
+
+    @Test
+    void testAddUserId_Null_DoesNotAdd() {
+        Metadata headers = new Metadata();
+
+        GrpcUtils.addUserId(headers, null);
+
+        assertNull(headers.get(GrpcUtils.USER_ID_KEY));
+    }
+
+    @Test
+    void testAddTenantId() {
+        Metadata headers = new Metadata();
+
+        GrpcUtils.addTenantId(headers, "tenant-1");
+
+        assertEquals("tenant-1", headers.get(GrpcUtils.TENANT_ID_KEY));
+    }
+
+    @Test
+    void testAddTenantId_Null_DoesNotAdd() {
+        Metadata headers = new Metadata();
+
+        GrpcUtils.addTenantId(headers, null);
+
+        assertNull(headers.get(GrpcUtils.TENANT_ID_KEY));
+    }
+
+    @Test
+    void testAddAuthorizationToken() {
+        Metadata headers = new Metadata();
+
+        GrpcUtils.addAuthorizationToken(headers, "Bearer abc");
+
+        assertEquals("Bearer abc", headers.get(GrpcUtils.AUTHORIZATION_KEY));
+    }
+
+    @Test
+    void testAddAuthorizationToken_Null_DoesNotAdd() {
+        Metadata headers = new Metadata();
+
+        GrpcUtils.addAuthorizationToken(headers, null);
+
+        assertNull(headers.get(GrpcUtils.AUTHORIZATION_KEY));
+    }
+
+    @Test
+    void testExceptionToStatus_NullPointerException() {
+        Status status = GrpcUtils.exceptionToStatus(new NullPointerException("npe"));
+
+        assertEquals(Status.Code.INVALID_ARGUMENT, status.getCode());
+        assertEquals("Required field is null", status.getDescription());
+    }
+
+    @Test
+    void testExceptionToStatus_UnsupportedOperationException() {
+        Status status = GrpcUtils.exceptionToStatus(new UnsupportedOperationException("nope"));
+
+        assertEquals(Status.Code.UNIMPLEMENTED, status.getCode());
+    }
+
+    @Test
+    void testExceptionToStatus_TimeoutNamedException() {
+        Status status = GrpcUtils.exceptionToStatus(new java.util.concurrent.TimeoutException("slow"));
+
+        assertEquals(Status.Code.DEADLINE_EXCEEDED, status.getCode());
+    }
+
+    @Test
+    void testExceptionToStatus_NotFoundNamedException() {
+        Status status = GrpcUtils.exceptionToStatus(new ResourceNotFoundException());
+
+        assertEquals(Status.Code.NOT_FOUND, status.getCode());
+    }
+
+    @Test
+    void testExceptionToStatus_AlreadyExistsNamedException() {
+        Status status = GrpcUtils.exceptionToStatus(new EntityAlreadyExistsException());
+
+        assertEquals(Status.Code.ALREADY_EXISTS, status.getCode());
+    }
+
+    @Test
+    void testExceptionToStatus_StatusRuntimeException_PreservesStatus() {
+        Status status = GrpcUtils.exceptionToStatus(
+                Status.PERMISSION_DENIED.withDescription("no").asRuntimeException());
+
+        assertEquals(Status.Code.PERMISSION_DENIED, status.getCode());
+    }
+
+    @Test
+    void testIsRetryableStatus_ResourceExhausted_And_Aborted() {
+        assertTrue(GrpcUtils.isRetryableStatus(Status.RESOURCE_EXHAUSTED));
+        assertTrue(GrpcUtils.isRetryableStatus(Status.ABORTED));
+    }
+
+    @Test
+    void testIsIdempotentMethod_SearchAndQuery() {
+        assertTrue(GrpcUtils.isIdempotentMethod("SearchProducts"));
+        assertTrue(GrpcUtils.isIdempotentMethod("QueryOrders"));
+    }
+
+    private static class ResourceNotFoundException extends RuntimeException {
+    }
+
+    private static class EntityAlreadyExistsException extends RuntimeException {
+    }
 }
 

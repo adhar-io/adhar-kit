@@ -245,7 +245,7 @@ public class RabbitMQMessageListener implements MessageListener {
         }
 
         // Create a container for the listener
-        SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
+        SimpleMessageListenerContainer container = createListenerContainer();
         container.setQueueNames(group);
         container.setPrefetchCount(properties.getRabbitmq().getListener().getPrefetchCount());
         container.setConcurrentConsumers(properties.getRabbitmq().getListener().getConcurrency());
@@ -266,6 +266,19 @@ public class RabbitMQMessageListener implements MessageListener {
         containers.put(consumerId, container);
 
         log.debug("Registered RabbitMQ message handler for queue {} with consumer ID {}", group, consumerId);
+    }
+
+    /**
+     * Creates a new {@link SimpleMessageListenerContainer} bound to the configured
+     * connection factory.
+     * <p>
+     * Exposed as a factory method to provide a seam for testing and to allow
+     * subclasses to customize container creation.
+     *
+     * @return a new listener container
+     */
+    public SimpleMessageListenerContainer createListenerContainer() {
+        return new SimpleMessageListenerContainer(connectionFactory);
     }
 
     /**

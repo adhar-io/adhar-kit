@@ -5,8 +5,10 @@ import com.adhar.adharkit.logging.encoder.MaskingJsonEncoder;
 import com.adhar.adharkit.logging.filter.MdcLoggingFilter;
 import com.adhar.adharkit.logging.properties.AdharLoggingProperties;
 import com.adhar.adharkit.logging.util.AdharLogger;
+import com.adhar.adharkit.logging.util.LoggingUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.tracing.Tracer;
+import org.springframework.beans.factory.ObjectProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -164,6 +166,21 @@ public class AdharLoggingAutoConfiguration {
     public AdharLogger adharLogger(ObjectMapper objectMapper) {
         log.info("Creating AdharLogger bean without Tracer");
         return new AdharLogger(properties, null, objectMapper);
+    }
+
+    /**
+     * Creates a {@link LoggingUtils} bean for programmatic access to correlation
+     * IDs, MDC management and tracing helpers. Uses the {@link Tracer} when one is
+     * available on the classpath/context.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public LoggingUtils loggingUtils(ObjectProvider<Tracer> tracerProvider) {
+        Tracer tracer = tracerProvider.getIfAvailable();
+        log.debug("Creating LoggingUtils bean (tracer present: {})", tracer != null);
+        return tracer != null
+                ? new LoggingUtils(properties, tracer)
+                : new LoggingUtils(properties);
     }
 
     /**

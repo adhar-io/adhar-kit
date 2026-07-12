@@ -139,16 +139,16 @@ public class RabbitMQMessagePublisher implements MessagePublisher {
                         }
                     }
                 });
-            } else {
-                // If publisher confirms are not enabled, we assume success
-                result.complete(true);
             }
 
             rabbitTemplate.send(exchange, routing, message, correlationData);
             log.debug("Published message to RabbitMQ exchange {} with routing key {}: {}", exchange, routing, correlationId);
 
             if (!properties.getRabbitmq().getPublisher().isConfirms()) {
-                // If publisher confirms are not enabled, we complete the future immediately
+                // Publisher confirms are not enabled: the send above completed without
+                // throwing, so the publish is successful. Complete only after the send
+                // so a send failure is reported as false (via the catch block below)
+                // rather than being masked by an early completion.
                 result.complete(true);
             }
         } catch (Exception e) {

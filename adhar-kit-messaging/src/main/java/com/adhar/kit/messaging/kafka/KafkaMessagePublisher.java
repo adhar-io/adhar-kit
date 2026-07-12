@@ -187,7 +187,9 @@ public class KafkaMessagePublisher implements MessagePublisher {
         if (properties.getCommon().isTraceEnabled()) {
             String messageId = UUID.randomUUID().toString();
             builder.setHeader("messageId", messageId);
-            builder.setHeader("timestamp", System.currentTimeMillis());
+            // Note: "timestamp" is a reserved, read-only header in Spring Messaging
+            // (MessageHeaders.TIMESTAMP), so a custom header name is used instead.
+            builder.setHeader("messageTimestamp", System.currentTimeMillis());
         }
 
         return builder.build();

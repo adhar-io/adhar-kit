@@ -40,6 +40,11 @@ class MaskingJsonEncoderTest {
         
         // Create an appender that uses our encoder and writes to our output stream
         LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+        // The encoder is a lifecycle component (CompositeJsonEncoder); it must be
+        // started before it emits any bytes, and OutputStreamAppender does not start
+        // it for us.
+        encoder.setContext(context);
+        encoder.start();
         appender = new OutputStreamAppender<>();
         appender.setContext(context);
         appender.setEncoder(encoder);
@@ -199,11 +204,10 @@ class MaskingJsonEncoderTest {
         // Given
         String message = null;
         
-        // When
-        LoggingEvent event = new LoggingEvent();
-        event.setLevel(Level.INFO);
-        event.setMessage(message);
-        event.setLoggerName(logger.getName());
+        // When - build a fully-initialised event (timestamp, context, thread) so the
+        // encoder has a realistic event to render, with a null message.
+        LoggingEvent event = new LoggingEvent(
+                Logger.FQCN, logger, Level.INFO, message, null, null);
         appender.doAppend(event);
         appender.stop();
         

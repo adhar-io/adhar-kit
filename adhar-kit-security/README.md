@@ -3,7 +3,7 @@
 **Comprehensive security for enterprise applications**
 
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.java.net/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.2-brightgreen.svg)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.0-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![Quarkus](https://img.shields.io/badge/Quarkus-3.17+-blue.svg)](https://quarkus.io/)
 [![Micronaut](https://img.shields.io/badge/Micronaut-4.8+-blue.svg)](https://micronaut.io/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -34,7 +34,7 @@ A comprehensive security starter for enterprise applications based on Spring Sec
 ### Prerequisites
 
 - Java 25 or higher
-- Spring Boot 4.0.2 or higher
+- Spring Boot 4.1.0 or higher
 
 ### Installation
 

@@ -278,6 +278,14 @@ public class LoggingUtils {
                     MDC.put(field, parentId);
                 }
             }
+
+            if (properties.getTracing().isIncludeSampled()) {
+                Boolean sampled = currentSpan.context().sampled();
+                String field = properties.getTracing().getSampledField();
+                if (sampled != null && field != null) {
+                    MDC.put(field, String.valueOf(sampled));
+                }
+            }
         }
     }
 
@@ -288,8 +296,19 @@ public class LoggingUtils {
      * @return The trace ID that was set
      */
     public String setTraceId(String traceId) {
-        if (properties.getTracing() == null || !properties.getTracing().isEnabled() || traceId == null) {
+        if (properties.getTracing() == null || !properties.getTracing().isEnabled()) {
             return traceId;
+        }
+
+        // Fall back to the current span's trace ID when none is provided.
+        if (traceId == null && tracer != null) {
+            Span currentSpan = tracer.currentSpan();
+            if (currentSpan != null && currentSpan.context() != null) {
+                traceId = currentSpan.context().traceId();
+            }
+        }
+        if (traceId == null) {
+            return null;
         }
 
         String field = properties.getTracing().getTraceIdField();
@@ -306,8 +325,19 @@ public class LoggingUtils {
      * @return The span ID that was set
      */
     public String setSpanId(String spanId) {
-        if (properties.getTracing() == null || !properties.getTracing().isEnabled() || spanId == null) {
+        if (properties.getTracing() == null || !properties.getTracing().isEnabled()) {
             return spanId;
+        }
+
+        // Fall back to the current span's ID when none is provided.
+        if (spanId == null && tracer != null) {
+            Span currentSpan = tracer.currentSpan();
+            if (currentSpan != null && currentSpan.context() != null) {
+                spanId = currentSpan.context().spanId();
+            }
+        }
+        if (spanId == null) {
+            return null;
         }
 
         String field = properties.getTracing().getSpanIdField();

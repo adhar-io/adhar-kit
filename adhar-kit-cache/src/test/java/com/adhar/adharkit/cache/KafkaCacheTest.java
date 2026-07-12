@@ -19,9 +19,10 @@ import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -39,13 +40,17 @@ import static org.awaitility.Awaitility.await;
  * <p>
  * This test class uses Testcontainers to start a Kafka container for testing.
  */
+// Close this context (and its Kafka producer/consumer connections) after the
+// class so they do not linger against the stopped Kafka container and disturb
+// sibling container-backed tests sharing Docker and Netty resources.
 @SpringBootTest
 @Testcontainers
 @EnableCaching
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public class KafkaCacheTest {
 
     @Container
-    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.3.0"));
+    static ConfluentKafkaContainer kafka = new ConfluentKafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
 
     @Autowired
     private CacheManager cacheManager;
@@ -67,10 +72,8 @@ public class KafkaCacheTest {
     @Configuration
     @ImportAutoConfiguration(AdharCacheAutoConfiguration.class)
     static class TestConfig {
-        @Bean
-        public AdharCacheProperties adharCacheProperties() {
-            return new AdharCacheProperties();
-        }
+        // AdharCacheProperties is provided by @EnableConfigurationProperties on
+        // AdharCacheAutoConfiguration - no manual bean needed.
 
         @Bean
         public ProducerFactory<String, Object> kafkaProducerFactory() {

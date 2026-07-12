@@ -45,10 +45,13 @@ class KafkaMessagePublisherTest {
 
     @BeforeEach
     void setUp() {
-        when(properties.getKafka()).thenReturn(kafkaProperties);
-        when(properties.getCommon()).thenReturn(commonProperties);
-        when(kafkaProperties.getDefaultTopic()).thenReturn(defaultTopic);
-        when(commonProperties.isTraceEnabled()).thenReturn(true);
+        // Shared @BeforeEach stubs: the default-topic getters are only used by the tests that
+        // publish without an explicit destination, so they are lenient to avoid
+        // UnnecessaryStubbingException under Mockito strict stubbing.
+        lenient().when(properties.getKafka()).thenReturn(kafkaProperties);
+        lenient().when(properties.getCommon()).thenReturn(commonProperties);
+        lenient().when(kafkaProperties.getDefaultTopic()).thenReturn(defaultTopic);
+        lenient().when(commonProperties.isTraceEnabled()).thenReturn(true);
 
         publisher = new KafkaMessagePublisher(kafkaTemplate, properties);
     }
@@ -143,10 +146,13 @@ class KafkaMessagePublisherTest {
     }
 
     @Test
-    void testPublishWithInterruptedException() {
-        // Mock the KafkaTemplate to throw an InterruptedException
-        CompletableFuture<SendResult<String, Object>> future = new CompletableFuture<>();
-        future.completeExceptionally(new InterruptedException("Test exception"));
+    @SuppressWarnings("unchecked")
+    void testPublishWithInterruptedException() throws Exception {
+        // A CompletableFuture completed exceptionally with an InterruptedException would surface
+        // as an ExecutionException from get(); to genuinely exercise the InterruptedException
+        // branch we mock the future so that get() throws InterruptedException directly.
+        CompletableFuture<SendResult<String, Object>> future = mock(CompletableFuture.class);
+        when(future.get()).thenThrow(new InterruptedException("Test exception"));
         when(kafkaTemplate.send(any(Message.class))).thenReturn(future);
 
         // Call the method

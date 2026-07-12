@@ -52,14 +52,15 @@ class CloudEventAdapterTest {
         assertEquals(message.getId(), cloudEvent.getId());
         assertEquals(source, cloudEvent.getSource());
         assertEquals(type, cloudEvent.getType());
-        assertEquals("1.0", cloudEvent.getSpecVersion());
+        assertEquals("1.0", cloudEvent.getSpecVersion().toString());
         assertEquals("application/json", cloudEvent.getDataContentType());
         assertEquals(URI.create("urn:adhar:schema:test"), cloudEvent.getDataSchema());
         assertEquals(subject, cloudEvent.getSubject());
         assertNotNull(cloudEvent.getData());
 
-        // Verify extension
-        assertEquals("custom-value", cloudEvent.getExtension("custom-header"));
+        // Verify extension (header keys are normalized to CloudEvents-compliant
+        // lowercase-alphanumeric extension names)
+        assertEquals("custom-value", cloudEvent.getExtension("customheader"));
     }
 
     @Test
@@ -81,7 +82,7 @@ class CloudEventAdapterTest {
                 .withDataContentType("application/json")
                 .withDataSchema(URI.create("urn:adhar:schema:test"))
                 .withData(payload.getBytes())
-                .withExtension("custom-extension", "custom-value")
+                .withExtension("customextension", "custom-value")
                 .build();
 
         // Create adapter and convert to Message
@@ -104,7 +105,7 @@ class CloudEventAdapterTest {
         assertEquals(URI.create("urn:adhar:schema:test").toString(), headers.get("ce-dataschema"));
         assertEquals(subject, headers.get("ce-subject"));
         assertNotNull(headers.get("ce-time"));
-        assertEquals("custom-value", headers.get("custom-extension"));
+        assertEquals("custom-value", headers.get("customextension"));
     }
 
     @Test
@@ -137,12 +138,12 @@ class CloudEventAdapterTest {
         assertEquals(originalMessage.getId(), cloudEvent.getId());
         assertEquals(originalMessage.getSource(), cloudEvent.getSource());
         assertEquals(originalMessage.getType(), cloudEvent.getType());
-        assertEquals(originalMessage.getSpecVersion(), cloudEvent.getSpecVersion());
+        assertEquals(originalMessage.getSpecVersion(), cloudEvent.getSpecVersion().toString());
         assertEquals(originalMessage.getDataContentType(), cloudEvent.getDataContentType());
         assertEquals(originalMessage.getDataSchema(), cloudEvent.getDataSchema());
         assertEquals(originalMessage.getSubject(), cloudEvent.getSubject());
 
-        // Verify the headers are preserved
-        assertEquals("custom-value", convertedMessage.getHeaders().get("custom-header"));
+        // Verify the headers are preserved (normalized to a CloudEvents-compliant name)
+        assertEquals("custom-value", convertedMessage.getHeaders().get("customheader"));
     }
 }

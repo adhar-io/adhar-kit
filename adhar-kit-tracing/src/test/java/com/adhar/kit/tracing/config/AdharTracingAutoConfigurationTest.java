@@ -170,9 +170,9 @@ class AdharTracingAutoConfigurationTest {
         contextRunner
                 .withPropertyValues(
                         "adhar.tracing.enabled=true",
-                        "adhar.tracing.controller.enabled=true",
-                        "adhar.tracing.controller.trace-http-clients=false",
-                        "adhar.tracing.controller.include-request-headers=true"
+                        "adhar.tracing.web.enabled=true",
+                        "adhar.tracing.web.trace-http-clients=false",
+                        "adhar.tracing.web.include-request-headers=true"
                 )
                 .run(context -> {
                     // Verify controller tracing configuration

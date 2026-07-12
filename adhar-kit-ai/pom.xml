@@ -14,31 +14,10 @@
     <description>AdharKit AI foundation with Spring AI and enterprise best practices</description>
 
     <properties>
-        <spring-ai.version>1.0.0-SNAPSHOT</spring-ai.version>
-        <langchain4j.version>1.0.0</langchain4j.version>
+        <!-- Spring AI versions are managed by the spring-ai-bom (2.0.0) imported
+             through adhar-kit-bom - do not pin them here. -->
         <!-- TODO: Increase to 0.80 once more tests are added -->
-        <jacoco.minimum.coverage>0.20</jacoco.minimum.coverage>
     </properties>
-
-    <repositories>
-        <repository>
-            <id>spring-milestones</id>
-            <name>Spring Milestones</name>
-            <url>https://repo.spring.io/milestone</url>
-            <snapshots>
-                <enabled>false</enabled>
-            </snapshots>
-        </repository>
-        <repository>
-            <id>spring-snapshots</id>
-            <name>Spring Snapshots</name>
-            <url>https://repo.spring.io/snapshot</url>
-            <releases>
-                <enabled>false</enabled>
-            </releases>
-        </repository>
-    </repositories>
-
 
     <dependencies>
         <!-- Spring Boot Core -->
@@ -70,33 +49,34 @@
             <artifactId>spring-boot-starter-aspectj</artifactId>
         </dependency>
 
-        <!-- Spring AI -->
+        <!-- Spring AI 2.0 (versions managed by spring-ai-bom via adhar-kit-bom) -->
+        <!-- OpenAI models (chat, embedding, image, audio) -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
-            <version>${spring-ai.version}</version>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
+        <!-- Ollama for local/self-hosted models -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-ollama-spring-boot-starter</artifactId>
-            <version>${spring-ai.version}</version>
+            <artifactId>spring-ai-starter-model-ollama</artifactId>
         </dependency>
+        <!-- Anthropic (Claude) models - enterprise default for the latest models.
+             Replaces the Azure OpenAI starter removed in Spring AI 2.0. -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-azure-openai-spring-boot-starter</artifactId>
-            <version>${spring-ai.version}</version>
+            <artifactId>spring-ai-starter-model-anthropic</artifactId>
         </dependency>
+        <!-- Core vector store abstraction (optional) -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-vector-store</artifactId>
-            <version>${spring-ai.version}</version>
             <optional>true</optional>
         </dependency>
-        <!-- Commented out until available in repository
+        <!-- Redis-backed vector store (optional)
         <dependency>
             <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-vectordb-redis-spring-boot-starter</artifactId>
-            <version>${spring-ai.version}</version>
+            <artifactId>spring-ai-starter-vector-store-redis</artifactId>
+            <optional>true</optional>
         </dependency>
         -->
 
@@ -172,7 +152,6 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-test</artifactId>
-            <version>${spring-ai.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

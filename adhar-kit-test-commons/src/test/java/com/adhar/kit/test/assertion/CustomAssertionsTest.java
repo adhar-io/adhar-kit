@@ -258,6 +258,12 @@ class CustomAssertionsTest {
     }
 
     @Test
+    @DisplayName("Should be instantiable (utility class default constructor)")
+    void testConstructor() {
+        assertNotNull(new CustomAssertions(), "CustomAssertions should be instantiable");
+    }
+
+    @Test
     @DisplayName("Should throw when properties differ")
     void testAssertSameProperties_Failure() {
         // Given

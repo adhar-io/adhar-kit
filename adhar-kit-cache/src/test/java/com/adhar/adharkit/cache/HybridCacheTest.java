@@ -12,10 +12,11 @@ import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
+import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
@@ -33,9 +34,13 @@ import static org.awaitility.Awaitility.await;
  * It demonstrates how the cache starter can use Redis as the primary cache backend and
  * Kafka for cache synchronization between instances.
  */
+// Close this context (and its Redis/Kafka connections) after the class so they
+// do not linger and reconnect-storm against the stopped containers, which would
+// otherwise destabilize the shared Netty event loop used by sibling tests.
 @SpringBootTest
 @Testcontainers
 @EnableCaching
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public class HybridCacheTest {
 
     @Container
@@ -43,7 +48,7 @@ public class HybridCacheTest {
             .withExposedPorts(6379);
 
     @Container
-    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.3.0"));
+    static ConfluentKafkaContainer kafka = new ConfluentKafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
 
     @Autowired
     private CacheManager cacheManager;
@@ -68,13 +73,11 @@ public class HybridCacheTest {
     /**
      * Test configuration for hybrid cache.
      */
+    // AdharCacheProperties is provided by @EnableConfigurationProperties on the
+    // imported auto-configurations - no manual bean needed.
     @Configuration
     @ImportAutoConfiguration({AdharCacheAutoConfiguration.class, RedisConfig.class})
     static class TestConfig {
-        @Bean
-        public AdharCacheProperties adharCacheProperties() {
-            return new AdharCacheProperties();
-        }
     }
 
     @Test

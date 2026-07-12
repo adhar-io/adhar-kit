@@ -17,15 +17,25 @@
 
     <properties>
         <java.version>25</java.version>
-        <quarkus.version>3.21.0</quarkus.version>
-        <micronaut.version>4.8.0</micronaut.version>
+        <quarkus.version>3.37.0</quarkus.version>
+        <micronaut.version>5.0.2</micronaut.version>
 
-        <logstash-logback-encoder.version>8.1</logstash-logback-encoder.version>
+        <logstash-logback-encoder.version>9.0</logstash-logback-encoder.version>
         <janino.version>3.1.12</janino.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <!-- Pin Spring Framework to the Spring Boot 4.1.0 line (7.0.8) FIRST so the
+                 Quarkus and Micronaut BOMs below do not drag in Spring 6.x (whose bundled
+                 ASM cannot parse Java 25 bytecode). First-declared wins in dependencyManagement. -->
+            <dependency>
+                <groupId>org.springframework</groupId>
+                <artifactId>spring-framework-bom</artifactId>
+                <version>7.0.8</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-bom</artifactId>
@@ -81,15 +91,35 @@
         </dependency>
 
         <!-- Quarkus (Optional) -->
+        <!-- Exclude the jboss-logmanager SLF4J binding so logback stays the sole
+             SLF4J provider; otherwise LoggerFactory.getILoggerFactory() may return
+             the jboss factory and the logback-based code/tests fail with a
+             ClassCastException to ch.qos.logback.classic.LoggerContext. -->
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
             <optional>true</optional>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.jboss.slf4j</groupId>
+                    <artifactId>slf4j-jboss-logmanager</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-logging-json</artifactId>
             <optional>true</optional>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.jboss.slf4j</groupId>
+                    <artifactId>slf4j-jboss-logmanager</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.jboss.logmanager</groupId>
+                    <artifactId>jboss-logmanager</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Micronaut (Optional) -->
@@ -112,6 +142,14 @@
             <groupId>net.logstash.logback</groupId>
             <artifactId>logstash-logback-encoder</artifactId>
             <version>${logstash-logback-encoder.version}</version>
+        </dependency>
+        <!-- Jackson 2 (Databind) for this module's ObjectMapper usage. As of
+             logstash-logback-encoder 9.x the encoder migrated to Jackson 3
+             (tools.jackson), so Jackson 2 is no longer pulled transitively.
+             Version is managed by Spring Boot 4.1 (jackson-2-bom). -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>

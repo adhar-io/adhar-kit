@@ -1,6 +1,8 @@
 package com.adhar.kit.grpc.server;
 
 import com.adhar.kit.grpc.config.GrpcProperties;
+import io.grpc.BindableService;
+import io.grpc.ServerServiceDefinition;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -122,5 +124,38 @@ class AdharGrpcServerTest {
         assertThat(server.isRunning()).isTrue();
 
         server.shutdown();
+    }
+
+    @Test
+    void addService_registersService_andStartsWithInterceptors() throws IOException {
+        GrpcProperties properties = new GrpcProperties();
+        properties.getServer().setPort(0);
+        properties.getServer().setEnableReflection(false);
+        properties.getServer().setEnableHealthCheck(false);
+        AdharGrpcServer server = new AdharGrpcServer(properties);
+
+        AdharGrpcServer returned = server.addService(new EmptyBindableService());
+
+        // addService returns this for fluent chaining
+        assertThat(returned).isSameAs(server);
+
+        // start() must register the service (wrapped with logging + exception interceptors)
+        server.start();
+        assertThat(server.isRunning()).isTrue();
+        assertThat(server.getPort()).isGreaterThanOrEqualTo(0);
+
+        server.shutdown();
+        assertThat(server.isRunning()).isFalse();
+    }
+
+    /**
+     * Minimal {@link BindableService} with no methods, allowing the server registration
+     * loop to be exercised without generated protobuf stubs.
+     */
+    private static class EmptyBindableService implements BindableService {
+        @Override
+        public ServerServiceDefinition bindService() {
+            return ServerServiceDefinition.builder("test.EmptyService").build();
+        }
     }
 }

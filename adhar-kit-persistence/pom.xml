@@ -14,7 +14,6 @@
     <description>adhar-persistence-starter</description>
 
     <properties>
-        <jacoco.minimum.coverage>0.30</jacoco.minimum.coverage>
     </properties>
 
     <dependencies>
