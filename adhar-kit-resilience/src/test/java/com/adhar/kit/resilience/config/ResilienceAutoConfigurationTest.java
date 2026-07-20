@@ -39,6 +39,47 @@ class ResilienceAutoConfigurationTest {
     @Autowired(required = false)
     private TimeLimiterRegistry timeLimiterRegistry;
 
+    @Autowired(required = false)
+    private com.adhar.kit.resilience.aspect.ResilienceAspect resilienceAspect;
+
+    @Autowired(required = false)
+    private com.adhar.kit.resilience.service.ResilienceMetricsService metricsService;
+
+    @Autowired(required = false)
+    private com.adhar.kit.resilience.event.ResilienceEventRecorder eventRecorder;
+
+    @Autowired(required = false)
+    private com.adhar.kit.resilience.event.ResilienceEventListeners eventListeners;
+
+    @Autowired(required = false)
+    private com.adhar.kit.resilience.endpoint.ResilienceEndpoint resilienceEndpoint;
+
+    @Test
+    void shouldAutoConfigureResilienceAspect() {
+        assertThat(resilienceAspect).isNotNull();
+    }
+
+    @Test
+    void shouldAutoConfigureMetricsServiceWithEventsSection() {
+        assertThat(metricsService).isNotNull();
+        assertThat(metricsService.getEventMetrics())
+                .containsKeys("circuitBreakerTransitions", "retryAttempts",
+                        "rateLimiterRejections", "bulkheadRejections", "timeLimiterTimeouts");
+    }
+
+    @Test
+    void shouldAutoConfigureEventRecorderAndListeners() {
+        assertThat(eventRecorder).isNotNull();
+        assertThat(eventListeners).isNotNull();
+    }
+
+    @Test
+    void shouldAutoConfigureResilienceEndpoint() {
+        assertThat(resilienceEndpoint).isNotNull();
+        assertThat(resilienceEndpoint.resilience()).containsKeys(
+                "circuitBreakers", "retries", "rateLimiters", "bulkheads", "events");
+    }
+
     @Test
     void shouldAutoConfigureCircuitBreakerRegistry() {
         assertThat(circuitBreakerRegistry).isNotNull();

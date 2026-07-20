@@ -23,6 +23,12 @@ The **adhar-kit-commons** module provides foundational components for building e
 - 📝 **Common Models** - API responses, errors, pagination
 - 🔧 **Enterprise Patterns** - Idempotency, versioning, events
 - ☁️ **CloudEvents Support** - Standard event format and base classes
+- 🚨 **Global Exception Handling** - `SpringGlobalExceptionHandler` (@RestControllerAdvice) mapping the exception hierarchy (via `getHttpStatus()`) plus `@Valid` / constraint violations to `ErrorResponse` bodies
+- 🔁 **Idempotency Runtime** - `IdempotencyAspect` + TTL-aware `InMemoryIdempotencyStore` behind `@Idempotent` (SpEL / `{index}` keys, cached replay, `DuplicateRequestException` for in-flight duplicates)
+- 🧵 **Tenant & Correlation Context** - `TenantContext` / `CorrelationContext` ThreadLocals with servlet filters populating SLF4J MDC from `X-Tenant-ID` / `X-Correlation-ID` / `X-Request-ID` and echoing ids on responses
+- 🏷️ **API Versioning Runtime** - `ApiVersionInterceptor` emitting `Deprecation` / `Sunset` headers for `@ApiVersion` handlers, with optional `X-API-Version` request validation
+- ✅ **`@NotNullOrEmpty` Validator** - Jakarta `ConstraintValidator` for strings, collections, maps, arrays and optionals
+- ⚙️ **Spring Boot Auto-Configuration** - all runtime beans registered conditionally, overridable via `@ConditionalOnMissingBean`, toggleable under `adhar.commons.*`
 
 ### Why Commons?
 
@@ -933,6 +939,13 @@ public class Order {
 ✅ **ApiResponse** - Standardized API responses  
 ✅ **ErrorResponse** - Error handling  
 ✅ **PageResponse** - Pagination support  
+
+### Runtime Support (auto-configured)
+✅ **SpringGlobalExceptionHandler** - HTTP status mapping for the exception hierarchy (400/404/409/422/500/502)  
+✅ **Idempotency** - `IdempotencyStore` + `IdempotencyAspect` for `@Idempotent`  
+✅ **Context Propagation** - `TenantContextFilter` + `CorrelationIdFilter` with MDC support  
+✅ **API Versioning** - `ApiVersionInterceptor` for `@ApiVersion` (Deprecation/Sunset headers)  
+✅ **Toggles** - `adhar.commons.{exception-handler,idempotency,correlation,tenant,api-versioning}.enabled`  
 
 **Perfect for:**
 - 🏢 Enterprise microservices

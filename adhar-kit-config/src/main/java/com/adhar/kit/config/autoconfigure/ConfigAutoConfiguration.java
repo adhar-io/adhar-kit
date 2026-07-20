@@ -5,11 +5,14 @@ import com.adhar.kit.config.encryption.PropertyEncryptor;
 import com.adhar.kit.config.manager.ConfigManager;
 import com.adhar.kit.config.properties.ConfigProperties;
 import com.adhar.kit.config.refresh.ConfigRefreshManager;
+import com.adhar.kit.config.refresh.RefreshConfigBeanPostProcessor;
 import com.adhar.kit.config.source.impl.EnvironmentConfigSource;
 import com.adhar.kit.config.source.impl.FileConfigSource;
+import com.adhar.kit.config.validator.ConfigValidationRunner;
 import com.adhar.kit.config.validator.ConfigValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -88,13 +91,16 @@ public class ConfigAutoConfiguration {
     /**
      * Creates the central ConfigManager bean.
      *
-     * <p>Configures multiple sources based on properties with priority-based merging.</p>
+     * <p>Configures multiple sources based on properties with priority-based merging.
+     * When encryption is enabled, the PropertyEncryptor is attached so ENC(...) values
+     * are transparently decrypted in the read path.</p>
      *
+     * @param encryptorProvider optional PropertyEncryptor (present when encryption is enabled)
      * @return configured ConfigManager instance
      */
     @Bean
     @ConditionalOnMissingBean
-    public ConfigManager configManager() {
+    public ConfigManager configManager(ObjectProvider<PropertyEncryptor> encryptorProvider) {
         ConfigManager manager = new ConfigManager();
 
         // Add environment variable source (highest priority by default)
@@ -111,24 +117,48 @@ public class ConfigAutoConfiguration {
             });
         }
 
+        // Attach encryptor for transparent decryption when encryption is enabled
+        encryptorProvider.ifAvailable(encryptor -> {
+            manager.setEncryptor(encryptor);
+            log.info("ConfigManager linked to PropertyEncryptor for transparent decryption");
+        });
+
         log.info("ConfigManager initialized with {} sources", manager.getHealthStatus().size());
         return manager;
     }
 
     /**
-     * Creates the ConfigFacade singleton accessor bean.
+     * Creates the ConfigFacade singleton accessor bean, linked to the ConfigManager.
      *
-     * <p>Provides a simplified interface for configuration access throughout the application.</p>
+     * <p>Provides a simplified interface for configuration access throughout the application.
+     * All facade lookups and refreshes delegate to the ConfigManager.</p>
      *
-     * @param configManager the config manager to use
+     * @param configManager the config manager to delegate to
      * @return configured ConfigFacade instance
      */
     @Bean
     @ConditionalOnMissingBean
     public ConfigFacade configFacade(ConfigManager configManager) {
         ConfigFacade facade = ConfigFacade.getInstance();
+        facade.setConfigManager(configManager);
         log.info("ConfigFacade initialized and linked to ConfigManager");
         return facade;
+    }
+
+    /**
+     * Creates the BeanPostProcessor that powers the {@code @RefreshConfig} annotation.
+     *
+     * <p>Static so the post-processor is created early without triggering premature
+     * initialization of this configuration class.</p>
+     *
+     * @param configManagerProvider lazy provider for the ConfigManager
+     * @return RefreshConfigBeanPostProcessor instance
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public static RefreshConfigBeanPostProcessor refreshConfigBeanPostProcessor(
+            ObjectProvider<ConfigManager> configManagerProvider) {
+        return new RefreshConfigBeanPostProcessor(configManagerProvider::getObject);
     }
 
     /**
@@ -143,6 +173,25 @@ public class ConfigAutoConfiguration {
         ConfigValidator validator = new ConfigValidator();
         log.info("ConfigValidator initialized - fail-on-error: {}", properties.getValidation().isFailOnError());
         return validator;
+    }
+
+    /**
+     * Creates the startup validation gate.
+     *
+     * <p>Runs ConfigValidator rules (including required/pattern rules declared under
+     * {@code adhar.config.validation}) against the merged configuration during startup
+     * and fails fast when {@code fail-on-error} is true.</p>
+     *
+     * @param configManager the config manager holding merged configuration
+     * @param configValidator the validator carrying the rules
+     * @return ConfigValidationRunner instance
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.config.validation", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public ConfigValidationRunner configValidationRunner(ConfigManager configManager,
+                                                         ConfigValidator configValidator) {
+        return new ConfigValidationRunner(configManager, configValidator, properties.getValidation());
     }
 
     /**
@@ -265,9 +314,11 @@ public class ConfigAutoConfiguration {
             }
 
             String algorithm = encryptionConfig.getAlgorithm();
-            log.info("PropertyEncryptor initialized with algorithm: {}", algorithm);
+            log.info("PropertyEncryptor initialized with algorithm: {} (AES/GCM v2 format, PBKDF2 key derivation)",
+                    algorithm);
 
-            return new PropertyEncryptor(encryptionKey, algorithm);
+            return new PropertyEncryptor(encryptionKey, algorithm,
+                    encryptionConfig.getSalt(), encryptionConfig.getKeyIterations());
         }
 
         /**

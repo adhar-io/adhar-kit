@@ -1,9 +1,13 @@
 package com.adhar.adharkit.logging.properties;
 
+import com.adhar.adharkit.logging.masking.MaskingStrategy;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -86,6 +90,31 @@ public class AdharLoggingProperties {
     private final AspectProperties aspects = new AspectProperties();
 
     /**
+     * Configuration for structured application log events (AppLogEvent).
+     */
+    private final EventProperties events = new EventProperties();
+
+    /**
+     * Configuration for REST API request/response logging.
+     */
+    private final RestApiProperties restApi = new RestApiProperties();
+
+    /**
+     * Configuration for batch job logging.
+     */
+    private final BatchLoggingProperties batch = new BatchLoggingProperties();
+
+    /**
+     * Configuration for performance logging.
+     */
+    private final PerformanceLoggingProperties performance = new PerformanceLoggingProperties();
+
+    /**
+     * Configuration for audit logging.
+     */
+    private final AuditLoggingProperties audit = new AuditLoggingProperties();
+
+    /**
      * Whether Janino is available for conditional processing in logback.
      */
     private boolean janinoAvailable = false;
@@ -140,6 +169,26 @@ public class AdharLoggingProperties {
 
     public AspectProperties getAspects() {
         return aspects;
+    }
+
+    public EventProperties getEvents() {
+        return events;
+    }
+
+    public RestApiProperties getRestApi() {
+        return restApi;
+    }
+
+    public BatchLoggingProperties getBatch() {
+        return batch;
+    }
+
+    public PerformanceLoggingProperties getPerformance() {
+        return performance;
+    }
+
+    public AuditLoggingProperties getAudit() {
+        return audit;
     }
 
     public ConsoleProperties getConsole() {
@@ -668,6 +717,31 @@ public class AdharLoggingProperties {
          */
         private Set<String> additionalKeys = new HashSet<>();
 
+        /**
+         * Strategy used to replace sensitive values (FULL, PARTIAL, HASH).
+         */
+        private MaskingStrategy strategy = MaskingStrategy.FULL;
+
+        /**
+         * Whether to mask credit-card-like number sequences in free text.
+         */
+        private boolean maskCreditCards = true;
+
+        /**
+         * Whether to mask US social security numbers (NNN-NN-NNNN) in free text.
+         */
+        private boolean maskSsn = true;
+
+        /**
+         * Whether to mask e-mail addresses in free text.
+         */
+        private boolean maskEmails = false;
+
+        /**
+         * Additional custom regular expressions whose matches are masked in free text.
+         */
+        private List<String> customPatterns = new ArrayList<>();
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -682,6 +756,46 @@ public class AdharLoggingProperties {
 
         public void setAdditionalKeys(Set<String> additionalKeys) {
             this.additionalKeys = additionalKeys;
+        }
+
+        public MaskingStrategy getStrategy() {
+            return strategy;
+        }
+
+        public void setStrategy(MaskingStrategy strategy) {
+            this.strategy = strategy;
+        }
+
+        public boolean isMaskCreditCards() {
+            return maskCreditCards;
+        }
+
+        public void setMaskCreditCards(boolean maskCreditCards) {
+            this.maskCreditCards = maskCreditCards;
+        }
+
+        public boolean isMaskSsn() {
+            return maskSsn;
+        }
+
+        public void setMaskSsn(boolean maskSsn) {
+            this.maskSsn = maskSsn;
+        }
+
+        public boolean isMaskEmails() {
+            return maskEmails;
+        }
+
+        public void setMaskEmails(boolean maskEmails) {
+            this.maskEmails = maskEmails;
+        }
+
+        public List<String> getCustomPatterns() {
+            return customPatterns;
+        }
+
+        public void setCustomPatterns(List<String> customPatterns) {
+            this.customPatterns = customPatterns;
         }
     }
 
@@ -1271,6 +1385,293 @@ public class AdharLoggingProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+    }
+
+    /**
+     * Properties for structured application log events (AppLogEvent pipeline).
+     */
+    public static class EventProperties {
+        /**
+         * Whether to enable the AppLogEvent publishing pipeline.
+         */
+        private boolean enabled = true;
+
+        /**
+         * Prefix for the dedicated event loggers (e.g. ADHAR_EVENT.BUSINESS).
+         */
+        private String loggerPrefix = "ADHAR_EVENT";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getLoggerPrefix() {
+            return loggerPrefix;
+        }
+
+        public void setLoggerPrefix(String loggerPrefix) {
+            this.loggerPrefix = loggerPrefix;
+        }
+    }
+
+    /**
+     * Properties for REST API request/response logging.
+     */
+    public static class RestApiProperties {
+        /**
+         * Whether to enable REST API logging (filter).
+         */
+        private boolean enabled = true;
+
+        /**
+         * Whether to enable the handler interceptor that logs controller execution.
+         */
+        private boolean interceptorEnabled = true;
+
+        /**
+         * Whether to include request headers (masked) in API log events.
+         */
+        private boolean includeHeaders = false;
+
+        /**
+         * Whether to include the request payload (masked, truncated) in API log events.
+         */
+        private boolean includeRequestPayload = false;
+
+        /**
+         * Whether to include the response payload (masked, truncated) in API log events.
+         */
+        private boolean includeResponsePayload = false;
+
+        /**
+         * Whether to include the query string in API log events.
+         */
+        private boolean includeQueryString = true;
+
+        /**
+         * Maximum number of payload characters captured per request/response.
+         */
+        private int maxPayloadLength = 2048;
+
+        /**
+         * Requests slower than this (milliseconds) are flagged and logged at WARN.
+         */
+        private long slowRequestThresholdMs = 3000;
+
+        /**
+         * Ant-style path patterns excluded from API logging.
+         */
+        private List<String> excludePaths = new ArrayList<>(Arrays.asList(
+                "/actuator/**", "/health/**", "/static/**", "/webjars/**", "/favicon.ico"));
+
+        /**
+         * Header names whose values are always masked in API log events.
+         */
+        private Set<String> maskedHeaders = new HashSet<>(Arrays.asList(
+                "authorization", "cookie", "set-cookie", "proxy-authorization", "x-api-key"));
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public boolean isInterceptorEnabled() {
+            return interceptorEnabled;
+        }
+
+        public void setInterceptorEnabled(boolean interceptorEnabled) {
+            this.interceptorEnabled = interceptorEnabled;
+        }
+
+        public boolean isIncludeHeaders() {
+            return includeHeaders;
+        }
+
+        public void setIncludeHeaders(boolean includeHeaders) {
+            this.includeHeaders = includeHeaders;
+        }
+
+        public boolean isIncludeRequestPayload() {
+            return includeRequestPayload;
+        }
+
+        public void setIncludeRequestPayload(boolean includeRequestPayload) {
+            this.includeRequestPayload = includeRequestPayload;
+        }
+
+        public boolean isIncludeResponsePayload() {
+            return includeResponsePayload;
+        }
+
+        public void setIncludeResponsePayload(boolean includeResponsePayload) {
+            this.includeResponsePayload = includeResponsePayload;
+        }
+
+        public boolean isIncludeQueryString() {
+            return includeQueryString;
+        }
+
+        public void setIncludeQueryString(boolean includeQueryString) {
+            this.includeQueryString = includeQueryString;
+        }
+
+        public int getMaxPayloadLength() {
+            return maxPayloadLength;
+        }
+
+        public void setMaxPayloadLength(int maxPayloadLength) {
+            this.maxPayloadLength = maxPayloadLength;
+        }
+
+        public long getSlowRequestThresholdMs() {
+            return slowRequestThresholdMs;
+        }
+
+        public void setSlowRequestThresholdMs(long slowRequestThresholdMs) {
+            this.slowRequestThresholdMs = slowRequestThresholdMs;
+        }
+
+        public List<String> getExcludePaths() {
+            return excludePaths;
+        }
+
+        public void setExcludePaths(List<String> excludePaths) {
+            this.excludePaths = excludePaths;
+        }
+
+        public Set<String> getMaskedHeaders() {
+            return maskedHeaders;
+        }
+
+        public void setMaskedHeaders(Set<String> maskedHeaders) {
+            this.maskedHeaders = maskedHeaders;
+        }
+    }
+
+    /**
+     * Properties for batch job logging.
+     */
+    public static class BatchLoggingProperties {
+        /**
+         * Whether to enable batch job logging.
+         */
+        private boolean enabled = true;
+
+        /**
+         * A progress event is emitted every N processed items.
+         */
+        private long progressLogInterval = 1000;
+
+        /**
+         * Maximum number of individual item errors logged per job run (further errors are counted only).
+         */
+        private int maxItemErrorsLogged = 10;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public long getProgressLogInterval() {
+            return progressLogInterval;
+        }
+
+        public void setProgressLogInterval(long progressLogInterval) {
+            this.progressLogInterval = progressLogInterval;
+        }
+
+        public int getMaxItemErrorsLogged() {
+            return maxItemErrorsLogged;
+        }
+
+        public void setMaxItemErrorsLogged(int maxItemErrorsLogged) {
+            this.maxItemErrorsLogged = maxItemErrorsLogged;
+        }
+    }
+
+    /**
+     * Properties for performance logging.
+     */
+    public static class PerformanceLoggingProperties {
+        /**
+         * Whether to enable performance logging.
+         */
+        private boolean enabled = true;
+
+        /**
+         * Operations slower than this (milliseconds) are logged as slow at WARN.
+         */
+        private long slowThresholdMs = 1000;
+
+        /**
+         * Whether to emit an event for every recorded operation (not only slow ones).
+         */
+        private boolean logAllOperations = false;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public long getSlowThresholdMs() {
+            return slowThresholdMs;
+        }
+
+        public void setSlowThresholdMs(long slowThresholdMs) {
+            this.slowThresholdMs = slowThresholdMs;
+        }
+
+        public boolean isLogAllOperations() {
+            return logAllOperations;
+        }
+
+        public void setLogAllOperations(boolean logAllOperations) {
+            this.logAllOperations = logAllOperations;
+        }
+    }
+
+    /**
+     * Properties for audit logging.
+     */
+    public static class AuditLoggingProperties {
+        /**
+         * Whether to enable audit event logging.
+         */
+        private boolean enabled = true;
+
+        /**
+         * Whether audit events may carry before/after change values (masked).
+         */
+        private boolean includeChanges = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public boolean isIncludeChanges() {
+            return includeChanges;
+        }
+
+        public void setIncludeChanges(boolean includeChanges) {
+            this.includeChanges = includeChanges;
         }
     }
 }

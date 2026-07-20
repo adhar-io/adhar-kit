@@ -1,6 +1,9 @@
 package com.adhar.kit.resilience.config;
 
 import com.adhar.kit.resilience.aspect.ResilienceAspect;
+import com.adhar.kit.resilience.endpoint.ResilienceEndpoint;
+import com.adhar.kit.resilience.event.ResilienceEventListeners;
+import com.adhar.kit.resilience.event.ResilienceEventRecorder;
 import com.adhar.kit.resilience.service.ResilienceMetricsService;
 import io.github.resilience4j.bulkhead.Bulkhead;
 import io.github.resilience4j.bulkhead.BulkheadConfig;
@@ -33,6 +36,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -277,15 +281,70 @@ public class ResilienceAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.resilience.events", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public ResilienceEventRecorder resilienceEventRecorder() {
+        log.info("Initializing ResilienceEventRecorder");
+        return new ResilienceEventRecorder();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.resilience.events", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public ResilienceEventListeners resilienceEventListeners(
+            CircuitBreakerRegistry circuitBreakerRegistry,
+            RetryRegistry retryRegistry,
+            RateLimiterRegistry rateLimiterRegistry,
+            BulkheadRegistry bulkheadRegistry,
+            TimeLimiterRegistry timeLimiterRegistry,
+            ResilienceEventRecorder resilienceEventRecorder) {
+        log.info("Initializing ResilienceEventListeners");
+        ResilienceEventListeners listeners = new ResilienceEventListeners(
+                circuitBreakerRegistry, retryRegistry, rateLimiterRegistry,
+                bulkheadRegistry, timeLimiterRegistry, resilienceEventRecorder);
+        listeners.register();
+        return listeners;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnProperty(prefix = "adhar.resilience.metrics", name = "enabled", havingValue = "true", matchIfMissing = true)
     public ResilienceMetricsService resilienceMetricsService(
             CircuitBreakerRegistry circuitBreakerRegistry,
             RetryRegistry retryRegistry,
             RateLimiterRegistry rateLimiterRegistry,
-            BulkheadRegistry bulkheadRegistry) {
+            BulkheadRegistry bulkheadRegistry,
+            ObjectProvider<ResilienceEventRecorder> resilienceEventRecorder) {
         log.info("Initializing ResilienceMetricsService");
         return new ResilienceMetricsService(circuitBreakerRegistry, retryRegistry,
-                                           rateLimiterRegistry, bulkheadRegistry);
+                                           rateLimiterRegistry, bulkheadRegistry,
+                                           resilienceEventRecorder.getIfAvailable());
+    }
+
+    /**
+     * Registers the {@code resilience} actuator endpoint when Spring Boot Actuator is
+     * on the classpath. Falls back to a locally constructed metrics service when the
+     * shared one is disabled, so the endpoint remains functional either way.
+     */
+    @Configuration
+    @ConditionalOnClass(name = "org.springframework.boot.actuate.endpoint.annotation.Endpoint")
+    public static class ResilienceEndpointConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnProperty(prefix = "adhar.resilience.endpoint", name = "enabled", havingValue = "true", matchIfMissing = true)
+        public ResilienceEndpoint resilienceEndpoint(
+                CircuitBreakerRegistry circuitBreakerRegistry,
+                RetryRegistry retryRegistry,
+                RateLimiterRegistry rateLimiterRegistry,
+                BulkheadRegistry bulkheadRegistry,
+                ObjectProvider<ResilienceMetricsService> metricsService,
+                ObjectProvider<ResilienceEventRecorder> eventRecorder) {
+            log.info("Initializing Resilience actuator endpoint");
+            ResilienceMetricsService service = metricsService.getIfAvailable(
+                    () -> new ResilienceMetricsService(circuitBreakerRegistry, retryRegistry,
+                            rateLimiterRegistry, bulkheadRegistry, eventRecorder.getIfAvailable()));
+            return new ResilienceEndpoint(service, circuitBreakerRegistry);
+        }
     }
 
     @Configuration

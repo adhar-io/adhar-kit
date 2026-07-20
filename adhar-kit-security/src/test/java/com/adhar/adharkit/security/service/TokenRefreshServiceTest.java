@@ -1,6 +1,7 @@
 package com.adhar.adharkit.security.service;
 
 import com.adhar.kit.security.properties.AdharSecurityProperties;
+import com.adhar.kit.security.service.InMemoryRefreshTokenStore;
 import com.adhar.kit.security.service.TokenRefreshService;
 import com.adhar.kit.security.service.TokenRefreshService.TokenRefreshException;
 import com.adhar.kit.security.service.TokenRefreshService.TokenResponse;
@@ -258,5 +259,71 @@ class TokenRefreshServiceTest {
         assertThat(response.accessTokenExpiresIn()).isEqualTo(1L);
         assertThat(response.refreshTokenExpiresIn()).isEqualTo(2L);
         assertThat(response.tokenType()).isEqualTo("Bearer");
+    }
+
+    @Test
+    void generateAccessTokenEmbedsRolesAndClaims() {
+        TokenRefreshService service = new TokenRefreshService(config(true, true));
+
+        String token = service.generateAccessToken("user-11",
+            new java.util.LinkedHashSet<>(List.of("ADMIN")), Map.of("email", "a@b.com"));
+
+        Claims claims = parse(token);
+        assertThat(claims.getSubject()).isEqualTo("user-11");
+        assertThat(claims.get("type", String.class)).isEqualTo("access");
+        assertThat(claims.get("roles", List.class)).containsExactly("ADMIN");
+        assertThat(claims.get("email", String.class)).isEqualTo("a@b.com");
+    }
+
+    @Test
+    void generateAccessTokenHandlesNullRolesAndClaims() {
+        TokenRefreshService service = new TokenRefreshService(config(true, true));
+
+        String token = service.generateAccessToken("user-12", null, null);
+
+        Claims claims = parse(token);
+        assertThat(claims.getSubject()).isEqualTo("user-12");
+        assertThat(claims.containsKey("roles")).isFalse();
+    }
+
+    @Test
+    void validateTokenAcceptsValidAndRejectsInvalid() {
+        TokenRefreshService service = new TokenRefreshService(config(true, true));
+        String valid = service.generateAccessToken("user-13", null, null);
+        String expired = manualToken("user-13", "access", null, -60, null);
+
+        assertThat(service.validateToken(valid)).isTrue();
+        assertThat(service.validateToken(expired)).isFalse();
+        assertThat(service.validateToken("garbage")).isFalse();
+        assertThat(service.validateToken(null)).isFalse();
+        assertThat(service.validateToken("  ")).isFalse();
+    }
+
+    @Test
+    void extractSubjectReturnsSubjectOrNull() {
+        TokenRefreshService service = new TokenRefreshService(config(true, true));
+        String token = service.generateAccessToken("user-14", null, null);
+
+        assertThat(service.extractSubject(token)).isEqualTo("user-14");
+        assertThat(service.extractSubject("garbage")).isNull();
+        assertThat(service.extractSubject(null)).isNull();
+        assertThat(service.extractSubject("")).isNull();
+    }
+
+    @Test
+    void customRefreshTokenStoreIsUsed() {
+        InMemoryRefreshTokenStore store = new InMemoryRefreshTokenStore();
+        TokenRefreshService service = new TokenRefreshService(config(true, true), store);
+
+        TokenResponse pair = service.createTokenPair("user-15", Map.of());
+
+        // The refresh token is tracked in the injected store.
+        String familyId = parse(pair.refreshToken()).get("family", String.class);
+        assertThat(store.isTokenInFamily(familyId, pair.refreshToken())).isTrue();
+
+        // Revocation goes through the injected store as well.
+        service.revokeRefreshToken(pair.refreshToken());
+        assertThat(store.isTokenRevoked(pair.refreshToken())).isTrue();
+        assertThat(store.isTokenInFamily(familyId, pair.refreshToken())).isFalse();
     }
 }

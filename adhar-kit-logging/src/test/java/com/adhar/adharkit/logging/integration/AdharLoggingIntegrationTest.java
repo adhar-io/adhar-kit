@@ -130,10 +130,12 @@ class AdharLoggingIntegrationTest {
                         "adhar.logging.mdc.enabled=true"
                 )
                 .run(context -> {
-                    // Unwrap the filter from its FilterRegistrationBean
+                    // Unwrap the filter from its FilterRegistrationBean (fetch by bean name:
+                    // the context also registers the RestApiLoggingFilter registration)
                     @SuppressWarnings("unchecked")
                     FilterRegistrationBean<MdcLoggingFilter> registration =
-                            context.getBean(FilterRegistrationBean.class);
+                            (FilterRegistrationBean<MdcLoggingFilter>)
+                                    context.getBean("mdcLoggingFilter", FilterRegistrationBean.class);
                     MdcLoggingFilter filter = registration.getFilter();
                     
                     // Create mock request and response

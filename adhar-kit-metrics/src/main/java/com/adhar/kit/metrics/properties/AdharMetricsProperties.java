@@ -63,6 +63,11 @@ public class AdharMetricsProperties {
     private KubernetesProperties kubernetes = new KubernetesProperties();
 
     /**
+     * Configuration for SLO (Service Level Objective) tracking.
+     */
+    private SloProperties slo = new SloProperties();
+
+    /**
      * Configuration properties for Prometheus metrics.
      */
     @Data
@@ -252,6 +257,35 @@ public class AdharMetricsProperties {
          * Whether to enable database metrics.
          */
         private boolean database = true;
+    }
+
+    /**
+     * Configuration properties for SLO (Service Level Objective) tracking.
+     * <p>
+     * SLO targets are configured as {@code adhar.metrics.slo.targets.<name>=<availability>}
+     * (e.g. {@code adhar.metrics.slo.targets.checkout=0.999}). The special target name
+     * {@code global} applies to every recorded request.
+     * </p>
+     */
+    @Data
+    public static class SloProperties {
+
+        /**
+         * Whether SLO tracking is enabled.
+         */
+        private boolean enabled = true;
+
+        /**
+         * SLO availability objectives keyed by target name (e.g. checkout=0.999).
+         * The special key "global" applies to all requests.
+         */
+        private Map<String, Double> targets = new HashMap<>();
+
+        /**
+         * Length of the rolling window (in seconds) over which the error budget
+         * and burn rate are computed.
+         */
+        private long windowSeconds = 3600;
     }
 
     /**

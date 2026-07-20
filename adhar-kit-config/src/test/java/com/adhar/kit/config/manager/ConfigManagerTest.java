@@ -1,5 +1,6 @@
 package com.adhar.kit.config.manager;
 
+import com.adhar.kit.config.encryption.PropertyEncryptor;
 import com.adhar.kit.config.source.ConfigSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -210,6 +211,66 @@ class ConfigManagerTest {
         source.data.put("key", "v2");
         manager.refreshAll();
         assertThat(manager.getProperty("key")).isEqualTo("v2");
+    }
+
+    @Test
+    void getPropertyDecryptsEncValuesWhenEncryptorSet() {
+        PropertyEncryptor encryptor = new PropertyEncryptor("unit-test-key", "AES", "unit-salt", 10_000);
+        String encrypted = encryptor.encrypt("s3cr3t");
+
+        manager.setEncryptor(encryptor);
+        manager.addSource(new TestSource("file", 100)
+                .with("database.password", encrypted)
+                .with("database.username", "admin"));
+
+        assertThat(manager.getProperty("database.password")).isEqualTo("s3cr3t");
+        assertThat(manager.getProperty("database.password", String.class)).isEqualTo("s3cr3t");
+        assertThat(manager.getRequiredProperty("database.password", String.class)).isEqualTo("s3cr3t");
+        // Non-encrypted values pass through untouched
+        assertThat(manager.getProperty("database.username")).isEqualTo("admin");
+    }
+
+    @Test
+    void getPropertiesWithPrefixDecryptsEncValues() {
+        PropertyEncryptor encryptor = new PropertyEncryptor("unit-test-key", "AES", "unit-salt", 10_000);
+        manager.setEncryptor(encryptor);
+        manager.addSource(new TestSource("file", 100)
+                .with("db.password", encryptor.encrypt("hidden"))
+                .with("db.url", "jdbc:x"));
+
+        Map<String, Object> props = manager.getPropertiesWithPrefix("db.");
+        assertThat(props).containsEntry("db.password", "hidden").containsEntry("db.url", "jdbc:x");
+    }
+
+    @Test
+    void withoutEncryptorEncValuesAreReturnedRaw() {
+        PropertyEncryptor encryptor = new PropertyEncryptor("unit-test-key", "AES", "unit-salt", 10_000);
+        String encrypted = encryptor.encrypt("s3cr3t");
+        manager.addSource(new TestSource("file", 100).with("database.password", encrypted));
+
+        assertThat(manager.getProperty("database.password")).isEqualTo(encrypted);
+    }
+
+    @Test
+    void nonStringValuesBypassDecryption() {
+        PropertyEncryptor encryptor = new PropertyEncryptor("unit-test-key", "AES", "unit-salt", 10_000);
+        manager.setEncryptor(encryptor);
+        manager.addSource(new TestSource("file", 100).with("port", 8080));
+
+        assertThat(manager.getProperty("port")).isEqualTo(8080);
+    }
+
+    @Test
+    void setEncryptorNullDisablesDecryption() {
+        PropertyEncryptor encryptor = new PropertyEncryptor("unit-test-key", "AES", "unit-salt", 10_000);
+        String encrypted = encryptor.encrypt("s3cr3t");
+        manager.addSource(new TestSource("file", 100).with("k", encrypted));
+
+        manager.setEncryptor(encryptor);
+        assertThat(manager.getProperty("k")).isEqualTo("s3cr3t");
+
+        manager.setEncryptor(null);
+        assertThat(manager.getProperty("k")).isEqualTo(encrypted);
     }
 
     @Test

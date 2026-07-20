@@ -61,6 +61,21 @@ The **adhar-kit-health** module provides comprehensive health check capabilities
 - MongoDB health
 - Elasticsearch health
 - gRPC service health
+- Certificate expiry (keystore or TLS endpoint)
+- Thread pool saturation
+- Heap memory usage
+
+✅ **Health Groups & Aggregation**
+- Named groups: `liveness`, `readiness`, `startup`, `default`
+- Worst-of status aggregation: `DOWN` > `OUT_OF_SERVICE` > `UNKNOWN` > `UP`
+- Non-critical indicators degrade the response without failing the group
+
+✅ **Operations**
+- TTL result caching (default 10s) so probe scrapes don't hammer backends
+- Readiness gate with graceful-shutdown draining (`ReadinessStateManager`)
+- Health transition events (`HealthTransitionListener` SPI)
+- Bounded transition history with flapping detection
+- Spring Boot auto-configuration (`AdharHealthAutoConfiguration`), every bean overridable
 
 ✅ **Multi-Framework Support**
 - Spring Boot (@Component)
@@ -587,6 +602,91 @@ public class HealthConfig {
         );
     }
 }
+```
+
+---
+
+## 🧭 Groups, Caching, Readiness Gate & History
+
+### Health Groups + Aggregation
+
+```java
+HealthRegistry registry = new HealthRegistry();
+
+// critical readiness indicator
+registry.register(new DatabaseHealthIndicator(dataSource, config), HealthRegistry.READINESS_GROUP);
+
+// non-critical: reports status but never fails the group (listed under "degraded")
+registry.register(new MemoryHealthIndicator(0.9), false,
+    HealthRegistry.DEFAULT_GROUP, HealthRegistry.LIVENESS_GROUP);
+
+HealthResponse liveness  = registry.checkGroup(HealthRegistry.LIVENESS_GROUP);
+HealthResponse readiness = registry.checkGroup(HealthRegistry.READINESS_GROUP);
+HealthResponse overall   = registry.checkHealth(); // all groups, worst-of aggregation
+```
+
+### TTL Result Caching
+
+```java
+registry.setCacheTtlMillis(10_000); // repeated scrapes within 10s reuse results; 0 disables
+registry.invalidateCache();         // force fresh checks
+```
+
+### Readiness Gate (Graceful Shutdown)
+
+```java
+ReadinessStateManager readiness = new ReadinessStateManager();
+registry.register(readiness, HealthRegistry.READINESS_GROUP);
+readiness.registerShutdownHook();       // JVM shutdown flips gate to not-ready
+readiness.markReady();                  // open the gate after startup
+readiness.markNotReady("Maintenance");  // drain traffic on demand
+```
+
+With Spring, `SpringReadinessLifecycle` opens the gate on `ContextRefreshedEvent` and
+closes it on `ContextClosedEvent` so load balancers drain before shutdown.
+
+### Transition Events & Flapping Detection
+
+```java
+registry.addTransitionListener(t ->
+    log.warn("{} went {} -> {}", t.indicator(), t.from(), t.to()));
+
+List<HealthTransition> history = registry.getHistory().getTransitions("database");
+boolean unstable = registry.isFlapping("database"); // N transitions within window
+```
+
+### Universal Facade
+
+`HealthFacade.getInstance()` now works on every runtime: it uses a framework adapter when
+one is reachable and otherwise falls back to the registry-backed `RegistryHealthService`.
+
+### Spring Boot Auto-Configuration
+
+`AdharHealthAutoConfiguration` wires the registry, `RegistryHealthService`, readiness gate,
+memory/certificate indicators, caching and history from `adhar.health.*` properties.
+All beans are `@ConditionalOnMissingBean`.
+
+```yaml
+adhar:
+  health:
+    cache:
+      enabled: true
+      ttl: 10000            # ms, 0 = disabled
+    memory:
+      enabled: true
+      threshold: 0.90       # heap usage ratio
+    certificate:
+      enabled: true
+      keystore-path: /etc/tls/service.p12
+      keystore-password: changeit
+      warning-days: 30      # DOWN within N days of expiry
+    readiness-gate:
+      enabled: true
+      shutdown-hook: true
+    history:
+      capacity: 100
+      flapping-threshold: 5
+      flapping-window: 60000
 ```
 
 ---

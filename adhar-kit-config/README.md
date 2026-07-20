@@ -29,8 +29,10 @@ Enterprise-grade configuration management for microservices supporting multiple 
 
 ### Core Capabilities
 - ✅ Multi-source configuration with priority-based merging
-- ✅ Dynamic configuration refresh
-- ✅ Property encryption/decryption (AES, DES)
+- ✅ Dynamic configuration refresh (`@RefreshConfig` methods invoked on change)
+- ✅ Property encryption/decryption (AES/GCM with PBKDF2 key derivation; legacy format decrypt supported)
+- ✅ Transparent decryption of `ENC(...)` values in `ConfigManager` reads
+- ✅ Startup validation gate (fail fast on invalid configuration)
 - ✅ Configuration validation with rules
 - ✅ Type-safe configuration binding
 - ✅ Change listeners
@@ -258,6 +260,30 @@ Map<String, Boolean> health = manager.getHealthStatus();
 
 ## 🔄 Dynamic Refresh
 
+### @RefreshConfig Methods
+
+With the starter on the classpath, methods annotated `@RefreshConfig` are automatically
+registered as `ConfigManager` change listeners (via `RefreshConfigBeanPostProcessor`) and
+invoked when watched keys change:
+
+```java
+@Component
+public class ApiClientService {
+
+    // Invoked when either key changes (zero-arg signature)
+    @RefreshConfig(keys = {"api.timeout", "api.retries"}, refreshOnStartup = true)
+    public void rebuildClient() { /* re-read config, rebuild client */ }
+
+    // Invoked with change details for any key under the prefix (3-arg signature)
+    @RefreshConfig(prefix = "cache.")
+    public void onCacheChange(String key, Object oldValue, Object newValue) { /* ... */ }
+}
+```
+
+Matching rules: `keys` matches exact keys, `prefix` matches keys starting with the prefix,
+and an annotation with neither watches every change. `refreshOnStartup = true` invokes
+zero-argument methods once at bean initialization.
+
 ### Auto-refresh on Configuration Change
 
 ```java
@@ -310,14 +336,43 @@ public void refreshConfiguration() {
 
 ## 🔐 Property Encryption
 
+### Encrypted Value Format
+
+Current (v2) format, produced by `encrypt(...)`:
+
+```
+ENC(v2:<base64(iv + ciphertext + gcm-tag)>)
+```
+
+- **Cipher:** AES/GCM/NoPadding (authenticated encryption — tampered values fail to decrypt)
+- **IV:** random 12 bytes per encryption, prepended to the ciphertext
+- **Key derivation:** PBKDF2WithHmacSHA256 (configurable salt and iteration count, default 210,000 iterations, 256-bit key)
+
+Legacy (v1) values in the old `ENC(<base64>)` format (AES/ECB, zero-padded key) are still
+**decrypted** transparently for backward compatibility, but new encryptions always produce v2.
+Re-encrypt legacy values when possible.
+
 ### Setup Encryptor
 
 ```java
-// Create encryptor with secret key
-PropertyEncryptor encryptor = new PropertyEncryptor("my-secret-key-16ch");
+// Create encryptor with secret key (defaults: AES, built-in salt, 210k iterations)
+PropertyEncryptor encryptor = new PropertyEncryptor("my-secret-key");
 
-// Or with custom algorithm
-PropertyEncryptor encryptor = new PropertyEncryptor("my-secret-key", "AES");
+// Production: use a deployment-specific salt
+PropertyEncryptor encryptor = new PropertyEncryptor("my-secret-key", "AES", "my-app-salt", 210_000);
+```
+
+Or via properties (the auto-configuration wires the encryptor into the `ConfigManager`):
+
+```yaml
+adhar:
+  config:
+    encryption:
+      enabled: true
+      algorithm: AES
+      salt: my-app-salt          # PBKDF2 salt
+      key-iterations: 210000     # PBKDF2 iterations
+      # key via ADHAR_CONFIG_ENCRYPTION_KEY env var (preferred) or adhar.config.encryption.key
 ```
 
 ### Encrypt Sensitive Values
@@ -325,7 +380,7 @@ PropertyEncryptor encryptor = new PropertyEncryptor("my-secret-key", "AES");
 ```java
 // Encrypt a password
 String encrypted = encryptor.encrypt("my-secret-password");
-// Output: ENC(base64-encrypted-value)
+// Output: ENC(v2:base64-iv-and-ciphertext)
 
 // Use in configuration file
 System.out.println("database.password=" + encrypted);
@@ -405,9 +460,9 @@ public class EncryptionTool {
    PropertyEncryptor encryptor = new PropertyEncryptor(secretKey);
    ```
 
-2. **Key Length Requirements:**
-   - AES: 16, 24, or 32 characters
-   - DES: 8 characters (legacy, not recommended)
+2. **Key Length:**
+   - Any passphrase length works — a 256-bit AES key is derived via PBKDF2WithHmacSHA256
+   - Prefer long, random passphrases and a deployment-specific salt
 
 3. **Store Keys Securely:**
    - Use environment variables
@@ -417,6 +472,29 @@ public class EncryptionTool {
 ---
 
 ## ✅ Configuration Validation
+
+### Startup Validation Gate
+
+The auto-configuration runs the `ConfigValidator` against the merged configuration during
+startup (`ConfigValidationRunner`). Rules can be declared directly in properties; when a
+rule fails and `fail-on-error` is `true` (the default), the application fails fast:
+
+```yaml
+adhar:
+  config:
+    validation:
+      enabled: true
+      fail-on-error: true      # throw at startup on violation
+      log-warnings: true       # log instead when fail-on-error is false
+      required:
+        - database.url
+        - api.key
+      patterns:
+        "[database.url]": "^jdbc:.*"
+```
+
+Additional programmatic rules (ranges, custom rules) can be added by defining your own
+`ConfigValidator` bean — the runner picks it up automatically.
 
 ### Setup Validator
 
@@ -530,6 +608,20 @@ manager.addSource(new FileConfigSource("application.yml", 100));
 ## 🎯 Framework Integration
 
 ### Spring Boot
+
+With the starter, the auto-configuration creates a `ConfigManager` (sources from
+`adhar.config.sources`, encryptor attached when encryption is enabled) and links the
+`ConfigFacade` singleton to it — facade lookups (`get`, `getInt`, ...) delegate to the
+manager and `facade.refresh()` triggers `configManager.refreshAll()`:
+
+```java
+@Service
+public class PaymentService {
+    private final ConfigFacade config = ConfigFacade.getInstance(); // backed by ConfigManager
+}
+```
+
+Manual setup without the starter:
 
 ```java
 @Configuration

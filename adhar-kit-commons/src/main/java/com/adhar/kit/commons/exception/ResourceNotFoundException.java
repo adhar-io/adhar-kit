@@ -27,4 +27,12 @@ public class ResourceNotFoundException extends AdharException {
     public ResourceNotFoundException(String errorCode, String message, Throwable cause) {
         super(errorCode, message, cause);
     }
+
+    /**
+     * Missing resources map to {@code 404} (Not Found).
+     */
+    @Override
+    public int getHttpStatus() {
+        return 404;
+    }
 }

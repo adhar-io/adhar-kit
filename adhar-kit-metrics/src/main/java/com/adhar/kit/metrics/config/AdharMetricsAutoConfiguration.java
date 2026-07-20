@@ -5,9 +5,12 @@ import com.adhar.kit.metrics.auto.JvmMetricsCollector;
 import com.adhar.kit.metrics.auto.MetricsInterceptor;
 import com.adhar.kit.metrics.auto.PlatformMetrics;
 import com.adhar.kit.metrics.properties.AdharMetricsProperties;
+import com.adhar.kit.metrics.slo.SloRecorder;
 import com.adhar.kit.metrics.util.AdharMetrics;
 import com.adhar.kit.metrics.util.KubernetesMetricsUtils;
 import com.adhar.kit.metrics.util.MetricsUtils;
+import com.adhar.kit.metrics.util.TagCardinalityLimiter;
+import com.adhar.kit.metrics.web.HttpMetricsFilter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.binder.jvm.ClassLoaderMetrics;
@@ -20,6 +23,7 @@ import io.micrometer.core.instrument.binder.system.UptimeMetrics;
 import io.micrometer.core.instrument.binder.system.DiskSpaceMetrics;
 import io.micrometer.core.instrument.config.MeterFilter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -272,6 +276,52 @@ public class AdharMetricsAutoConfiguration {
     public MeterFilter uriTagLimitFilter() {
         return MeterFilter.maximumAllowableTags("http.server.requests", "uri",
                 properties.getWeb().getMaxUriTags(), MeterFilter.deny());
+    }
+
+    /**
+     * Creates the tag cardinality limiter used to bound the distinct values of
+     * high-cardinality tags (e.g. the uri tag of the HttpMetricsFilter).
+     * The maximum is driven by {@code adhar.metrics.web.maxUriTags} (default 100).
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public TagCardinalityLimiter tagCardinalityLimiter() {
+        log.debug("Registering TagCardinalityLimiter with max cardinality {}", properties.getWeb().getMaxUriTags());
+        return new TagCardinalityLimiter(properties.getWeb().getMaxUriTags());
+    }
+
+    /**
+     * Creates the SLO recorder that tracks error budgets and burn rates for the
+     * targets configured under {@code adhar.metrics.slo.targets.*}.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.metrics.slo", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public SloRecorder sloRecorder(MeterRegistry meterRegistry) {
+        log.debug("Registering SloRecorder with {} target(s)", properties.getSlo().getTargets().size());
+        return new SloRecorder(meterRegistry, properties.getSlo());
+    }
+
+    /**
+     * Registers the HTTP metrics filter when running in a servlet web application.
+     * Nested so the servlet API is only required when actually present on the classpath.
+     */
+    @Configuration
+    @ConditionalOnClass(name = {"jakarta.servlet.Filter", "org.springframework.web.filter.OncePerRequestFilter"})
+    public static class HttpMetricsFilterConfiguration {
+
+        /**
+         * Creates the servlet filter that records per-request timers with the
+         * actual response status and a cardinality-safe uri tag.
+         */
+        @Bean
+        @ConditionalOnProperty(prefix = "adhar.metrics.web", name = "enabled", havingValue = "true", matchIfMissing = true)
+        @ConditionalOnMissingBean
+        public HttpMetricsFilter httpMetricsFilter(MeterRegistry meterRegistry,
+                                                   TagCardinalityLimiter tagCardinalityLimiter,
+                                                   ObjectProvider<SloRecorder> sloRecorder) {
+            return new HttpMetricsFilter(meterRegistry, tagCardinalityLimiter, sloRecorder.getIfAvailable());
+        }
     }
 
     // -------------------------------------------------------------------------

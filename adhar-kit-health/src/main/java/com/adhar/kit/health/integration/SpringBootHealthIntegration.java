@@ -149,7 +149,64 @@ public class SpringBootHealthIntegration {
             allIndicators.add(new GrpcHealthIndicator(grpcChannel, properties.getGrpc()));
         }
 
-        return createHealthRegistry(allIndicators);
+        return configureRegistry(createHealthRegistry(allIndicators), properties);
+    }
+
+    /**
+     * Applies property-driven configuration to a registry: result caching, transition
+     * history / flapping detection, and the built-in memory / certificate indicators.
+     *
+     * @param registry   registry to configure
+     * @param properties health configuration properties
+     * @return the configured registry
+     */
+    public static HealthRegistry configureRegistry(HealthRegistry registry, AdharHealthProperties properties) {
+        AdharHealthProperties.CacheConfig cache = properties.getCache();
+        registry.setCacheTtlMillis(cache.isEnabled() ? cache.getTtl() : 0);
+
+        AdharHealthProperties.HistoryConfig history = properties.getHistory();
+        registry.getHistory().setCapacity(history.getCapacity());
+        registry.configureFlapping(history.getFlappingThreshold(), history.getFlappingWindow());
+
+        if (properties.getMemory().isEnabled()) {
+            log.info("Auto-configuring memory health indicator");
+            // Non-critical: high heap usage degrades the response without failing probes.
+            registry.register(new MemoryHealthIndicator(properties.getMemory()), false,
+                    HealthRegistry.DEFAULT_GROUP, HealthRegistry.LIVENESS_GROUP);
+        }
+
+        AdharHealthProperties.CertificateConfig certificate = properties.getCertificate();
+        boolean certificateSourceConfigured =
+                (certificate.getKeystorePath() != null && !certificate.getKeystorePath().isBlank())
+                        || (certificate.getHost() != null && !certificate.getHost().isBlank());
+        if (certificate.isEnabled() && certificateSourceConfigured) {
+            log.info("Auto-configuring certificate expiry health indicator");
+            registry.register(new CertificateExpiryHealthIndicator(certificate));
+        }
+
+        return registry;
+    }
+
+    /**
+     * Creates and registers a readiness gate when enabled by configuration.
+     *
+     * @param registry   registry to register the gate with (readiness group)
+     * @param properties health configuration properties
+     * @return the readiness gate, or null when disabled
+     */
+    public static com.adhar.kit.health.lifecycle.ReadinessStateManager configureReadinessGate(
+            HealthRegistry registry, AdharHealthProperties properties) {
+        AdharHealthProperties.ReadinessGateConfig config = properties.getReadinessGate();
+        if (!config.isEnabled()) {
+            return null;
+        }
+        log.info("Auto-configuring readiness gate");
+        var manager = new com.adhar.kit.health.lifecycle.ReadinessStateManager(config.isInitiallyReady());
+        registry.register(manager, HealthRegistry.READINESS_GROUP);
+        if (config.isShutdownHook()) {
+            manager.registerShutdownHook();
+        }
+        return manager;
     }
 
     /**

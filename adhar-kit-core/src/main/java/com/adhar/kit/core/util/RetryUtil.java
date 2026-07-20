@@ -3,6 +3,7 @@ package com.adhar.kit.core.util;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.*;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -103,6 +104,49 @@ public class RetryUtil {
                            attempt + 1, maxRetries, delay, e.getMessage());
                     Thread.sleep(delay);
                     delay = (long) (delay * backoffMultiplier);
+                }
+            }
+        }
+
+        log.error("All {} retry attempts failed", maxRetries);
+        throw lastException;
+    }
+
+    /**
+     * Executes operation with exponential backoff capped at a maximum delay,
+     * retrying only exceptions accepted by the given predicate.
+     *
+     * @param operation operation to execute
+     * @param maxRetries maximum retry attempts
+     * @param initialDelayMs initial delay in milliseconds
+     * @param backoffMultiplier backoff multiplier
+     * @param maxDelayMs maximum delay in milliseconds
+     * @param retryOn predicate deciding whether an exception is retryable
+     *                (null = retry all exceptions)
+     * @param <T> return type
+     * @return operation result
+     * @throws Exception if a non-retryable exception occurs or all retries fail
+     */
+    public static <T> T executeWithBackoff(Supplier<T> operation, int maxRetries,
+                                           long initialDelayMs, double backoffMultiplier,
+                                           long maxDelayMs, Predicate<Exception> retryOn) throws Exception {
+        Exception lastException = null;
+        long delay = Math.min(initialDelayMs, maxDelayMs);
+
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                return operation.get();
+            } catch (Exception e) {
+                lastException = e;
+                if (retryOn != null && !retryOn.test(e)) {
+                    log.debug("Exception {} is not retryable, aborting", e.getClass().getSimpleName());
+                    throw e;
+                }
+                if (attempt < maxRetries) {
+                    log.warn("Retry attempt {}/{} failed, waiting {}ms: {}",
+                           attempt + 1, maxRetries, delay, e.getMessage());
+                    Thread.sleep(delay);
+                    delay = Math.min((long) (delay * backoffMultiplier), maxDelayMs);
                 }
             }
         }

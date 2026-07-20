@@ -13,11 +13,58 @@ adhar:
     # Sensitive data masking configuration
     masking:
       enabled: true                    # Enable automatic data masking
+      strategy: FULL                   # FULL | PARTIAL (keep last 4) | HASH (sha256 prefix)
+      mask-credit-cards: true          # Mask credit-card-like numbers in free text
+      mask-ssn: true                   # Mask SSNs (NNN-NN-NNNN) in free text
+      mask-emails: false               # Mask e-mail addresses in free text
+      custom-patterns:                 # Extra regexes whose matches are masked
+        - "ACC-\\d{6}"
       additional-keys:                 # Additional field names to mask beyond defaults
         - customSecret
         - apiKey
         - internalToken
         - clientSecret
+
+    # Structured application log events (AppLogEvent pipeline)
+    events:
+      enabled: true                    # Enable the AppLogEvent publishing pipeline
+      logger-prefix: ADHAR_EVENT       # Events are logged to <prefix>.<TYPE> loggers
+
+    # REST API request/response logging
+    rest-api:
+      enabled: true                    # Log every API exchange as a structured API event
+      interceptor-enabled: true        # Also track controller handler execution (Spring MVC)
+      include-headers: false           # Capture request headers (sensitive ones masked)
+      include-request-payload: false   # Capture request body (masked, truncated)
+      include-response-payload: false  # Capture response body (masked, truncated)
+      include-query-string: true
+      max-payload-length: 2048         # Max captured payload characters
+      slow-request-threshold-ms: 3000  # Slower requests are flagged and logged at WARN
+      exclude-paths:                   # Ant-style patterns skipped by API logging
+        - /actuator/**
+        - /health/**
+        - /static/**
+      masked-headers:                  # Headers always masked in API events
+        - authorization
+        - cookie
+        - x-api-key
+
+    # Batch job logging
+    batch:
+      enabled: true
+      progress-log-interval: 1000      # Emit a progress event every N processed items
+      max-item-errors-logged: 10       # Detailed item-error events per job run (rest counted)
+
+    # Performance logging
+    performance:
+      enabled: true
+      slow-threshold-ms: 1000          # Operations slower than this are logged at WARN
+      log-all-operations: false        # true = emit an event for every recorded operation
+
+    # Audit logging
+    audit:
+      enabled: true
+      include-changes: true            # Allow before/after change values (masked) in audit events
 
     # MDC (Mapped Diagnostic Context) configuration
     mdc:

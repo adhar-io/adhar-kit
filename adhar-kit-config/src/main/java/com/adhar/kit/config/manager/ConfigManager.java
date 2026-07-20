@@ -1,5 +1,6 @@
 package com.adhar.kit.config.manager;
 
+import com.adhar.kit.config.encryption.PropertyEncryptor;
 import com.adhar.kit.config.source.ConfigSource;
 import lombok.extern.slf4j.Slf4j;
 
@@ -58,6 +59,22 @@ public class ConfigManager {
     private final List<ConfigChangeListener> listeners = new CopyOnWriteArrayList<>();
 
     /**
+     * Optional encryptor for transparent decryption of ENC(...) values.
+     */
+    private volatile PropertyEncryptor encryptor;
+
+    /**
+     * Sets the property encryptor used to transparently decrypt {@code ENC(...)}
+     * values in the read path ({@link #getProperty(String)} and friends).
+     *
+     * @param encryptor the property encryptor (null disables decryption)
+     */
+    public void setEncryptor(PropertyEncryptor encryptor) {
+        this.encryptor = encryptor;
+        log.info("PropertyEncryptor {} on ConfigManager", encryptor != null ? "enabled" : "disabled");
+    }
+
+    /**
      * Adds a configuration source.
      *
      * @param source the configuration source
@@ -96,7 +113,7 @@ public class ConfigManager {
      * @return property value or null
      */
     public Object getProperty(String key) {
-        return cache.get(key);
+        return decryptIfNeeded(cache.get(key));
     }
 
     /**
@@ -109,7 +126,7 @@ public class ConfigManager {
      */
     @SuppressWarnings("unchecked")
     public <T> T getProperty(String key, Class<T> type) {
-        Object value = cache.get(key);
+        Object value = getProperty(key);
         if (value == null) {
             return null;
         }
@@ -157,7 +174,7 @@ public class ConfigManager {
     public Map<String, Object> getPropertiesWithPrefix(String prefix) {
         return cache.entrySet().stream()
             .filter(e -> e.getKey().startsWith(prefix))
-            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+            .collect(Collectors.toMap(Map.Entry::getKey, e -> decryptIfNeeded(e.getValue())));
     }
 
     /**
@@ -308,6 +325,17 @@ public class ConfigManager {
                 log.error("Error notifying listener of config change", e);
             }
         });
+    }
+
+    /**
+     * Transparently decrypts ENC(...) string values when an encryptor is configured.
+     */
+    private Object decryptIfNeeded(Object value) {
+        PropertyEncryptor enc = this.encryptor;
+        if (enc != null && value instanceof String strValue) {
+            return enc.decryptIfNeeded(strValue);
+        }
+        return value;
     }
 
     /**

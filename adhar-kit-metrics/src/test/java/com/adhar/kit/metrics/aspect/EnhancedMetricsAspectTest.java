@@ -1,6 +1,7 @@
 package com.adhar.kit.metrics.aspect;
 
 import com.adhar.kit.metrics.annotation.ApiMetrics;
+import com.adhar.kit.metrics.annotation.BusinessMetric;
 import com.adhar.kit.metrics.annotation.CacheMetrics;
 import com.adhar.kit.metrics.annotation.Counted;
 import com.adhar.kit.metrics.annotation.DatabaseMetrics;
@@ -219,12 +220,29 @@ class EnhancedMetricsAspectTest {
         Gauged a = ann("gaugedNamed", Gauged.class);
         aspect.recordGauge(jp("gaugedNamed", 10), 10, a);
         assertThat(registry.find("gauged.named").gauge()).isNotNull();
+        assertThat(registry.find("gauged.named").gauge().value()).isEqualTo(10.0);
 
         // second call hits the gauge cache branch and exercises collection extraction
         aspect.recordGauge(jp("gaugedNamed", List.of(1, 2)), List.of(1, 2), a);
+        assertThat(registry.find("gauged.named").gauge().value()).isEqualTo(2.0);
+
         aspect.recordGauge(jp("gaugedNamed", new Object[]{1}), new Object[]{1}, a);
+        assertThat(registry.find("gauged.named").gauge().value()).isEqualTo(1.0);
 
         assertThat(registry.find("gauged.named").gauges()).hasSize(1);
+    }
+
+    @Test
+    void recordGauge_reflectsLatestReturnValue() {
+        Gauged a = ann("gaugedNamed", Gauged.class);
+        aspect.recordGauge(jp("gaugedNamed", 10), 10, a);
+        aspect.recordGauge(jp("gaugedNamed", 42), 42, a);
+
+        assertThat(registry.find("gauged.named").gauge().value()).isEqualTo(42.0);
+
+        // a non-extractable result keeps the previous value
+        aspect.recordGauge(jp("gaugedNamed", new Object()), new Object(), a);
+        assertThat(registry.find("gauged.named").gauge().value()).isEqualTo(42.0);
     }
 
     @Test
@@ -268,6 +286,41 @@ class EnhancedMetricsAspectTest {
 
         assertThat(result).isNull();
         assertThat(registry.find("sample.histValueSuccessOnly").summary()).isNull();
+    }
+
+    @Test
+    void recordHistogram_timingMode_appliesSloBucketsFromAnnotation() throws Throwable {
+        aspect.recordHistogram(jp("histTimingBuckets", "ok"), ann("histTimingBuckets", Histogram.class));
+
+        io.micrometer.core.instrument.Timer timer = registry.find("hist.timing.buckets").timer();
+        assertThat(timer).isNotNull();
+        io.micrometer.core.instrument.distribution.CountAtBucket[] counts =
+                timer.takeSnapshot().histogramCounts();
+        assertThat(counts).isNotEmpty();
+        // The annotation-declared SLO buckets (seconds) must be present in the histogram.
+        assertThat(counts)
+                .anySatisfy(c -> assertThat(c.bucket(java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(0.1))
+                .anySatisfy(c -> assertThat(c.bucket(java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(0.5));
+    }
+
+    @Test
+    void recordHistogram_valueMode_appliesSloBucketsAndBaseUnit() throws Throwable {
+        aspect.recordHistogram(jp("histValueBuckets", 7), ann("histValueBuckets", Histogram.class));
+
+        io.micrometer.core.instrument.DistributionSummary summary =
+                registry.find("hist.value.buckets").summary();
+        assertThat(summary).isNotNull();
+        assertThat(summary.getId().getBaseUnit()).isEqualTo("items");
+        io.micrometer.core.instrument.distribution.CountAtBucket[] counts =
+                summary.takeSnapshot().histogramCounts();
+        assertThat(counts).isNotEmpty();
+        assertThat(counts)
+                .anySatisfy(c -> assertThat(c.bucket()).isEqualTo(10.0))
+                .anySatisfy(c -> assertThat(c.bucket()).isEqualTo(100.0));
+        // value 7 falls into the 10.0 bucket
+        assertThat(java.util.Arrays.stream(counts)
+                .filter(c -> c.bucket() == 10.0)
+                .findFirst().orElseThrow().count()).isEqualTo(1.0);
     }
 
     // ==================== @MonitorPerformance ====================
@@ -382,7 +435,7 @@ class EnhancedMetricsAspectTest {
         assertThat(result).isEqualTo("response");
         assertThat(registry.find("api.request.time").timer().count()).isEqualTo(1L);
         assertThat(registry.find("api.payload.size").summary().count()).isEqualTo(1L);
-        assertThat(registry.find("api.requests").tag("status", "200").counter().count()).isEqualTo(1.0);
+        assertThat(registry.find("api.requests").tag("outcome", "success").counter().count()).isEqualTo(1.0);
     }
 
     @Test
@@ -394,12 +447,65 @@ class EnhancedMetricsAspectTest {
     }
 
     @Test
-    void monitorApi_exception_recordsErrorStatus() {
+    void monitorApi_exception_recordsErrorOutcomeWithExceptionType() {
         ProceedingJoinPoint pjp = jpThrow("apiPlain", new RuntimeException("boom"));
 
         assertThatThrownBy(() -> aspect.monitorApi(pjp, ann("apiPlain", ApiMetrics.class)))
                 .isInstanceOf(RuntimeException.class);
-        assertThat(registry.find("api.requests").tag("status", "500").counter().count()).isEqualTo(1.0);
+        assertThat(registry.find("api.requests")
+                .tag("outcome", "error")
+                .tag("exception", "RuntimeException")
+                .counter().count()).isEqualTo(1.0);
+        // no fabricated status codes are recorded any more
+        assertThat(registry.find("api.requests").tag("status", "500").counter()).isNull();
+    }
+
+    // ==================== @BusinessMetric ====================
+
+    @Test
+    void recordBusinessMetric_numberResult_countsAndRecordsValue() throws Throwable {
+        Object result = aspect.recordBusinessMetric(jp("businessOrder", 99.5),
+                ann("businessOrder", BusinessMetric.class));
+
+        assertThat(result).isEqualTo(99.5);
+        assertThat(registry.find("adhar.business.orders.placed")
+                .tag("category", "sales")
+                .tag("channel", "web")
+                .tag("outcome", "success")
+                .counter().count()).isEqualTo(1.0);
+        assertThat(registry.find("adhar.business.orders.placed.value").summary().totalAmount())
+                .isEqualTo(99.5);
+    }
+
+    @Test
+    void recordBusinessMetric_nonNumberResult_countsWithoutValue() throws Throwable {
+        aspect.recordBusinessMetric(jp("businessNonNumeric", "created"),
+                ann("businessNonNumeric", BusinessMetric.class));
+
+        assertThat(registry.find("adhar.business.sample.businessNonNumeric")
+                .tag("outcome", "success").counter().count()).isEqualTo(1.0);
+        assertThat(registry.find("adhar.business.sample.businessNonNumeric.value").summary()).isNull();
+    }
+
+    @Test
+    void recordBusinessMetric_recordValueDisabled_skipsValueDistribution() throws Throwable {
+        aspect.recordBusinessMetric(jp("businessNoValue", 5),
+                ann("businessNoValue", BusinessMetric.class));
+
+        assertThat(registry.find("adhar.business.revenue").tag("outcome", "success")
+                .counter().count()).isEqualTo(1.0);
+        assertThat(registry.find("adhar.business.revenue.value").summary()).isNull();
+    }
+
+    @Test
+    void recordBusinessMetric_exception_countsErrorOutcome() {
+        ProceedingJoinPoint pjp = jpThrow("businessOrder", new IllegalStateException("boom"));
+
+        assertThatThrownBy(() -> aspect.recordBusinessMetric(pjp, ann("businessOrder", BusinessMetric.class)))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(registry.find("adhar.business.orders.placed")
+                .tag("outcome", "error").counter().count()).isEqualTo(1.0);
+        assertThat(registry.find("adhar.business.orders.placed.value").summary()).isNull();
     }
 
     // ==================== Sample annotated methods ====================
@@ -480,6 +586,33 @@ class EnhancedMetricsAspectTest {
         @Histogram(recordTiming = false, successOnly = true)
         public Integer histValueSuccessOnly() {
             return 7;
+        }
+
+        @Histogram(name = "hist.timing.buckets", buckets = {0.1, 0.5, 1.0})
+        public String histTimingBuckets() {
+            return "ok";
+        }
+
+        @Histogram(name = "hist.value.buckets", recordTiming = false,
+                buckets = {10.0, 100.0}, baseUnit = "items")
+        public Integer histValueBuckets() {
+            return 7;
+        }
+
+        @BusinessMetric(name = "orders.placed", category = "sales",
+                tags = {"channel", "web"}, description = "Orders placed")
+        public Double businessOrder() {
+            return 99.5;
+        }
+
+        @BusinessMetric
+        public String businessNonNumeric() {
+            return "created";
+        }
+
+        @BusinessMetric(name = "revenue", recordValue = false)
+        public Integer businessNoValue() {
+            return 5;
         }
 
         @MonitorPerformance(name = "perf.named")

@@ -19,6 +19,7 @@
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Annotations](#annotations)
+- [AppLogEvent — Structured Event Logging](#-applogevent--structured-event-logging)
 - [AdharLogger API](#adharlogger-api)
 - [Sensitive Data Masking](#sensitive-data-masking)
 - [MDC Context](#mdc-context)
@@ -55,13 +56,46 @@ The **adhar-kit-logging** module provides enterprise-grade logging capabilities 
 - Framework-agnostic logging interface
 - Automatic framework detection
 
-✅ **Annotations (6)**
+✅ **Annotations (11)**
 - `@Loggable` - Method entry/exit logging
 - `@LogExecutionTime` - Performance monitoring
 - `@LogExceptions` - Exception handling
 - `@LogMetrics` - Metrics collection
 - `@Audit` - Audit trail logging
 - `@Sensitive` - Data masking
+- `@LogOperation` - Operation tracking as structured AppLogEvents
+- `@BusinessEvent` - Business milestone events
+- `@TrackPerformance` - Timing statistics + slow-operation detection
+- `@LogBatchJob` - Batch job lifecycle logging
+- `@InjectLogger` - Automatic logger field injection
+
+✅ **AppLogEvent Pipeline (structured event logging)**
+- Single structured event model for business, operation, API, batch, performance, audit, security and system events
+- Automatic enrichment from MDC (correlation ID, trace/span ID, user, tenant)
+- Automatic masking of messages and metadata
+- Pluggable sinks (default: JSON to per-type SLF4J loggers `ADHAR_EVENT.<TYPE>`)
+- `BusinessEventLogger` with try-with-resources `OperationScope` to track every operation
+
+✅ **REST API Logging**
+- Servlet filter logging every exchange (status, duration, client IP, sizes)
+- Optional masked header/payload capture with truncation
+- Slow-request detection, path exclusions
+- Spring MVC interceptor attributing time to controller handlers (`handler` MDC key)
+
+✅ **Batch Job Logging**
+- Job/step lifecycle events, item counters, throughput
+- Periodic progress events, capped item-error logging
+- Summary event with SUCCESS/PARTIAL/FAILURE outcome
+
+✅ **Performance Logging**
+- Per-operation aggregated stats (count/min/max/avg/failures)
+- Slow-operation WARN events with configurable thresholds
+- On-demand summary reports
+
+✅ **Audit Logging**
+- Programmatic `AuditEventLogger` (who did what to which resource)
+- Masked before/after change tracking
+- Outcomes: success, failure, denied, custom
 
 ✅ **AdharLogger Utility**
 - Correlation ID management
@@ -345,6 +379,141 @@ public class User {
 }
 
 // Logged as: {name=John Doe, password=***, ssn=***, email=john@example.com}
+```
+
+### @LogOperation
+
+Tracks a method as an application operation — publishes an OPERATION `AppLogEvent` with duration, outcome and optional masked arguments/result:
+
+```java
+@LogOperation(value = "order.fulfil", category = "order", includeArgs = true)
+public Shipment fulfil(String orderId) { ... }
+```
+
+### @BusinessEvent
+
+Publishes a BUSINESS event when the method returns (SUCCESS) or throws (FAILURE):
+
+```java
+@BusinessEvent(value = "ORDER_PLACED", category = "order")
+public Order placeOrder(Cart cart) { ... }
+```
+
+### @TrackPerformance
+
+Feeds the performance statistics and slow-operation detection:
+
+```java
+@TrackPerformance(value = "db.orders.query", slowThresholdMs = 250)
+public List<Order> findOrders(...) { ... }
+```
+
+### @LogBatchJob
+
+Wraps a method as a tracked batch job run (STARTED + COMPLETED/FAILED events):
+
+```java
+@LogBatchJob("nightly-reconciliation")
+@Scheduled(cron = "0 0 2 * * *")
+public void reconcile() { ... }
+```
+
+### @InjectLogger
+
+Automatic logger setup — no more logger boilerplate:
+
+```java
+@Service
+public class OrderService {
+
+    @InjectLogger
+    private Logger log;                // org.slf4j.Logger named after OrderService
+
+    @InjectLogger
+    private AdharLogger adharLogger;   // shared AdharLogger bean
+}
+```
+
+---
+
+## 📊 AppLogEvent — Structured Event Logging
+
+Every business event and operation is captured as an immutable `AppLogEvent` and dispatched through the `AppLogEventPublisher`, which enriches it from MDC (correlation ID, trace/span IDs, user, tenant), masks sensitive data and hands it to all registered `AppLogEventSink`s. The default sink writes one JSON line per event to a dedicated logger `ADHAR_EVENT.<TYPE>` (BUSINESS, OPERATION, API, BATCH, PERFORMANCE, AUDIT, SECURITY, SYSTEM), so each event type can be routed to its own appender/index.
+
+### Business events and operation tracking
+
+```java
+private final BusinessEventLogger events;
+
+// Business milestone
+events.businessEvent("order", "ORDER_PLACED", Map.of("orderId", orderId, "amount", total));
+
+// Track any operation with timing and outcome (try-with-resources)
+try (var op = events.startOperation("order.fulfil")) {
+    op.metadata("orderId", orderId);
+    fulfil(orderId);
+    op.success();
+} // publishes an OPERATION event with durationMs on close
+```
+
+### Audit trail
+
+```java
+private final AuditEventLogger audit;
+
+audit.event("USER_PROFILE_UPDATED")
+     .actor(currentUser)
+     .resource("User", userId)
+     .change("email", oldEmail, newEmail)   // masked by field name (e.g. password)
+     .reason("self-service update")
+     .success();                             // or .failure(ex) / .denied()
+```
+
+### Batch job logging
+
+```java
+private final BatchJobLogger batchJobLogger;
+
+try (BatchJobRun run = batchJobLogger.startJob("nightly-reconciliation")) {
+    run.startStep("load");
+    for (Record r : records) {
+        try {
+            process(r);
+            run.itemProcessed();     // progress event every N items with throughput
+        } catch (Exception e) {
+            run.itemFailed(e, r.id()); // detailed events capped, rest counted
+        }
+    }
+    run.complete();                   // summary: SUCCESS / PARTIAL / FAILURE
+}
+```
+
+### Performance logging
+
+```java
+private final PerformanceLogger perf;
+
+try (PerformanceTimer timer = perf.start("payment.authorize")) {
+    gateway.authorize(payment);
+}
+// Slow executions -> WARN PERFORMANCE event; stats aggregated per operation
+
+perf.logSummary();   // one summary event per operation (count/min/max/avg/failures)
+```
+
+### REST API logging
+
+Enabled by default in web applications: every exchange is logged as an API event with method, path, status, duration, client IP and slow-request flagging. Header and payload capture (masked, truncated) are opt-in via `adhar.logging.rest-api.*`. The Spring MVC interceptor additionally publishes the resolved controller handler (`Controller.method`) under the `handler` MDC key and emits per-handler timing events.
+
+### Custom sinks
+
+Register additional `AppLogEventSink` beans to ship events to Kafka, a database audit table or an SIEM — sink failures are isolated and never break business code:
+
+```java
+@Bean
+AppLogEventSink kafkaEventSink(KafkaTemplate<String, String> kafka) {
+    return event -> kafka.send("app-log-events", toJson(event.toMap()));
+}
 ```
 
 ---

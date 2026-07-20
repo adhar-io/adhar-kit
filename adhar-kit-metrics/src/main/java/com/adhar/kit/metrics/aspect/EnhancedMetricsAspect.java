@@ -13,6 +13,8 @@ import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.util.StringUtils;
 
 import java.lang.reflect.Method;
+import java.time.Duration;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,6 +38,7 @@ public class EnhancedMetricsAspect {
     private final Map<String, Counter> counterCache = new ConcurrentHashMap<>();
     private final Map<String, DistributionSummary> summaryCache = new ConcurrentHashMap<>();
     private final Map<String, Gauge> gaugeCache = new ConcurrentHashMap<>();
+    private final Map<String, GaugeValue> gaugeValueCache = new ConcurrentHashMap<>();
 
     // Performance monitoring cache
     private final Map<String, PerformanceMetrics> performanceCache = new ConcurrentHashMap<>();
@@ -111,19 +114,21 @@ public class EnhancedMetricsAspect {
 
             String cacheKey = metricName + ":" + Tags.of(gauged.tags()).toString();
 
-            if (!gaugeCache.containsKey(cacheKey)) {
-                GaugeValue gaugeValue = new GaugeValue();
+            GaugeValue gaugeValue = gaugeValueCache.computeIfAbsent(cacheKey, key -> {
+                GaugeValue holder = new GaugeValue();
 
-                Gauge gauge = Gauge.builder(metricName, gaugeValue, GaugeValue::getValue)
+                Gauge gauge = Gauge.builder(metricName, holder, GaugeValue::getValue)
                         .description(StringUtils.hasText(gauged.description()) ? gauged.description() : null)
                         .tags(gauged.tags())
                         .register(registry);
 
                 gaugeCache.put(cacheKey, gauge);
-            }
+                return holder;
+            });
 
             double value = extractValueForGauge(result);
             if (!Double.isNaN(value)) {
+                gaugeValue.setValue(value);
                 log.debug("Updated gauge {} with value {}", metricName, value);
             }
         }
@@ -271,7 +276,8 @@ public class EnhancedMetricsAspect {
         String[] allTags = combineTags(baseTags, apiMetrics.tags());
 
         Timer.Sample sample = Timer.start(registry);
-        String statusCode = "200"; // Default success
+        String outcome = "success";
+        String exceptionType = "none";
 
         try {
             Object result = joinPoint.proceed();
@@ -282,16 +288,52 @@ public class EnhancedMetricsAspect {
 
             return result;
 
-        } catch (Exception e) {
-            statusCode = "500"; // Default error
+        } catch (Throwable e) {
+            outcome = "error";
+            exceptionType = e.getClass().getSimpleName();
             throw e;
         } finally {
             sample.stop(Timer.builder("api.request.time").tags(allTags).register(registry));
 
             if (apiMetrics.recordStatusCodes()) {
+                // The real HTTP status is only known at the servlet layer (see HttpMetricsFilter);
+                // at the method level we record the actual outcome instead of a guessed status code.
                 AdharMetrics.increment("api.requests",
-                    combineTags(allTags, new String[]{"status", statusCode}));
+                    combineTags(allTags, new String[]{"outcome", outcome, "exception", exceptionType}));
             }
+        }
+    }
+
+    @Around("@annotation(businessMetric)")
+    public Object recordBusinessMetric(ProceedingJoinPoint joinPoint, BusinessMetric businessMetric) throws Throwable {
+        String metricName = "adhar.business." + getMetricName(joinPoint, businessMetric.name());
+        String[] tags = combineTags(new String[]{"category", businessMetric.category()}, businessMetric.tags());
+
+        String outcome = "success";
+        try {
+            Object result = joinPoint.proceed();
+
+            if (businessMetric.recordValue() && result instanceof Number number) {
+                DistributionSummary.builder(metricName + ".value")
+                        .description(StringUtils.hasText(businessMetric.description()) ?
+                                businessMetric.description() : null)
+                        .tags(tags)
+                        .register(registry)
+                        .record(number.doubleValue());
+            }
+
+            return result;
+        } catch (Throwable e) {
+            outcome = "error";
+            throw e;
+        } finally {
+            Counter.builder(metricName)
+                    .description(StringUtils.hasText(businessMetric.description()) ?
+                            businessMetric.description() : null)
+                    .tags(tags)
+                    .tag("outcome", outcome)
+                    .register(registry)
+                    .increment();
         }
     }
 
@@ -307,7 +349,14 @@ public class EnhancedMetricsAspect {
                 builder.description(histogram.description());
             }
 
+            builder.publishPercentileHistogram(true);
 
+            if (histogram.buckets().length > 0) {
+                Duration[] slos = Arrays.stream(histogram.buckets())
+                        .mapToObj(seconds -> Duration.ofNanos((long) (seconds * 1_000_000_000L)))
+                        .toArray(Duration[]::new);
+                builder.serviceLevelObjectives(slos);
+            }
 
             return builder.register(registry);
         });
@@ -323,7 +372,15 @@ public class EnhancedMetricsAspect {
                 builder.description(histogram.description());
             }
 
+            if (StringUtils.hasText(histogram.baseUnit())) {
+                builder.baseUnit(histogram.baseUnit());
+            }
 
+            builder.publishPercentileHistogram(true);
+
+            if (histogram.buckets().length > 0) {
+                builder.serviceLevelObjectives(histogram.buckets());
+            }
 
             return builder.register(registry);
         });
@@ -420,6 +477,9 @@ public class EnhancedMetricsAspect {
                 builder.description(summary.description());
             }
 
+            if (StringUtils.hasText(summary.baseUnit())) {
+                builder.baseUnit(summary.baseUnit());
+            }
 
             if (summary.percentiles().length > 0) {
                 builder.publishPercentiles(summary.percentiles());

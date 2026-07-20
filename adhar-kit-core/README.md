@@ -23,7 +23,9 @@ The **adhar-kit-core** module provides fundamental patterns and utilities used a
 - ⚡ **Async Utilities** - Non-blocking operations, parallel execution
 - 💾 **Memoization** - Cache expensive computations
 - 🛠️ **Core Utilities** - Lazy loading, type conversion
-- ⚙️ **Configuration** - Centralized core configuration
+- ❄️ **Snowflake IDs** - Distributed 64-bit time-ordered ID generation
+- 🧵 **MDC Propagation** - `ContextPropagatingExecutor` carries the SLF4J MDC to async tasks
+- ⚙️ **Auto-Configuration** - Spring Boot auto-configuration (`CoreAutoConfiguration`) wires everything from `adhar.core.*` properties, including AOP aspects for `@Retry`, `@Memoize` and `@Async`
 
 ---
 
@@ -149,6 +151,21 @@ Optional<User> userOpt = result.toOptional();
 User user = result.getOrThrow(error -> 
     new BusinessException("User not found: " + error)
 );
+```
+
+**Recover, Fold and Lazy Fallbacks:**
+```java
+// Capture exceptions as a failure
+Result<User, Exception> result = Result.of(() -> userClient.fetch(userId));
+
+// Recover a failure into a success value
+Result<User, Exception> withDefault = result.recover(error -> User.guest());
+
+// Fold both branches into a single value
+String label = result.fold(User::getName, error -> "unknown: " + error.getMessage());
+
+// Lazily supplied fallback
+User user = result.orElseGet(User::guest);
 ```
 
 ---
@@ -484,6 +501,10 @@ public class PriceService {
 
 ## 🎯 Annotations
 
+In Spring Boot applications the annotations below are active out of the box:
+`CoreAutoConfiguration` registers AOP aspects (`RetryAspect`, `MemoizeAspect`,
+`AsyncAspect`) for them. Disable them with `adhar.core.aspects.enabled=false`.
+
 ### @Retry
 
 Automatically retry failed method executions with exponential backoff.
@@ -559,15 +580,63 @@ public class PriceService {
 
 ---
 
+## ❄️ Snowflake ID Generation
+
+`SnowflakeIdGenerator` produces 64-bit, time-ordered, cluster-unique IDs
+(41-bit timestamp since 2024-01-01, 10-bit node id, 12-bit sequence) with a
+clock-drift guard that waits for the clock to catch up on regression.
+
+```java
+// Via the facade (node id from adhar.core.snowflake.node-id, the
+// ADHAR_SNOWFLAKE_NODE_ID env var, or a hostname-derived fallback)
+long id = CoreFacade.getInstance().generateSnowflakeId();
+
+// Standalone with an explicit node id
+SnowflakeIdGenerator generator = new SnowflakeIdGenerator(42);
+long id2 = generator.nextId();
+long node = SnowflakeIdGenerator.extractNodeId(id2);  // 42
+```
+
+---
+
+## 🧵 MDC-Propagating Executor
+
+`ContextPropagatingExecutor` decorates any `ExecutorService`, snapshotting the
+SLF4J MDC at submit time, restoring it in the worker thread and clearing it
+afterwards. The auto-configured async executor is wrapped with it, so
+correlation IDs survive `@Async` and `CoreFacade.executeAsync` calls.
+
+```java
+ExecutorService executor = new ContextPropagatingExecutor(
+    Executors.newFixedThreadPool(4));
+
+MDC.put("correlationId", "abc-123");
+executor.submit(() -> log.info("logged with correlationId=abc-123"));
+```
+
+---
+
 ## ⚙️ Core Configuration
 
-Configure all core features via properties:
+With Spring Boot, `CoreAutoConfiguration` binds the properties below, builds
+the async executor from them, exposes an `ObjectMapper`
+(`@ConditionalOnMissingBean`) and a fully wired `CoreFacade` bean, and
+registers the annotation aspects. Set `adhar.core.enabled=false` to switch the
+whole module off. Non-Spring code can keep using `CoreFacade.getInstance()`.
 
 **application.yml:**
 ```yaml
 adhar:
   core:
     enabled: true
+
+    # Annotation aspects (@Retry/@Memoize/@Async)
+    aspects:
+      enabled: true
+
+    # Snowflake ID generation
+    snowflake:
+      node-id: -1   # 0-1023; -1 = auto-resolve
     
     # Async configuration
     async:
@@ -638,6 +707,10 @@ adhar:
 | `match(Function, Function)` | Pattern matching |
 | `getOrDefault(T)` | Gets value or default |
 | `getOrThrow(Function)` | Gets value or throws |
+| `orElseGet(Supplier<T>)` | Gets value or lazily supplied fallback |
+| `recover(Function<E, T>)` | Maps a failure into a success value |
+| `fold(Function, Function)` | Folds both branches into one value |
+| `of(Callable<T>)` | Captures exceptions as `Result<T, Exception>` |
 | `toOptional()` | Converts to Optional |
 
 #### Observable<T>

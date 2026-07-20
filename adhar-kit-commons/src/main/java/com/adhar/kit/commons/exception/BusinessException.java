@@ -57,6 +57,14 @@ public class BusinessException extends AdharException {
     }
 
     /**
+     * Business rule violations map to {@code 422} (Unprocessable Entity).
+     */
+    @Override
+    public int getHttpStatus() {
+        return 422;
+    }
+
+    /**
      * Creates a BusinessException for insufficient funds.
      */
     public static BusinessException insufficientFunds(String accountId, String amount) {

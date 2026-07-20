@@ -1,5 +1,8 @@
 package com.adhar.kit.core;
 
+import com.adhar.kit.core.config.AdharCoreProperties;
+import com.adhar.kit.core.util.SnowflakeIdGenerator;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -7,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
@@ -395,6 +400,62 @@ class CoreFacadeTest {
         @DisplayName("generateMD5 returns null for null input")
         void generateMD5_nullReturnsNull() {
             assertThat(core.generateMD5(null)).isNull();
+        }
+    }
+
+    // ==================== DI Constructor ====================
+
+    @Nested
+    @DisplayName("DI Constructor")
+    class DiConstructor {
+
+        @Test
+        @DisplayName("uses the provided ObjectMapper and executor")
+        void usesProvidedCollaborators() throws Exception {
+            AdharCoreProperties properties = new AdharCoreProperties();
+            properties.getSnowflake().setNodeId(7);
+            ObjectMapper mapper = new ObjectMapper();
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+
+            try {
+                CoreFacade facade = new CoreFacade(properties, executor, mapper);
+
+                assertThat(facade.getObjectMapper()).isSameAs(mapper);
+                assertThat(facade.getAsyncExecutor()).isSameAs(executor);
+                assertThat(facade.executeAsync(() -> "wired").get()).isEqualTo("wired");
+            } finally {
+                executor.shutdownNow();
+            }
+        }
+
+        @Test
+        @DisplayName("snowflake ids carry the configured node id and are monotonic")
+        void snowflakeUsesConfiguredNodeId() {
+            AdharCoreProperties properties = new AdharCoreProperties();
+            properties.getSnowflake().setNodeId(99);
+            CoreFacade facade = new CoreFacade(
+                properties, Runnable::run, new ObjectMapper());
+
+            long id1 = facade.generateSnowflakeId();
+            long id2 = facade.generateSnowflakeId();
+
+            assertThat(SnowflakeIdGenerator.extractNodeId(id1)).isEqualTo(99);
+            assertThat(SnowflakeIdGenerator.extractNodeId(id2)).isEqualTo(99);
+            assertThat(id2).isGreaterThan(id1);
+        }
+
+        @Test
+        @DisplayName("rejects null collaborators")
+        void rejectsNullCollaborators() {
+            AdharCoreProperties properties = new AdharCoreProperties();
+            ObjectMapper mapper = new ObjectMapper();
+
+            assertThatThrownBy(() -> new CoreFacade(null, Runnable::run, mapper))
+                .isInstanceOf(NullPointerException.class);
+            assertThatThrownBy(() -> new CoreFacade(properties, null, mapper))
+                .isInstanceOf(NullPointerException.class);
+            assertThatThrownBy(() -> new CoreFacade(properties, Runnable::run, null))
+                .isInstanceOf(NullPointerException.class);
         }
     }
 

@@ -26,8 +26,11 @@ A comprehensive security starter for enterprise applications based on Spring Sec
 - **Content Security Policy**: Configurable Content Security Policy
 - **Authorization**: Fine-grained URL-based authorization
 - **Rate Limiting**: IP-based request throttling with configurable limits
-- **Security Audit Logging**: Structured logging for authentication events
-- **Token Refresh**: JWT token refresh with optional rotation for enhanced security
+- **Security Audit Logging**: Structured Jackson-JSON logging for authentication events with a pluggable `AuditEventSink`
+- **Token Refresh**: JWT token refresh with optional rotation and a pluggable `RefreshTokenStore` (in-memory default, Redis-ready)
+- **Unified SecurityService**: Framework-agnostic `SecurityFacade`/`SecurityService` backed by a Spring Security adapter
+- **RBAC Annotations**: `@RequiresRole` / `@RequiresPermission` (any-of/all-of) enforced by an AOP aspect
+- **API-Key Authentication**: Header-based API keys validated against SHA-256 hashes (constant-time compare)
 
 ## Getting Started
 
@@ -529,6 +532,99 @@ When `rotate-refresh-tokens: true`:
 tokenRefreshService.revokeAllUserTokens(userId);
 ```
 
+### Pluggable Refresh-Token Store
+
+Token families and revocations live behind the `RefreshTokenStore` interface
+(String keys/values, TTL hints per write). The default is `InMemoryRefreshTokenStore`;
+provide your own bean (e.g. Redis-backed) to share state across nodes:
+
+```java
+@Bean
+public RefreshTokenStore refreshTokenStore(StringRedisTemplate redis) {
+    return new RedisRefreshTokenStore(redis); // your implementation
+}
+```
+
+---
+
+## Unified SecurityService / SecurityFacade
+
+The auto-configuration registers a `SpringSecurityAdapter` (a `SecurityService` bean) and
+wires it as the delegate of the singleton `SecurityFacade`, so portable code can do:
+
+```java
+SecurityService security = SecurityFacade.getInstance();
+
+String userId = security.getCurrentUserId();        // from SecurityContextHolder (JWT-aware)
+boolean admin  = security.hasRole("ADMIN");          // matches ADMIN or ROLE_ADMIN
+boolean canDo  = security.hasPermission("order:create"); // exact or SCOPE_-prefixed authority
+String encoded = security.encodePassword(raw);       // DelegatingPasswordEncoder by default
+```
+
+Token operations (`generateToken`, `validateToken`, `extractUserId`) delegate to
+`TokenRefreshService` and therefore require `adhar.security.token-refresh.enabled=true`.
+Provide your own `PasswordEncoder` or `SecurityService` bean to override the defaults.
+Without Spring (no delegate registered) the facade falls back to inert stub behavior.
+
+---
+
+## RBAC Annotations
+
+`@RequiresRole` and `@RequiresPermission` are enforced by `AccessControlAspect`
+(enabled by default; disable with `adhar.security.rbac.enabled=false`). Both support
+class-level and method-level placement (method wins) and `anyOf`/`allOf` modes.
+Failures throw `com.adhar.kit.security.exception.AccessDeniedException`.
+
+```java
+@RequiresRole("ADMIN")
+public void deleteOrder(Long id) { ... }
+
+@RequiresRole(value = {"AUDITOR", "COMPLIANCE"}, mode = CheckMode.ALL_OF)
+public Report complianceReport() { ... }
+
+@RequiresPermission(value = {"order:read", "order:export"}) // any-of by default
+public byte[] exportOrders() { ... }
+```
+
+---
+
+## API-Key Authentication
+
+Off by default. Keys are configured as lowercase-hex SHA-256 hashes (never plain text)
+and compared in constant time. A valid key populates the `SecurityContext` with the
+configured principal and roles; an invalid key is rejected with `401`; requests without
+the header pass through to other authentication mechanisms.
+
+```yaml
+adhar:
+  security:
+    api-key:
+      enabled: true
+      header-name: X-API-Key          # default
+      keys:
+        - key-hash: 2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae
+          principal: reporting-service
+          roles:
+            - ROLE_SERVICE
+            - report:read
+```
+
+Generate a hash: `echo -n 'my-api-key' | shasum -a 256`
+
+---
+
+## Custom Audit Event Sink
+
+Audit events are serialized with Jackson and written to the `SECURITY_AUDIT` logger by
+the default `Slf4jAuditEventSink`. Ship them elsewhere by providing your own bean:
+
+```java
+@Bean
+public AuditEventSink auditEventSink(KafkaTemplate<String, String> kafka) {
+    return (eventType, auditData) -> kafka.send("security-audit", toJson(auditData));
+}
+```
+
 ---
 
 ## Complete Configuration Example
@@ -570,6 +666,18 @@ adhar:
       refresh-token-validity-seconds: 604800
       rotate-refresh-tokens: true
       secret: ${TOKEN_REFRESH_SECRET}
+
+    rbac:
+      enabled: true
+
+    api-key:
+      enabled: true
+      header-name: X-API-Key
+      keys:
+        - key-hash: ${REPORTING_API_KEY_SHA256}
+          principal: reporting-service
+          roles:
+            - ROLE_SERVICE
 
     csrf:
       enabled: true

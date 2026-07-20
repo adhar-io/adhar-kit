@@ -12,7 +12,6 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Service for handling JWT token refresh operations.
@@ -66,15 +65,9 @@ public class TokenRefreshService {
     private final SecretKey signingKey;
 
     /**
-     * Stores refresh token families for rotation tracking.
-     * Key: token family ID, Value: set of valid refresh tokens in the family.
+     * Pluggable storage for token families and revocations.
      */
-    private final Map<String, Set<String>> tokenFamilies = new ConcurrentHashMap<>();
-
-    /**
-     * Stores revoked refresh tokens.
-     */
-    private final Set<String> revokedTokens = ConcurrentHashMap.newKeySet();
+    private final RefreshTokenStore tokenStore;
 
     /**
      * Token response DTO.
@@ -88,12 +81,24 @@ public class TokenRefreshService {
     ) {}
 
     /**
-     * Creates token refresh service.
+     * Creates token refresh service backed by the default in-memory store.
      *
      * @param config token refresh configuration
      */
     public TokenRefreshService(AdharSecurityProperties.TokenRefreshProperties config) {
+        this(config, new InMemoryRefreshTokenStore());
+    }
+
+    /**
+     * Creates token refresh service with a custom {@link RefreshTokenStore}
+     * (e.g. a Redis-backed implementation for multi-node deployments).
+     *
+     * @param config token refresh configuration
+     * @param tokenStore store for token families and revocations
+     */
+    public TokenRefreshService(AdharSecurityProperties.TokenRefreshProperties config, RefreshTokenStore tokenStore) {
         this.config = config;
+        this.tokenStore = tokenStore;
 
         // Generate or use configured signing key
         String secret = config.getSecret();
@@ -124,7 +129,7 @@ public class TokenRefreshService {
         }
 
         // Check if token is revoked
-        if (revokedTokens.contains(refreshToken)) {
+        if (tokenStore.isTokenRevoked(refreshToken)) {
             throw new TokenRefreshException("Refresh token has been revoked");
         }
 
@@ -157,14 +162,13 @@ public class TokenRefreshService {
 
             if (config.isRotateRefreshTokens()) {
                 // Check if token is still valid in its family
-                if (familyId != null) {
-                    Set<String> familyTokens = tokenFamilies.get(familyId);
-                    if (familyTokens != null && !familyTokens.contains(refreshToken)) {
-                        // Token was already rotated - possible token theft
-                        log.warn("Refresh token reuse detected for family {}. Revoking entire family.", familyId);
-                        revokeTokenFamily(familyId);
-                        throw new TokenRefreshException("Refresh token has been invalidated");
-                    }
+                if (familyId != null
+                        && tokenStore.familyExists(familyId)
+                        && !tokenStore.isTokenInFamily(familyId, refreshToken)) {
+                    // Token was already rotated - possible token theft
+                    log.warn("Refresh token reuse detected for family {}. Revoking entire family.", familyId);
+                    revokeTokenFamily(familyId);
+                    throw new TokenRefreshException("Refresh token has been invalidated");
                 }
 
                 // Generate new refresh token
@@ -172,10 +176,7 @@ public class TokenRefreshService {
 
                 // Invalidate old refresh token
                 if (familyId != null) {
-                    Set<String> familyTokens = tokenFamilies.get(familyId);
-                    if (familyTokens != null) {
-                        familyTokens.remove(refreshToken);
-                    }
+                    tokenStore.removeTokenFromFamily(familyId, refreshToken);
                 }
 
                 // Calculate remaining validity for rotated token
@@ -253,10 +254,82 @@ public class TokenRefreshService {
             .compact();
 
         // Track token in family
-        tokenFamilies.computeIfAbsent(familyId, k -> ConcurrentHashMap.newKeySet())
-            .add(token);
+        tokenStore.addTokenToFamily(familyId, token, config.getRefreshTokenValiditySeconds());
 
         return token;
+    }
+
+    /**
+     * Generates a standalone access token (no refresh token / family tracking).
+     *
+     * @param subject user identifier
+     * @param roles roles to embed in the {@code roles} claim (may be null or empty)
+     * @param claims additional claims to include (may be null)
+     * @return signed access token
+     */
+    public String generateAccessToken(String subject, Set<String> roles, Map<String, Object> claims) {
+        Instant now = Instant.now();
+        Instant expiry = now.plusSeconds(config.getAccessTokenValiditySeconds());
+
+        var builder = Jwts.builder()
+            .subject(subject)
+            .issuedAt(Date.from(now))
+            .expiration(Date.from(expiry))
+            .claim("type", "access");
+
+        if (roles != null && !roles.isEmpty()) {
+            builder.claim("roles", new ArrayList<>(roles));
+        }
+        if (claims != null) {
+            claims.forEach(builder::claim);
+        }
+
+        return builder.signWith(signingKey).compact();
+    }
+
+    /**
+     * Validates a token signed by this service (signature and expiration).
+     *
+     * @param token the token to validate
+     * @return true if the token is well-formed, correctly signed and not expired
+     */
+    public boolean validateToken(String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        try {
+            Jwts.parser()
+                .verifyWith(signingKey)
+                .build()
+                .parseSignedClaims(token);
+            return true;
+        } catch (Exception e) {
+            log.debug("Token validation failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Extracts the subject (user id) from a token signed by this service.
+     *
+     * @param token the token
+     * @return the subject, or null if the token cannot be parsed or verified
+     */
+    public String extractSubject(String token) {
+        if (token == null || token.isBlank()) {
+            return null;
+        }
+        try {
+            return Jwts.parser()
+                .verifyWith(signingKey)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .getSubject();
+        } catch (Exception e) {
+            log.debug("Could not extract subject from token: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -309,7 +382,7 @@ public class TokenRefreshService {
      * @param refreshToken the refresh token to revoke
      */
     public void revokeRefreshToken(String refreshToken) {
-        revokedTokens.add(refreshToken);
+        tokenStore.revokeToken(refreshToken, config.getRefreshTokenValiditySeconds());
 
         try {
             Claims claims = Jwts.parser()
@@ -320,10 +393,7 @@ public class TokenRefreshService {
 
             String familyId = claims.get("family", String.class);
             if (familyId != null) {
-                Set<String> familyTokens = tokenFamilies.get(familyId);
-                if (familyTokens != null) {
-                    familyTokens.remove(refreshToken);
-                }
+                tokenStore.removeTokenFromFamily(familyId, refreshToken);
             }
 
             log.debug("Refresh token revoked for user: {}", claims.getSubject());
@@ -337,9 +407,10 @@ public class TokenRefreshService {
      * Revokes all tokens in a token family (used when token theft is detected).
      */
     private void revokeTokenFamily(String familyId) {
-        Set<String> familyTokens = tokenFamilies.remove(familyId);
-        if (familyTokens != null) {
-            revokedTokens.addAll(familyTokens);
+        Set<String> familyTokens = tokenStore.removeFamily(familyId);
+        if (!familyTokens.isEmpty()) {
+            familyTokens.forEach(token ->
+                tokenStore.revokeToken(token, config.getRefreshTokenValiditySeconds()));
             log.warn("Revoked {} tokens in family {}", familyTokens.size(), familyId);
         }
     }
@@ -352,8 +423,8 @@ public class TokenRefreshService {
     public void revokeAllUserTokens(String userId) {
         List<String> familiesToRemove = new ArrayList<>();
 
-        for (Map.Entry<String, Set<String>> entry : tokenFamilies.entrySet()) {
-            for (String token : entry.getValue()) {
+        for (String familyId : tokenStore.getFamilyIds()) {
+            for (String token : tokenStore.getFamilyTokens(familyId)) {
                 try {
                     Claims claims = Jwts.parser()
                         .verifyWith(signingKey)
@@ -362,7 +433,7 @@ public class TokenRefreshService {
                         .getPayload();
 
                     if (userId.equals(claims.getSubject())) {
-                        familiesToRemove.add(entry.getKey());
+                        familiesToRemove.add(familyId);
                         break;
                     }
                 } catch (Exception e) {

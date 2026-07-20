@@ -1,6 +1,7 @@
 package com.adhar.kit.config;
 
 import com.adhar.kit.config.api.ConfigService;
+import com.adhar.kit.config.manager.ConfigManager;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
@@ -9,6 +10,17 @@ import java.util.Optional;
 
 /**
  * Universal Configuration facade for application configuration.
+ *
+ * <p>Operates in one of two modes:</p>
+ * <ul>
+ *   <li><b>Delegation mode</b> - when linked to a {@link ConfigManager} (see
+ *       {@link #setConfigManager(ConfigManager)}), all lookups and refreshes are
+ *       delegated to the manager (multi-source, priority merged, auto-decrypted).
+ *       The local property map remains available as a fallback for keys the
+ *       manager does not know about.</li>
+ *   <li><b>Standalone mode</b> - without a manager, lookups use the local
+ *       in-memory property map only.</li>
+ * </ul>
  *
  * <p><b>Usage Example:</b></p>
  * <pre>{@code
@@ -63,6 +75,11 @@ public class ConfigFacade implements ConfigService {
     private static volatile ConfigFacade instance;
     private final Map<String, String> properties = new HashMap<>();
 
+    /**
+     * Optional backing ConfigManager (delegation mode when non-null).
+     */
+    private volatile ConfigManager configManager;
+
     private ConfigFacade() {
         log.info("Initialized ConfigFacade");
     }
@@ -78,10 +95,38 @@ public class ConfigFacade implements ConfigService {
         return instance;
     }
 
+    /**
+     * Links this facade to a {@link ConfigManager} (delegation mode).
+     *
+     * <p>Once linked, lookups delegate to the manager first and fall back to the
+     * local property map; {@link #refresh()} triggers {@link ConfigManager#refreshAll()}.</p>
+     *
+     * @param configManager the backing config manager (null reverts to standalone mode)
+     */
+    public void setConfigManager(ConfigManager configManager) {
+        this.configManager = configManager;
+        log.info("ConfigFacade {} ConfigManager delegation",
+                configManager != null ? "enabled" : "disabled");
+    }
+
+    /**
+     * Looks up a raw value: ConfigManager first (delegation mode), local map fallback.
+     */
+    private String lookup(String key) {
+        ConfigManager manager = this.configManager;
+        if (manager != null) {
+            Object value = manager.getProperty(key);
+            if (value != null) {
+                return value.toString();
+            }
+        }
+        return properties.get(key);
+    }
+
     @Override
     public String get(String key) {
         log.debug("Getting configuration: {}", key);
-        String value = properties.get(key);
+        String value = lookup(key);
         if (value == null) {
             throw new IllegalArgumentException("Configuration key not found: " + key);
         }
@@ -91,19 +136,20 @@ public class ConfigFacade implements ConfigService {
     @Override
     public String get(String key, String defaultValue) {
         log.debug("Getting configuration: {} (default: {})", key, defaultValue);
-        return properties.getOrDefault(key, defaultValue);
+        String value = lookup(key);
+        return value != null ? value : defaultValue;
     }
 
     @Override
     public Optional<String> getOptional(String key) {
         log.debug("Getting optional configuration: {}", key);
-        return Optional.ofNullable(properties.get(key));
+        return Optional.ofNullable(lookup(key));
     }
 
     @Override
     public int getInt(String key, int defaultValue) {
         try {
-            String value = properties.get(key);
+            String value = lookup(key);
             return value != null ? Integer.parseInt(value) : defaultValue;
         } catch (NumberFormatException e) {
             log.warn("Invalid integer value for key: {}, using default: {}", key, defaultValue);
@@ -114,7 +160,7 @@ public class ConfigFacade implements ConfigService {
     @Override
     public long getLong(String key, long defaultValue) {
         try {
-            String value = properties.get(key);
+            String value = lookup(key);
             return value != null ? Long.parseLong(value) : defaultValue;
         } catch (NumberFormatException e) {
             log.warn("Invalid long value for key: {}, using default: {}", key, defaultValue);
@@ -124,14 +170,14 @@ public class ConfigFacade implements ConfigService {
 
     @Override
     public boolean getBoolean(String key, boolean defaultValue) {
-        String value = properties.get(key);
+        String value = lookup(key);
         return value != null ? Boolean.parseBoolean(value) : defaultValue;
     }
 
     @Override
     public double getDouble(String key, double defaultValue) {
         try {
-            String value = properties.get(key);
+            String value = lookup(key);
             return value != null ? Double.parseDouble(value) : defaultValue;
         } catch (NumberFormatException e) {
             log.warn("Invalid double value for key: {}, using default: {}", key, defaultValue);
@@ -145,6 +191,7 @@ public class ConfigFacade implements ConfigService {
         Map<String, String> result = new HashMap<>();
         String prefixWithDot = prefix.endsWith(".") ? prefix : prefix + ".";
 
+        // Local map first so delegated values override on key collision
         properties.entrySet().stream()
             .filter(e -> e.getKey().startsWith(prefixWithDot))
             .forEach(e -> result.put(
@@ -152,11 +199,24 @@ public class ConfigFacade implements ConfigService {
                 e.getValue()
             ));
 
+        ConfigManager manager = this.configManager;
+        if (manager != null) {
+            manager.getPropertiesWithPrefix(prefixWithDot)
+                .forEach((key, value) -> result.put(
+                    key.substring(prefixWithDot.length()),
+                    value != null ? value.toString() : null
+                ));
+        }
+
         return result;
     }
 
     @Override
     public boolean containsKey(String key) {
+        ConfigManager manager = this.configManager;
+        if (manager != null && manager.containsProperty(key)) {
+            return true;
+        }
         return properties.containsKey(key);
     }
 
@@ -168,12 +228,17 @@ public class ConfigFacade implements ConfigService {
     @Override
     public void refresh() {
         log.info("Refreshing configuration");
-        // Framework-specific implementation will override this
+        ConfigManager manager = this.configManager;
+        if (manager != null) {
+            manager.refreshAll();
+        } else {
+            log.debug("No ConfigManager linked - refresh is a no-op in standalone mode");
+        }
     }
 
     @Override
     public boolean isRefreshable() {
-        return true;
+        return configManager != null;
     }
 }
 

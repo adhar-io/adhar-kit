@@ -61,6 +61,14 @@ public class IntegrationException extends AdharException {
     }
 
     /**
+     * External system failures map to {@code 502} (Bad Gateway).
+     */
+    @Override
+    public int getHttpStatus() {
+        return 502;
+    }
+
+    /**
      * Creates an IntegrationException for timeout.
      */
     public static IntegrationException timeout(String systemName, String endpoint, long timeoutMs) {

@@ -47,4 +47,16 @@ public class AdharException extends RuntimeException {
         this.errorCode = errorCode;
         this.args = args;
     }
+
+    /**
+     * Returns the HTTP status code this exception maps to when translated to an API response.
+     *
+     * <p>Defaults to {@code 500} (Internal Server Error). Subclasses override this to provide
+     * their natural HTTP status (e.g. {@code 404} for {@link ResourceNotFoundException}).</p>
+     *
+     * @return the HTTP status code
+     */
+    public int getHttpStatus() {
+        return 500;
+    }
 }

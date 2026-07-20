@@ -52,6 +52,16 @@ public class ResilienceProperties {
      */
     private MetricsConfig metrics = new MetricsConfig();
 
+    /**
+     * Resilience event listener configuration.
+     */
+    private EventsConfig events = new EventsConfig();
+
+    /**
+     * Actuator endpoint configuration.
+     */
+    private EndpointConfig endpoint = new EndpointConfig();
+
     @Data
     public static class CircuitBreakerConfig {
         private float failureRateThreshold = 50.0f;
@@ -96,6 +106,24 @@ public class ResilienceProperties {
     public static class TimeLimiterConfig {
         private Duration timeoutDuration = Duration.ofSeconds(1);
         private boolean cancelRunningFuture = true;
+    }
+
+    @Data
+    public static class EventsConfig {
+        /**
+         * Enable/disable Resilience4j event listeners (state transitions, retry
+         * attempts, rate limiter/bulkhead rejections, time limiter timeouts).
+         */
+        private boolean enabled = true;
+    }
+
+    @Data
+    public static class EndpointConfig {
+        /**
+         * Enable/disable the {@code resilience} actuator endpoint
+         * (requires Spring Boot Actuator on the classpath).
+         */
+        private boolean enabled = true;
     }
 
     @Data

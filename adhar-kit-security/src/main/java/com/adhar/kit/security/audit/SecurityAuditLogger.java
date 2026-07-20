@@ -67,9 +67,9 @@ import java.util.Map;
 public class SecurityAuditLogger {
 
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_INSTANT;
-    private static final org.slf4j.Logger AUDIT_LOGGER = org.slf4j.LoggerFactory.getLogger("SECURITY_AUDIT");
 
     private final AdharSecurityProperties.AuditProperties config;
+    private final AuditEventSink eventSink;
 
     /**
      * Security event types.
@@ -85,12 +85,23 @@ public class SecurityAuditLogger {
     }
 
     /**
-     * Creates security audit logger.
+     * Creates security audit logger with the default SLF4J/Jackson sink.
      *
      * @param config audit configuration properties
      */
     public SecurityAuditLogger(AdharSecurityProperties.AuditProperties config) {
+        this(config, new Slf4jAuditEventSink());
+    }
+
+    /**
+     * Creates security audit logger with a custom event sink.
+     *
+     * @param config audit configuration properties
+     * @param eventSink destination for audit events
+     */
+    public SecurityAuditLogger(AdharSecurityProperties.AuditProperties config, AuditEventSink eventSink) {
         this.config = config;
+        this.eventSink = eventSink;
         if (config.isEnabled()) {
             log.info("Security audit logging enabled - Success: {}, Failure: {}, Logout: {}",
                 config.isLogSuccessfulAuth(), config.isLogFailedAuth(), config.isLogLogout());
@@ -201,14 +212,7 @@ public class SecurityAuditLogger {
                 auditData.put("details", eventDetails);
             }
 
-            // Log to audit logger
-            String auditJson = formatAsJson(auditData);
-
-            if (isFailureEvent(eventType)) {
-                AUDIT_LOGGER.warn("SECURITY_AUDIT: {}", auditJson);
-            } else {
-                AUDIT_LOGGER.info("SECURITY_AUDIT: {}", auditJson);
-            }
+            eventSink.publish(eventType, auditData);
 
         } catch (Exception e) {
             log.error("Failed to log security audit event", e);
@@ -240,13 +244,7 @@ public class SecurityAuditLogger {
                 auditData.put("details", details);
             }
 
-            String auditJson = formatAsJson(auditData);
-
-            if (isFailureEvent(eventType)) {
-                AUDIT_LOGGER.warn("SECURITY_AUDIT: {}", auditJson);
-            } else {
-                AUDIT_LOGGER.info("SECURITY_AUDIT: {}", auditJson);
-            }
+            eventSink.publish(eventType, auditData);
 
         } catch (Exception e) {
             log.error("Failed to log custom security audit event", e);
@@ -284,68 +282,4 @@ public class SecurityAuditLogger {
         return sessionId.substring(0, 8) + "***";
     }
 
-    /**
-     * Determines if the event type is a failure event.
-     */
-    private boolean isFailureEvent(SecurityEventType eventType) {
-        return eventType.name().contains("FAILURE");
-    }
-
-    /**
-     * Formats the audit data as JSON.
-     */
-    private String formatAsJson(Map<String, Object> data) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-
-        for (Map.Entry<String, Object> entry : data.entrySet()) {
-            if (!first) {
-                sb.append(",");
-            }
-            first = false;
-
-            sb.append("\"").append(entry.getKey()).append("\":");
-
-            Object value = entry.getValue();
-            if (value == null) {
-                sb.append("null");
-            } else if (value instanceof String) {
-                sb.append("\"").append(escapeJson((String) value)).append("\"");
-            } else if (value instanceof Number || value instanceof Boolean) {
-                sb.append(value);
-            } else if (value instanceof java.util.List) {
-                sb.append(formatListAsJson((java.util.List<?>) value));
-            } else if (value instanceof Map) {
-                sb.append(formatAsJson((Map<String, Object>) value));
-            } else {
-                sb.append("\"").append(escapeJson(value.toString())).append("\"");
-            }
-        }
-
-        sb.append("}");
-        return sb.toString();
-    }
-
-    private String formatListAsJson(java.util.List<?> list) {
-        StringBuilder sb = new StringBuilder("[");
-        boolean first = true;
-        for (Object item : list) {
-            if (!first) {
-                sb.append(",");
-            }
-            first = false;
-            sb.append("\"").append(escapeJson(item.toString())).append("\"");
-        }
-        sb.append("]");
-        return sb.toString();
-    }
-
-    private String escapeJson(String text) {
-        if (text == null) return "";
-        return text.replace("\\", "\\\\")
-                   .replace("\"", "\\\"")
-                   .replace("\n", "\\n")
-                   .replace("\r", "\\r")
-                   .replace("\t", "\\t");
-    }
 }

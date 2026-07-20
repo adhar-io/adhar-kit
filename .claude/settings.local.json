@@ -65,7 +65,13 @@
       "Bash(awk -F, 'NR>1{m=$4;c=$5; tot_m+=m; tot_c+=c; print $3\": missed=\"m\" covered=\"c} END{print \"---\"; print \"TOTAL missed=\"tot_m\" covered=\"tot_c; printf \"INSTR_COV=%.2f%%\\\\n\", tot_c/\\(tot_m+tot_c\\)*100}' target/site/jacoco/jacoco.csv)",
       "Bash(awk -F, 'NR>1{c+=$5;m+=$4} END{if\\(c+m>0\\) printf \"messaging: %.1f%% \\(missed=%d\\)\\\\n\", 100*c/\\(c+m\\), m}' target/site/jacoco/jacoco.csv)",
       "Bash(awk -F, 'NR>1{c+=$5;m+=$4} END{if\\(c+m>0\\) printf \"messaging coverage: %.1f%% \\(missed=%d, covered=%d\\)\\\\n\", 100*c/\\(c+m\\), m, c}' target/site/jacoco/jacoco.csv)",
-      "Bash(timeout 600 ./mvnw -q compile -Dmaven.build.cache.enabled=false)"
+      "Bash(timeout 600 ./mvnw -q compile -Dmaven.build.cache.enabled=false)",
+      "Bash(mvn -pl adhar-kit-metrics verify -Dmaven.build.cache.enabled=false)",
+      "Bash(mvn -pl adhar-kit-health clean verify -Dmaven.build.cache.enabled=false)",
+      "Bash(awk *)",
+      "Bash(mvn -q -pl adhar-kit-resilience test-compile -Dmaven.build.cache.enabled=false)",
+      "Bash(git -C /Users/tapas-pc/Documents/Work/Adhar/AdharWS/adhar-kit status --porcelain)",
+      "Bash(python3 *)"
     ]
   }
 }

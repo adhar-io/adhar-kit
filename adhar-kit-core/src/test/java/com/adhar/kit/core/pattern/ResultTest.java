@@ -151,4 +151,73 @@ class ResultTest {
         assertThat(r.isFailure()).isTrue();
         assertThat(r.getError()).isEqualTo("err");
     }
+
+    @Test
+    void recover_mapsErrorToSuccessValue() {
+        Result<String, String> r = Result.<String, String>failure("boom").recover(e -> "fallback:" + e);
+        assertThat(r.isSuccess()).isTrue();
+        assertThat(r.getValue()).isEqualTo("fallback:boom");
+    }
+
+    @Test
+    void recover_returnsSameInstanceOnSuccess() {
+        Result<String, String> r = Result.success("ok");
+        assertThat(r.recover(e -> "fallback")).isSameAs(r);
+    }
+
+    @Test
+    void fold_mapsSuccessBranch() {
+        String folded = Result.<Integer, String>success(21).fold(v -> "value=" + (v * 2), e -> "error=" + e);
+        assertThat(folded).isEqualTo("value=42");
+    }
+
+    @Test
+    void fold_mapsFailureBranch() {
+        String folded = Result.<Integer, String>failure("bad").fold(v -> "value=" + v, e -> "error=" + e);
+        assertThat(folded).isEqualTo("error=bad");
+    }
+
+    @Test
+    void orElseGet_returnsValueOnSuccessWithoutInvokingSupplier() {
+        AtomicReference<Boolean> invoked = new AtomicReference<>(false);
+        String value = Result.<String, String>success("val").orElseGet(() -> {
+            invoked.set(true);
+            return "supplied";
+        });
+        assertThat(value).isEqualTo("val");
+        assertThat(invoked.get()).isFalse();
+    }
+
+    @Test
+    void orElseGet_invokesSupplierOnFailure() {
+        String value = Result.<String, String>failure("err").orElseGet(() -> "supplied");
+        assertThat(value).isEqualTo("supplied");
+    }
+
+    @Test
+    void of_wrapsCallableResultAsSuccess() {
+        Result<String, Exception> r = Result.of(() -> "computed");
+        assertThat(r.isSuccess()).isTrue();
+        assertThat(r.getValue()).isEqualTo("computed");
+    }
+
+    @Test
+    void of_capturesThrownExceptionAsFailure() {
+        Result<String, Exception> r = Result.of(() -> {
+            throw new IllegalStateException("kaput");
+        });
+        assertThat(r.isFailure()).isTrue();
+        assertThat(r.getError())
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessage("kaput");
+    }
+
+    @Test
+    void of_capturesCheckedExceptionAsFailure() {
+        Result<String, Exception> r = Result.of(() -> {
+            throw new java.io.IOException("io");
+        });
+        assertThat(r.isFailure()).isTrue();
+        assertThat(r.getError()).isInstanceOf(java.io.IOException.class);
+    }
 }

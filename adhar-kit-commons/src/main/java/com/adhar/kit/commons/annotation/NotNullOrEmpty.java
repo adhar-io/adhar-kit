@@ -1,5 +1,8 @@
 package com.adhar.kit.commons.annotation;
 
+import jakarta.validation.Constraint;
+import jakarta.validation.Payload;
+
 import java.lang.annotation.*;
 
 /**
@@ -28,6 +31,7 @@ import java.lang.annotation.*;
 @Target({ElementType.FIELD, ElementType.PARAMETER})
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
+@Constraint(validatedBy = NotNullOrEmptyValidator.class)
 public @interface NotNullOrEmpty {
 
     /**
@@ -39,5 +43,10 @@ public @interface NotNullOrEmpty {
      * Validation groups.
      */
     Class<?>[] groups() default {};
+
+    /**
+     * Constraint payload (required by the Jakarta Bean Validation spec).
+     */
+    Class<? extends Payload>[] payload() default {};
 }
 

@@ -31,7 +31,7 @@ class TimeLimiterTest {
         assertNotNull(annotation);
         assertEquals("default", annotation.name());
         assertEquals("", annotation.fallbackMethod());
-        assertEquals(1000L, annotation.timeoutDuration());
+        assertEquals(-1L, annotation.timeoutDuration()); // -1 = use registry default config
         assertTrue(annotation.cancelRunningFuture());
     }
 

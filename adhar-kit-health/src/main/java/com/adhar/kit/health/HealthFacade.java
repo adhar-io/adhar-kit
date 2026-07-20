@@ -1,6 +1,7 @@
 package com.adhar.kit.health;
 
 import com.adhar.kit.health.api.HealthService;
+import com.adhar.kit.health.registry.RegistryHealthService;
 import com.adhar.kit.commons.framework.FrameworkDetector;
 import lombok.extern.slf4j.Slf4j;
 
@@ -55,52 +56,33 @@ public class HealthFacade implements HealthService {
 
     private HealthService createDelegate() {
         return switch (FrameworkDetector.detect()) {
-            case SPRING_BOOT -> createSpringAdapter();
-            case QUARKUS -> createQuarkusAdapter();
-            case MICRONAUT -> createMicronautAdapter();
-            case HELIDON -> createHelidonAdapter();
-            case VERTX -> createVertxAdapter();
-            default -> throw new IllegalStateException(
-                    "Unsupported framework for health: " + FrameworkDetector.detect()
-            );
+            // Spring/Quarkus/Micronaut adapters are dependency-injection managed;
+            // through the facade the registry-backed default service is used.
+            case HELIDON -> adapterOrDefault("com.adhar.kit.health.helidon.HelidonHealthAdapter", "Helidon");
+            case VERTX -> adapterOrDefault("com.adhar.kit.health.vertx.VertxHealthAdapter", "Vert.x");
+            default -> createDefaultDelegate();
         };
     }
 
-    private HealthService createSpringAdapter() {
-        // Spring adapter should be obtained via dependency injection, not through facade
-        throw new UnsupportedOperationException(
-                "Spring adapter should be injected via @Autowired SpringHealthAdapter, not accessed through HealthFacade"
-        );
-    }
-
-    private HealthService createQuarkusAdapter() {
-        throw new UnsupportedOperationException("Quarkus adapter initialization from facade not yet supported");
-    }
-
-    private HealthService createMicronautAdapter() {
-        throw new UnsupportedOperationException("Micronaut adapter initialization from facade not yet supported");
-    }
-
-    private HealthService createHelidonAdapter() {
+    /**
+     * Attempts to create a framework adapter reflectively and falls back to the
+     * registry-backed default service when the adapter is unavailable.
+     */
+    private HealthService adapterOrDefault(String adapterClassName, String frameworkName) {
         try {
-            log.debug("Creating Helidon health adapter");
-            var adapterClass = Class.forName("com.adhar.kit.health.helidon.HelidonHealthAdapter");
+            log.debug("Creating {} health adapter", frameworkName);
+            var adapterClass = Class.forName(adapterClassName);
             return (HealthService) adapterClass.getDeclaredConstructor().newInstance();
         } catch (Exception e) {
-            log.error("Failed to create Helidon health adapter", e);
-            throw new IllegalStateException("Helidon health adapter not available. Ensure Helidon dependencies are on the classpath.", e);
+            log.warn("{} health adapter not available ({}); falling back to registry-backed health service",
+                    frameworkName, e.getMessage());
+            return createDefaultDelegate();
         }
     }
 
-    private HealthService createVertxAdapter() {
-        try {
-            log.debug("Creating Vert.x health adapter");
-            var adapterClass = Class.forName("com.adhar.kit.health.vertx.VertxHealthAdapter");
-            return (HealthService) adapterClass.getDeclaredConstructor().newInstance();
-        } catch (Exception e) {
-            log.error("Failed to create Vert.x health adapter", e);
-            throw new IllegalStateException("Vert.x health adapter not available. Ensure Vert.x dependencies are on the classpath.", e);
-        }
+    private HealthService createDefaultDelegate() {
+        log.debug("Creating registry-backed health service delegate");
+        return new RegistryHealthService();
     }
 
     @Override

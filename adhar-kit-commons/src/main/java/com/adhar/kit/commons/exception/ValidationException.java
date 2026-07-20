@@ -50,6 +50,14 @@ public class ValidationException extends AdharException {
         this.fieldErrors = fieldErrors;
     }
 
+    /**
+     * Validation failures map to {@code 400} (Bad Request).
+     */
+    @Override
+    public int getHttpStatus() {
+        return 400;
+    }
+
     public List<String> getValidationErrors() {
         return validationErrors;
     }

@@ -1,11 +1,22 @@
 package com.adhar.kit.security.config;
 
+import com.adhar.kit.security.SecurityFacade;
+import com.adhar.kit.security.api.SecurityService;
+import com.adhar.kit.security.aspect.AccessControlAspect;
+import com.adhar.kit.security.audit.AuditEventSink;
 import com.adhar.kit.security.audit.SecurityAuditLogger;
+import com.adhar.kit.security.audit.Slf4jAuditEventSink;
+import com.adhar.kit.security.filter.ApiKeyAuthenticationFilter;
 import com.adhar.kit.security.filter.RateLimitingFilter;
 import com.adhar.kit.security.properties.AdharSecurityProperties;
+import com.adhar.kit.security.service.ApiKeyService;
+import com.adhar.kit.security.service.InMemoryRefreshTokenStore;
+import com.adhar.kit.security.service.RefreshTokenStore;
 import com.adhar.kit.security.service.TokenRefreshService;
+import com.adhar.kit.security.spring.SpringSecurityAdapter;
 import com.adhar.kit.security.util.JwtUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -15,6 +26,7 @@ import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.Ordered;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -256,28 +268,123 @@ public class AdharSecurityAutoConfiguration {
     }
 
     /**
+     * Configures the audit event sink used by the security audit logger.
+     *
+     * @return the audit event sink (SLF4J/Jackson by default)
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.security.audit", name = "enabled", havingValue = "true")
+    public AuditEventSink auditEventSink() {
+        return new Slf4jAuditEventSink();
+    }
+
+    /**
      * Configures the security audit logger.
      *
+     * @param auditEventSink destination for audit events
      * @return the security audit logger
      */
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnProperty(prefix = "adhar.security.audit", name = "enabled", havingValue = "true")
-    public SecurityAuditLogger securityAuditLogger() {
+    public SecurityAuditLogger securityAuditLogger(AuditEventSink auditEventSink) {
         log.info("Configuring security audit logger");
-        return new SecurityAuditLogger(properties.getAudit());
+        return new SecurityAuditLogger(properties.getAudit(), auditEventSink);
+    }
+
+    /**
+     * Configures the refresh-token store (in-memory by default; replace with a
+     * distributed implementation for multi-node deployments).
+     *
+     * @return the refresh token store
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.security.token-refresh", name = "enabled", havingValue = "true")
+    public RefreshTokenStore refreshTokenStore() {
+        return new InMemoryRefreshTokenStore();
     }
 
     /**
      * Configures the token refresh service.
      *
+     * @param refreshTokenStore store for token families and revocations
      * @return the token refresh service
      */
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnProperty(prefix = "adhar.security.token-refresh", name = "enabled", havingValue = "true")
-    public TokenRefreshService tokenRefreshService() {
+    public TokenRefreshService tokenRefreshService(RefreshTokenStore refreshTokenStore) {
         log.info("Configuring token refresh service");
-        return new TokenRefreshService(properties.getTokenRefresh());
+        return new TokenRefreshService(properties.getTokenRefresh(), refreshTokenStore);
+    }
+
+    /**
+     * Configures the Spring-backed {@link SecurityService} and registers it as the
+     * delegate of the universal {@link SecurityFacade}.
+     *
+     * @param passwordEncoder optional user-provided password encoder
+     * @param jwtUtils optional JWT utils
+     * @param tokenRefreshService optional token refresh service (enables token operations)
+     * @return the security service adapter
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public SecurityService securityService(ObjectProvider<PasswordEncoder> passwordEncoder,
+                                           ObjectProvider<JwtUtils> jwtUtils,
+                                           ObjectProvider<TokenRefreshService> tokenRefreshService) {
+        SpringSecurityAdapter adapter = new SpringSecurityAdapter(
+            passwordEncoder.getIfAvailable(),
+            jwtUtils.getIfAvailable(),
+            tokenRefreshService.getIfAvailable());
+        SecurityFacade.getInstance().setDelegate(adapter);
+        log.info("Registered SpringSecurityAdapter as SecurityFacade delegate");
+        return adapter;
+    }
+
+    /**
+     * Configures the aspect enforcing @RequiresRole / @RequiresPermission annotations.
+     *
+     * @param securityService the security service used for evaluation
+     * @return the access-control aspect
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.security.rbac", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public AccessControlAspect accessControlAspect(SecurityService securityService) {
+        log.info("Configuring RBAC access-control aspect");
+        return new AccessControlAspect(securityService);
+    }
+
+    /**
+     * Configures the API-key service validating configured SHA-256 key hashes.
+     *
+     * @return the API key service
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.security.api-key", name = "enabled", havingValue = "true")
+    public ApiKeyService apiKeyService() {
+        log.info("Configuring API key service");
+        return new ApiKeyService(properties.getApiKey());
+    }
+
+    /**
+     * Configures the API-key authentication filter.
+     *
+     * @param apiKeyService the API key service
+     * @return the API-key filter registration
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.security.api-key", name = "enabled", havingValue = "true")
+    public FilterRegistrationBean<ApiKeyAuthenticationFilter> apiKeyAuthenticationFilter(ApiKeyService apiKeyService) {
+        log.info("Configuring API key authentication filter (header: {})", properties.getApiKey().getHeaderName());
+        ApiKeyAuthenticationFilter filter = new ApiKeyAuthenticationFilter(properties.getApiKey(), apiKeyService);
+        FilterRegistrationBean<ApiKeyAuthenticationFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 20);
+        registration.addUrlPatterns("/*");
+        return registration;
     }
 }

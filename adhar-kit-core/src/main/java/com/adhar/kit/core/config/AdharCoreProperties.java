@@ -1,6 +1,7 @@
 package com.adhar.kit.core.config;
 
 import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * Core configuration properties for Adhar Kit.
@@ -30,12 +31,23 @@ import lombok.Data;
  * @since 1.0.0
  */
 @Data
+@ConfigurationProperties(prefix = "adhar.core")
 public class AdharCoreProperties {
 
     /**
      * Enable core features.
      */
     private boolean enabled = true;
+
+    /**
+     * Aspect (AOP) configuration.
+     */
+    private AspectsConfig aspects = new AspectsConfig();
+
+    /**
+     * Snowflake ID generation configuration.
+     */
+    private SnowflakeConfig snowflake = new SnowflakeConfig();
 
     /**
      * Async configuration.
@@ -184,6 +196,30 @@ public class AdharCoreProperties {
          * Time-to-idle in seconds.
          */
         private long tti = 180;
+    }
+
+    /**
+     * Aspect (AOP) configuration for the @Retry/@Memoize/@Async annotations.
+     */
+    @Data
+    public static class AspectsConfig {
+        /**
+         * Enable AOP aspects for the core annotations.
+         */
+        private boolean enabled = true;
+    }
+
+    /**
+     * Snowflake ID generation configuration.
+     */
+    @Data
+    public static class SnowflakeConfig {
+        /**
+         * Node/worker id (0-1023). -1 resolves from the ADHAR_SNOWFLAKE_NODE_ID
+         * environment variable, the adhar.core.snowflake.node-id system property,
+         * or a hostname-derived fallback.
+         */
+        private long nodeId = -1;
     }
 
     /**

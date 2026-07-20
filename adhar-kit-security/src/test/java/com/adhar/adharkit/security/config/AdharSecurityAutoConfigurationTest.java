@@ -1,11 +1,23 @@
 package com.adhar.adharkit.security.config;
 
+import com.adhar.kit.security.SecurityFacade;
+import com.adhar.kit.security.api.SecurityService;
+import com.adhar.kit.security.aspect.AccessControlAspect;
+import com.adhar.kit.security.audit.AuditEventSink;
+import com.adhar.kit.security.audit.SecurityAuditLogger;
+import com.adhar.kit.security.audit.Slf4jAuditEventSink;
 import com.adhar.kit.security.config.AdharSecurityAutoConfiguration;
 import com.adhar.kit.security.properties.AdharSecurityProperties;
+import com.adhar.kit.security.service.ApiKeyService;
+import com.adhar.kit.security.service.InMemoryRefreshTokenStore;
+import com.adhar.kit.security.service.RefreshTokenStore;
+import com.adhar.kit.security.service.TokenRefreshService;
+import com.adhar.kit.security.spring.SpringSecurityAdapter;
 import com.adhar.kit.security.util.JwtUtils;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -77,6 +89,95 @@ public class AdharSecurityAutoConfigurationTest {
                 .run(context -> {
                     assertThat(context).doesNotHaveBean(AdharSecurityAutoConfiguration.class);
                 });
+    }
+
+    @Test
+    public void testSecurityServiceAdapterRegisteredAndWiredIntoFacade() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(SecurityService.class);
+                    assertThat(context.getBean(SecurityService.class))
+                            .isInstanceOf(SpringSecurityAdapter.class);
+                    assertThat(SecurityFacade.getInstance().hasDelegate()).isTrue();
+                });
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testAccessControlAspectEnabledByDefaultAndCanBeDisabled() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .run(context -> assertThat(context).hasSingleBean(AccessControlAspect.class));
+
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .withPropertyValues("adhar.security.rbac.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(AccessControlAspect.class));
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testTokenRefreshBeansLoadWithStore() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .withPropertyValues(
+                        "adhar.security.token-refresh.enabled=true",
+                        "adhar.security.token-refresh.secret=this-is-a-very-long-test-secret-key-256bits!!"
+                )
+                .run(context -> {
+                    assertThat(context).hasSingleBean(RefreshTokenStore.class);
+                    assertThat(context.getBean(RefreshTokenStore.class))
+                            .isInstanceOf(InMemoryRefreshTokenStore.class);
+                    assertThat(context).hasSingleBean(TokenRefreshService.class);
+                });
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testTokenRefreshBeansAbsentByDefault() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(RefreshTokenStore.class);
+                    assertThat(context).doesNotHaveBean(TokenRefreshService.class);
+                });
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testApiKeyBeansLoadWhenEnabled() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .withPropertyValues("adhar.security.api-key.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(ApiKeyService.class);
+                    assertThat(context.getBeansOfType(FilterRegistrationBean.class))
+                            .containsKey("apiKeyAuthenticationFilter");
+                });
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testApiKeyBeansAbsentByDefault() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .run(context -> assertThat(context).doesNotHaveBean(ApiKeyService.class));
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testAuditBeansLoadWhenEnabled() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .withPropertyValues("adhar.security.audit.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(AuditEventSink.class);
+                    assertThat(context.getBean(AuditEventSink.class))
+                            .isInstanceOf(Slf4jAuditEventSink.class);
+                    assertThat(context).hasSingleBean(SecurityAuditLogger.class);
+                });
+        SecurityFacade.getInstance().clearDelegate();
     }
 
     @Configuration

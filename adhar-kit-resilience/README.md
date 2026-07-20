@@ -26,7 +26,16 @@ Enterprise-grade resilience patterns for microservices using Resilience4j.
 - **Bulkhead** - Isolate resources and limit concurrent executions
 - **Time Limiter** - Handle timeouts gracefully
 - **Metrics Integration** - Full Micrometer metrics support
-- **Annotation-based** - Simple annotation-driven configuration
+- **Annotation-based** - Simple annotation-driven configuration; annotation attributes
+  (e.g. `@Retry(maxAttempts = 5)`) are honored when the named instance is created
+- **Ordered composition** - Stacked annotations compose in the recommended order
+  `Retry -> CircuitBreaker -> RateLimiter -> TimeLimiter -> Bulkhead` and execute the method once per attempt
+- **Async support** - Methods returning `CompletableFuture`/`CompletionStage` are decorated
+  with the non-blocking async variants (including `TimeLimiter`)
+- **Event listeners** - Circuit breaker transitions, retry attempts, rate limiter/bulkhead
+  rejections and time limiter timeouts are logged as structured warnings and counted
+- **Actuator endpoint** - `GET /actuator/resilience` (metrics + events) and
+  `POST /actuator/resilience/{name}` to reset a circuit breaker
 
 ## Quick Start
 
@@ -195,7 +204,20 @@ adhar.resilience.metrics.enabled=true
 
 ## Advanced Usage
 
+### Annotation Attributes and Defaults
+
+Numeric annotation attributes default to `-1`, which means "inherit the registry default
+(or `adhar.resilience.*` property-driven) configuration". Explicitly set attributes are
+applied when the named instance is first created and the instance is cached per name.
+If a name is already configured through properties, the property configuration wins.
+
 ### Combining Multiple Patterns
+
+A single unified aspect collects **all** resilience annotations on a method and composes
+the Resilience4j decorators in the recommended order (outermost to innermost):
+`Retry -> CircuitBreaker -> RateLimiter -> TimeLimiter -> Bulkhead`. The method body runs
+once per retry attempt, and the first configured `fallbackMethod` (in that same order)
+guards the whole composed chain.
 
 ```java
 @Service
@@ -214,6 +236,33 @@ public class AdvancedService {
         return Response.error("Service temporarily unavailable");
     }
 }
+```
+
+### Async Methods
+
+Methods returning `CompletableFuture`/`CompletionStage` are decorated with the
+asynchronous decorator variants (`decorateCompletionStage`), including a non-blocking
+time limiter, so no caller thread is blocked. Fallback methods may return either the
+plain value or a `CompletableFuture`.
+
+### Resilience Events and Actuator Endpoint
+
+Resilience4j events are logged as structured warnings and counted per instance:
+circuit breaker state transitions, retry attempts, rate limiter rejections, bulkhead
+rejections and time limiter timeouts. Counters are exposed via
+`ResilienceMetricsService.getEventMetrics()` and the actuator endpoint (requires
+`spring-boot-starter-actuator` and the endpoint being exposed):
+
+```
+GET  /actuator/resilience          # metrics for all patterns + events section
+POST /actuator/resilience/{name}   # reset the named circuit breaker
+```
+
+Toggles (all default to `true`):
+
+```properties
+adhar.resilience.events.enabled=true
+adhar.resilience.endpoint.enabled=true
 ```
 
 ### Accessing Metrics Programmatically

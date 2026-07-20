@@ -143,6 +143,20 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- AOP (Optional) - runtime support for the caching annotations/aspects -->
+        <dependency>
+            <groupId>org.aspectj</groupId>
+            <artifactId>aspectjweaver</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Metrics (Optional) - Micrometer binding for cache statistics -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Utility Dependencies -->
         <dependency>
             <groupId>org.projectlombok</groupId>

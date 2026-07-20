@@ -246,12 +246,42 @@ public class OrderService {
 - `@MonitorPerformance` - Comprehensive performance monitoring
 - `@CacheMetrics` - Cache hit/miss rate tracking
 - `@DatabaseMetrics` - Database query performance monitoring
-- `@ApiMetrics` - REST API endpoint monitoring
+- `@ApiMetrics` - REST API endpoint monitoring (records real outcome: success/error + exception type)
+- `@BusinessMetric` - Business KPI counters with optional value distributions (e.g. orders placed, revenue)
+
+### 🌐 **HTTP Request Metrics (HttpMetricsFilter)**
+A servlet filter (auto-registered in servlet web apps when `adhar.metrics.web.enabled=true`) records the
+timer `adhar.http.server.requests` per request with tags:
+- `method`, `status` (the **actual** response status), `outcome` (`2xx`/`4xx`/`5xx`)
+- `uri` - cardinality-safe: uses the Spring MVC best-matching handler pattern when available, otherwise a
+  bounded normalization that replaces numeric/UUID path segments with `{id}`; additionally guarded by the
+  `TagCardinalityLimiter` (max distinct values per tag key, default 100 via `adhar.metrics.web.maxUriTags`,
+  overflow becomes `other`).
+
+### 📉 **SLO Tracking (SloRecorder)**
+Configure availability objectives and get error-budget gauges computed over a rolling window
+(`adhar.metrics.slo.window-seconds`, default 3600):
+
+```yaml
+adhar:
+  metrics:
+    slo:
+      enabled: true
+      window-seconds: 3600
+      targets:
+        global: 0.99      # applies to all requests
+        checkout: 0.999   # matches uris containing the /checkout segment
+```
+
+Published gauges per target: `adhar.slo.error_budget.remaining` (1.0 = untouched, 0.0 = exhausted) and
+`adhar.slo.burn_rate` (>1.0 means the budget is being burned faster than the SLO allows). Outcomes are fed
+automatically from `HttpMetricsFilter` (success = status < 500) or manually via `sloRecorder.record(target, success)`.
 
 ### 🔧 **Programmatic Metrics API**
 - **AdharMetrics** - Fluent API for manual metrics management
 - **MetricsUtils** - Comprehensive utility methods
 - **KubernetesMetricsUtils** - Kubernetes-specific metrics
+- **TagCardinalityLimiter** - Reusable guard that bounds distinct values per tag key (overflow -> `other`)
 
 ### 🚀 **Enterprise Features**
 - **Multi-registry support** - Prometheus, OpenTelemetry, custom registries

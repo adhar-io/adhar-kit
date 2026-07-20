@@ -1,8 +1,19 @@
 package com.adhar.adharkit.logging.config;
 
 import com.adhar.adharkit.logging.aspect.*;
+import com.adhar.adharkit.logging.audit.AuditEventLogger;
+import com.adhar.adharkit.logging.batch.BatchJobLogger;
 import com.adhar.adharkit.logging.encoder.MaskingJsonEncoder;
+import com.adhar.adharkit.logging.event.AppLogEventPublisher;
+import com.adhar.adharkit.logging.event.AppLogEventSink;
+import com.adhar.adharkit.logging.event.BusinessEventLogger;
+import com.adhar.adharkit.logging.event.Slf4jAppLogEventSink;
 import com.adhar.adharkit.logging.filter.MdcLoggingFilter;
+import com.adhar.adharkit.logging.filter.RestApiLoggingFilter;
+import com.adhar.adharkit.logging.interceptor.RestApiLoggingInterceptor;
+import com.adhar.adharkit.logging.masking.LogDataMasker;
+import com.adhar.adharkit.logging.performance.PerformanceLogger;
+import com.adhar.adharkit.logging.processor.LoggerInjectionBeanPostProcessor;
 import com.adhar.adharkit.logging.properties.AdharLoggingProperties;
 import com.adhar.adharkit.logging.util.AdharLogger;
 import com.adhar.adharkit.logging.util.LoggingUtils;
@@ -12,6 +23,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -21,7 +33,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.core.Ordered;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -238,5 +253,165 @@ public class AdharLoggingAutoConfiguration {
     public LogMetricsAspect logMetricsAspect(ObjectMapper objectMapper) {
         log.debug("Creating LogMetricsAspect bean");
         return new LogMetricsAspect(objectMapper);
+    }
+
+    // ==================== AppLogEvent pipeline ====================
+
+    /**
+     * Creates the central data masker used by the event pipeline, API logging and audit logging.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public LogDataMasker logDataMasker() {
+        log.debug("Creating LogDataMasker bean (strategy: {})", properties.getMasking().getStrategy());
+        return new LogDataMasker(properties.getMasking());
+    }
+
+    /**
+     * Creates the default SLF4J sink that writes AppLogEvents as JSON to per-type loggers.
+     */
+    @Bean
+    @ConditionalOnMissingBean(AppLogEventSink.class)
+    public Slf4jAppLogEventSink slf4jAppLogEventSink(ObjectMapper objectMapper) {
+        log.debug("Creating Slf4jAppLogEventSink bean (prefix: {})", properties.getEvents().getLoggerPrefix());
+        return new Slf4jAppLogEventSink(properties, objectMapper);
+    }
+
+    /**
+     * Creates the AppLogEvent publisher that enriches, masks and dispatches events to all sinks.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public AppLogEventPublisher appLogEventPublisher(LogDataMasker masker, List<AppLogEventSink> sinks) {
+        log.info("Creating AppLogEventPublisher bean with {} sink(s)", sinks.size());
+        return new AppLogEventPublisher(properties, masker, sinks);
+    }
+
+    /**
+     * Creates the business event / operation tracking API.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public BusinessEventLogger businessEventLogger(AppLogEventPublisher publisher) {
+        log.debug("Creating BusinessEventLogger bean");
+        return new BusinessEventLogger(publisher);
+    }
+
+    /**
+     * Creates the programmatic audit trail API.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.logging.audit", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public AuditEventLogger auditEventLogger(AppLogEventPublisher publisher, LogDataMasker masker) {
+        log.debug("Creating AuditEventLogger bean");
+        return new AuditEventLogger(properties, publisher, masker);
+    }
+
+    /**
+     * Creates the batch job logging API.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.logging.batch", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public BatchJobLogger batchJobLogger(AppLogEventPublisher publisher) {
+        log.debug("Creating BatchJobLogger bean");
+        return new BatchJobLogger(properties, publisher);
+    }
+
+    /**
+     * Creates the performance logging API (timers, aggregated stats, slow-operation detection).
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.logging.performance", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public PerformanceLogger performanceLogger(AppLogEventPublisher publisher) {
+        log.debug("Creating PerformanceLogger bean");
+        return new PerformanceLogger(properties, publisher);
+    }
+
+    /**
+     * Creates the BeanPostProcessor that injects loggers into @InjectLogger fields.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public LoggerInjectionBeanPostProcessor loggerInjectionBeanPostProcessor(
+            ObjectProvider<AdharLogger> adharLoggerProvider) {
+        log.debug("Creating LoggerInjectionBeanPostProcessor bean");
+        return new LoggerInjectionBeanPostProcessor(adharLoggerProvider);
+    }
+
+    // ==================== New event-driven aspects ====================
+
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.logging.aspects", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public LogOperationAspect logOperationAspect(AppLogEventPublisher publisher, LogDataMasker masker) {
+        log.debug("Creating LogOperationAspect bean");
+        return new LogOperationAspect(publisher, masker);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.logging.aspects", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public BusinessEventAspect businessEventAspect(AppLogEventPublisher publisher, LogDataMasker masker) {
+        log.debug("Creating BusinessEventAspect bean");
+        return new BusinessEventAspect(publisher, masker);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.logging.aspects", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public TrackPerformanceAspect trackPerformanceAspect(PerformanceLogger performanceLogger) {
+        log.debug("Creating TrackPerformanceAspect bean");
+        return new TrackPerformanceAspect(performanceLogger);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "adhar.logging.aspects", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public LogBatchJobAspect logBatchJobAspect(BatchJobLogger batchJobLogger) {
+        log.debug("Creating LogBatchJobAspect bean");
+        return new LogBatchJobAspect(batchJobLogger);
+    }
+
+    // ==================== REST API logging (web applications only) ====================
+
+    /**
+     * Registers the REST API logging filter right after the MDC filter so API events inherit the
+     * full MDC context (correlation ID, user, tracing).
+     */
+    @Bean
+    @ConditionalOnWebApplication
+    @ConditionalOnProperty(prefix = "adhar.logging.rest-api", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public FilterRegistrationBean<RestApiLoggingFilter> restApiLoggingFilter(
+            AppLogEventPublisher publisher, LogDataMasker masker) {
+        log.debug("Creating RestApiLoggingFilter bean");
+        RestApiLoggingFilter filter = new RestApiLoggingFilter(properties, publisher, masker);
+        FilterRegistrationBean<RestApiLoggingFilter> registrationBean = new FilterRegistrationBean<>(filter);
+        registrationBean.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
+        return registrationBean;
+    }
+
+    /**
+     * Registers the handler interceptor that tracks controller execution when Spring MVC is on
+     * the classpath.
+     */
+    @Configuration
+    @ConditionalOnWebApplication
+    @ConditionalOnClass(WebMvcConfigurer.class)
+    @ConditionalOnProperty(prefix = "adhar.logging.rest-api", name = "interceptor-enabled", havingValue = "true", matchIfMissing = true)
+    static class RestApiInterceptorConfiguration implements WebMvcConfigurer {
+
+        private final AppLogEventPublisher publisher;
+
+        RestApiInterceptorConfiguration(AppLogEventPublisher publisher) {
+            this.publisher = publisher;
+        }
+
+        @Override
+        public void addInterceptors(InterceptorRegistry registry) {
+            registry.addInterceptor(new RestApiLoggingInterceptor(publisher));
+        }
     }
 }

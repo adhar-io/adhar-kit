@@ -5,7 +5,9 @@ import lombok.Getter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Result pattern for handling success/failure scenarios without exceptions.
@@ -238,6 +240,41 @@ public abstract class Result<T, E> {
     }
 
     /**
+     * Recovers from a failure by mapping the error to a success value.
+     *
+     * @param recovery maps the error to a replacement value
+     * @return this result if success, otherwise a success with the recovered value
+     */
+    public Result<T, E> recover(Function<E, T> recovery) {
+        if (isSuccess()) {
+            return this;
+        }
+        return success(recovery.apply(getError()));
+    }
+
+    /**
+     * Folds both branches into a single value (alias of {@link #match}).
+     *
+     * @param successMapper maps success value
+     * @param failureMapper maps error value
+     * @param <R> result type
+     * @return mapped value
+     */
+    public <R> R fold(Function<T, R> successMapper, Function<E, R> failureMapper) {
+        return match(successMapper, failureMapper);
+    }
+
+    /**
+     * Gets the success value or a lazily supplied fallback.
+     *
+     * @param supplier fallback supplier, invoked only on failure
+     * @return success value or supplied fallback
+     */
+    public T orElseGet(Supplier<T> supplier) {
+        return isSuccess() ? getValue() : supplier.get();
+    }
+
+    /**
      * Converts to Optional.
      *
      * @return optional of success value
@@ -270,6 +307,21 @@ public abstract class Result<T, E> {
      */
     public static <T, E> Result<T, E> failure(E error) {
         return new Failure<>(error);
+    }
+
+    /**
+     * Executes a callable, capturing any thrown exception as a failure.
+     *
+     * @param callable operation to execute
+     * @param <T> success type
+     * @return success with the callable's value, or failure with the exception
+     */
+    public static <T> Result<T, Exception> of(Callable<T> callable) {
+        try {
+            return success(callable.call());
+        } catch (Exception e) {
+            return failure(e);
+        }
     }
 
     /**

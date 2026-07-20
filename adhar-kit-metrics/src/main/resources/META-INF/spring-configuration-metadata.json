@@ -46,6 +46,12 @@
       "type": "com.adhar.kit.metrics.properties.AdharMetricsProperties$KubernetesProperties",
       "sourceType": "com.adhar.kit.metrics.properties.AdharMetricsProperties",
       "description": "Configuration properties for Kubernetes-specific metrics."
+    },
+    {
+      "name": "adhar.metrics.slo",
+      "type": "com.adhar.kit.metrics.properties.AdharMetricsProperties$SloProperties",
+      "sourceType": "com.adhar.kit.metrics.properties.AdharMetricsProperties",
+      "description": "Configuration properties for SLO (Service Level Objective) tracking."
     }
   ],
   "properties": [
@@ -61,6 +67,26 @@
       "type": "java.util.Map<java.lang.String,java.lang.String>",
       "sourceType": "com.adhar.kit.metrics.properties.AdharMetricsProperties",
       "description": "Common tags to be applied to all metrics."
+    },
+    {
+      "name": "adhar.metrics.slo.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "com.adhar.kit.metrics.properties.AdharMetricsProperties$SloProperties",
+      "description": "Whether SLO tracking is enabled.",
+      "defaultValue": true
+    },
+    {
+      "name": "adhar.metrics.slo.targets",
+      "type": "java.util.Map<java.lang.String,java.lang.Double>",
+      "sourceType": "com.adhar.kit.metrics.properties.AdharMetricsProperties$SloProperties",
+      "description": "SLO availability objectives keyed by target name (e.g. checkout=0.999). The special key 'global' applies to all requests."
+    },
+    {
+      "name": "adhar.metrics.slo.window-seconds",
+      "type": "java.lang.Long",
+      "sourceType": "com.adhar.kit.metrics.properties.AdharMetricsProperties$SloProperties",
+      "description": "Length of the rolling window (in seconds) over which the error budget and burn rate are computed.",
+      "defaultValue": 3600
     },
     {
       "name": "adhar.metrics.prometheus.enabled",

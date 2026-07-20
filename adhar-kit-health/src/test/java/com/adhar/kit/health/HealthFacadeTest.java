@@ -4,6 +4,7 @@ import com.adhar.kit.commons.framework.Framework;
 import com.adhar.kit.commons.framework.FrameworkDetector;
 import com.adhar.kit.health.api.HealthService;
 import com.adhar.kit.health.api.HealthService.HealthStatus;
+import com.adhar.kit.health.registry.RegistryHealthService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -13,7 +14,6 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -21,11 +21,11 @@ import static org.mockito.Mockito.when;
 /**
  * Tests for {@link HealthFacade}.
  *
- * <p>The facade resolves a framework-specific delegate in its private constructor, and
- * for every framework the delegate creation throws (Spring/Quarkus/Micronaut adapters are
- * unsupported through the facade, and Helidon/Vert.x adapters are not on the classpath).
- * These tests drive the framework dispatch via {@link FrameworkDetector} and exercise the
- * delegating methods on an instance whose delegate is injected reflectively.</p>
+ * <p>The facade now falls back to a registry-backed {@link RegistryHealthService}
+ * delegate for every framework where a dedicated adapter is not reachable, so
+ * {@code getInstance()} works everywhere. These tests drive the framework dispatch
+ * via {@link FrameworkDetector} and verify both delegate selection and the
+ * end-to-end check behavior of the fallback.</p>
  */
 class HealthFacadeTest {
 
@@ -36,58 +36,87 @@ class HealthFacadeTest {
     }
 
     @Test
-    void getInstance_onSpringBootClasspath_throwsUnsupported() throws Exception {
+    void getInstance_onSpringBootClasspath_usesRegistryBackedDelegate() throws Exception {
+        resetDetection(); // Spring Boot is detected on the test classpath
+        resetInstance();
+
+        HealthFacade facade = HealthFacade.getInstance();
+
+        assertThat(delegateOf(facade)).isInstanceOf(RegistryHealthService.class);
+    }
+
+    @Test
+    void getInstance_returnsSameSingleton() throws Exception {
         resetDetection();
         resetInstance();
-        // Spring Boot is detected on the test classpath.
-        assertThatThrownBy(HealthFacade::getInstance)
-            .isInstanceOf(UnsupportedOperationException.class)
-            .hasMessageContaining("Spring adapter");
+
+        assertThat(HealthFacade.getInstance()).isSameAs(HealthFacade.getInstance());
     }
 
     @Test
-    void createDelegate_quarkus_throwsUnsupported() throws Exception {
+    void createDelegate_quarkus_fallsBackToRegistry() throws Exception {
         force(Framework.QUARKUS);
         resetInstance();
-        assertThatThrownBy(HealthFacade::getInstance)
-            .isInstanceOf(UnsupportedOperationException.class)
-            .hasMessageContaining("Quarkus");
+
+        assertThat(delegateOf(HealthFacade.getInstance())).isInstanceOf(RegistryHealthService.class);
     }
 
     @Test
-    void createDelegate_micronaut_throwsUnsupported() throws Exception {
+    void createDelegate_micronaut_fallsBackToRegistry() throws Exception {
         force(Framework.MICRONAUT);
         resetInstance();
-        assertThatThrownBy(HealthFacade::getInstance)
-            .isInstanceOf(UnsupportedOperationException.class)
-            .hasMessageContaining("Micronaut");
+
+        assertThat(delegateOf(HealthFacade.getInstance())).isInstanceOf(RegistryHealthService.class);
     }
 
     @Test
-    void createDelegate_helidon_throwsIllegalStateBecauseAdapterMissing() throws Exception {
+    void createDelegate_helidonAdapterMissing_fallsBackToRegistry() throws Exception {
         force(Framework.HELIDON);
         resetInstance();
-        assertThatThrownBy(HealthFacade::getInstance)
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("Helidon");
+
+        // Helidon adapter sources are excluded from compilation, so reflection fails
+        // and the facade must fall back instead of throwing.
+        assertThat(delegateOf(HealthFacade.getInstance())).isInstanceOf(RegistryHealthService.class);
     }
 
     @Test
-    void createDelegate_vertx_throwsIllegalStateBecauseAdapterMissing() throws Exception {
+    void createDelegate_vertxAdapterMissing_fallsBackToRegistry() throws Exception {
         force(Framework.VERTX);
         resetInstance();
-        assertThatThrownBy(HealthFacade::getInstance)
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("Vert.x");
+
+        assertThat(delegateOf(HealthFacade.getInstance())).isInstanceOf(RegistryHealthService.class);
     }
 
     @Test
-    void createDelegate_unknownFramework_throwsIllegalState() throws Exception {
+    void createDelegate_unknownFramework_usesRegistryBackedDelegate() throws Exception {
         force(Framework.OTHER);
         resetInstance();
-        assertThatThrownBy(HealthFacade::getInstance)
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("Unsupported framework");
+
+        assertThat(delegateOf(HealthFacade.getInstance())).isInstanceOf(RegistryHealthService.class);
+    }
+
+    @Test
+    void facade_isFunctionalEndToEnd_withFallbackDelegate() throws Exception {
+        force(Framework.OTHER);
+        resetInstance();
+        HealthFacade facade = HealthFacade.getInstance();
+
+        assertThat(facade.getHealth()).isEqualTo(HealthStatus.UP);
+
+        facade.registerHealthCheck("ok", () -> HealthStatus.UP);
+        facade.registerLivenessCheck("live", () -> HealthStatus.UP);
+        facade.registerReadinessCheck("notReady", () -> HealthStatus.DOWN);
+
+        assertThat(facade.getLiveness()).isEqualTo(HealthStatus.UP);
+        assertThat(facade.getReadiness()).isEqualTo(HealthStatus.DOWN);
+        assertThat(facade.getHealth()).isEqualTo(HealthStatus.DOWN);
+        assertThat(facade.getDetailedHealth())
+            .containsEntry("ok", HealthStatus.UP)
+            .containsEntry("notReady", HealthStatus.DOWN);
+        assertThat(facade.hasHealthCheck("ok")).isTrue();
+
+        assertThat(facade.unregisterHealthCheck("notReady")).isTrue();
+        assertThat(facade.getHealth()).isEqualTo(HealthStatus.UP);
     }
 
     @Test
@@ -138,7 +167,13 @@ class HealthFacadeTest {
         f.set(null, null);
     }
 
-    /** Allocates a HealthFacade without running its (always-throwing) constructor. */
+    private static HealthService delegateOf(HealthFacade facade) throws Exception {
+        Field delegateField = HealthFacade.class.getDeclaredField("delegate");
+        delegateField.setAccessible(true);
+        return (HealthService) delegateField.get(facade);
+    }
+
+    /** Allocates a HealthFacade with an injected mock delegate. */
     private static HealthFacade facadeWithDelegate(HealthService delegate) throws Exception {
         Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
         Field theUnsafe = unsafeClass.getDeclaredField("theUnsafe");

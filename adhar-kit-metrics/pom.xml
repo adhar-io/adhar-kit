@@ -70,6 +70,13 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Servlet API (Optional - only needed when the HttpMetricsFilter is used) -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- Quarkus (Optional) -->
         <dependency>
             <groupId>io.quarkus</groupId>

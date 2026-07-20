@@ -1,1 +1,2 @@
 com.adhar.adharkit.cache.config.AdharCacheAutoConfiguration
+com.adhar.adharkit.cache.config.AdharCacheAspectsAutoConfiguration

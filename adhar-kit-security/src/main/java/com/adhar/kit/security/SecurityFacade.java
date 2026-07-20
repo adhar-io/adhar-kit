@@ -61,6 +61,13 @@ public class SecurityFacade implements SecurityService {
 
     private static volatile SecurityFacade instance;
 
+    /**
+     * Framework-specific delegate (e.g. the Spring adapter). When set, all calls are
+     * forwarded to it; otherwise the safe stub defaults below are used so the facade
+     * remains usable in non-Spring environments.
+     */
+    private volatile SecurityService delegate;
+
     private SecurityFacade() {
         log.info("Initialized SecurityFacade");
     }
@@ -76,37 +83,84 @@ public class SecurityFacade implements SecurityService {
         return instance;
     }
 
+    /**
+     * Registers a framework-specific {@link SecurityService} implementation that this
+     * facade delegates to (e.g. {@code SpringSecurityAdapter}). Setting the facade
+     * itself as delegate is ignored to avoid infinite recursion.
+     *
+     * @param delegate the delegate, or null to clear
+     */
+    public void setDelegate(SecurityService delegate) {
+        if (delegate == this) {
+            log.warn("Ignoring attempt to set SecurityFacade as its own delegate");
+            return;
+        }
+        this.delegate = delegate;
+        log.info("SecurityFacade delegate set to: {}", delegate != null ? delegate.getClass().getName() : "none");
+    }
+
+    /**
+     * Clears the registered delegate, restoring stub fallback behavior.
+     */
+    public void clearDelegate() {
+        this.delegate = null;
+    }
+
+    /**
+     * Whether a framework-specific delegate is registered.
+     *
+     * @return true if delegation is active
+     */
+    public boolean hasDelegate() {
+        return delegate != null;
+    }
+
     @Override
     public String getCurrentUserId() {
-        log.debug("Getting current user ID");
-        // Framework-specific implementation will override this
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.getCurrentUserId();
+        }
+        log.debug("Getting current user ID (no delegate registered)");
         return null;
     }
 
     @Override
     public String getCurrentUsername() {
-        log.debug("Getting current username");
-        // Framework-specific implementation will override this
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.getCurrentUsername();
+        }
+        log.debug("Getting current username (no delegate registered)");
         return null;
     }
 
     @Override
     public Set<String> getCurrentUserRoles() {
-        log.debug("Getting current user roles");
-        // Framework-specific implementation will override this
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.getCurrentUserRoles();
+        }
+        log.debug("Getting current user roles (no delegate registered)");
         return new HashSet<>();
     }
 
     @Override
     public boolean hasRole(String role) {
-        log.debug("Checking if user has role: {}", role);
-        // Framework-specific implementation will override this
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.hasRole(role);
+        }
+        log.debug("Checking if user has role: {} (no delegate registered)", role);
         return false;
     }
 
     @Override
     public boolean hasAnyRole(String... roles) {
-        log.debug("Checking if user has any of roles: {}", (Object[]) roles);
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.hasAnyRole(roles);
+        }
         for (String role : roles) {
             if (hasRole(role)) {
                 return true;
@@ -117,7 +171,10 @@ public class SecurityFacade implements SecurityService {
 
     @Override
     public boolean hasAllRoles(String... roles) {
-        log.debug("Checking if user has all roles: {}", (Object[]) roles);
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.hasAllRoles(roles);
+        }
         for (String role : roles) {
             if (!hasRole(role)) {
                 return false;
@@ -128,55 +185,80 @@ public class SecurityFacade implements SecurityService {
 
     @Override
     public boolean hasPermission(String permission) {
-        log.debug("Checking permission: {}", permission);
-        // Framework-specific implementation will override this
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.hasPermission(permission);
+        }
+        log.debug("Checking permission: {} (no delegate registered)", permission);
         return false;
     }
 
     @Override
     public String generateToken(String userId, Set<String> roles) {
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.generateToken(userId, roles);
+        }
         return generateToken(userId, roles, Map.of());
     }
 
     @Override
     public String generateToken(String userId, Set<String> roles, Map<String, Object> claims) {
-        log.debug("Generating token for user: {}", userId);
-        // Framework-specific implementation will override this
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.generateToken(userId, roles, claims);
+        }
+        log.debug("Generating token for user: {} (no delegate registered)", userId);
         return "token-" + userId;
     }
 
     @Override
     public boolean validateToken(String token) {
-        log.debug("Validating token");
-        // Framework-specific implementation will override this
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.validateToken(token);
+        }
+        log.debug("Validating token (no delegate registered)");
         return false;
     }
 
     @Override
     public String extractUserId(String token) {
-        log.debug("Extracting user ID from token");
-        // Framework-specific implementation will override this
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.extractUserId(token);
+        }
+        log.debug("Extracting user ID from token (no delegate registered)");
         return null;
     }
 
     @Override
     public String encodePassword(String rawPassword) {
-        log.debug("Encoding password");
-        // Framework-specific implementation will override this
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.encodePassword(rawPassword);
+        }
+        log.debug("Encoding password (no delegate registered)");
         return "encoded-" + rawPassword;
     }
 
     @Override
     public boolean verifyPassword(String rawPassword, String encodedPassword) {
-        log.debug("Verifying password");
-        // Framework-specific implementation will override this
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.verifyPassword(rawPassword, encodedPassword);
+        }
+        log.debug("Verifying password (no delegate registered)");
         return false;
     }
 
     @Override
     public boolean isAuthenticated() {
-        log.debug("Checking if user is authenticated");
-        // Framework-specific implementation will override this
+        SecurityService current = delegate;
+        if (current != null) {
+            return current.isAuthenticated();
+        }
+        log.debug("Checking if user is authenticated (no delegate registered)");
         return false;
     }
 }

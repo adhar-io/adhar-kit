@@ -1,11 +1,14 @@
 package com.adhar.kit.core;
 
+import com.adhar.kit.core.config.AdharCoreProperties;
+import com.adhar.kit.core.util.SnowflakeIdGenerator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -71,6 +74,7 @@ public class CoreFacade {
     private static volatile CoreFacade instance;
     private final ObjectMapper objectMapper;
     private final Executor asyncExecutor;
+    private final SnowflakeIdGenerator snowflakeIdGenerator;
 
     private CoreFacade() {
         log.info("Initializing CoreFacade v1.0.0");
@@ -90,7 +94,27 @@ public class CoreFacade {
             }
         );
 
+        // Auto-resolved node id (env/system property/hostname fallback)
+        this.snowflakeIdGenerator = new SnowflakeIdGenerator();
+
         log.info("CoreFacade initialized successfully");
+    }
+
+    /**
+     * DI-friendly constructor for container-managed use (e.g. Spring's
+     * {@code CoreAutoConfiguration}). Non-Spring code should keep using
+     * {@link #getInstance()}.
+     *
+     * @param properties core configuration properties
+     * @param asyncExecutor executor for async operations
+     * @param objectMapper ObjectMapper for JSON operations
+     */
+    public CoreFacade(AdharCoreProperties properties, Executor asyncExecutor, ObjectMapper objectMapper) {
+        Objects.requireNonNull(properties, "properties must not be null");
+        this.asyncExecutor = Objects.requireNonNull(asyncExecutor, "asyncExecutor must not be null");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.snowflakeIdGenerator = new SnowflakeIdGenerator(properties.getSnowflake().getNodeId());
+        log.info("CoreFacade initialized from configuration properties");
     }
 
     /**
@@ -139,12 +163,13 @@ public class CoreFacade {
     }
 
     /**
-     * Generates a snowflake-style ID (time-based, unique).
+     * Generates a snowflake ID (64-bit, time-ordered, unique across nodes).
      *
      * @return numeric ID
+     * @see SnowflakeIdGenerator
      */
     public long generateSnowflakeId() {
-        return System.currentTimeMillis() * 1000 + (System.nanoTime() % 1000);
+        return snowflakeIdGenerator.nextId();
     }
 
     // ==================== JSON Operations ====================

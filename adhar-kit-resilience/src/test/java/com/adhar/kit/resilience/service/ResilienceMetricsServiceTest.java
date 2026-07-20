@@ -113,6 +113,44 @@ class ResilienceMetricsServiceTest {
     }
 
     @Test
+    @DisplayName("getEventMetrics returns empty map when no event recorder is configured")
+    void eventMetricsWithoutRecorder() {
+        assertThat(service.getEventMetrics()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("getEventMetrics exposes the events section fed by the recorder")
+    void eventMetricsWithRecorder() {
+        com.adhar.kit.resilience.event.ResilienceEventRecorder recorder =
+                new com.adhar.kit.resilience.event.ResilienceEventRecorder();
+        recorder.recordCircuitBreakerTransition("cb-ev", "CLOSED", "OPEN");
+        recorder.recordRetryAttempt("retry-ev");
+        recorder.recordRateLimiterRejection("rl-ev");
+        recorder.recordBulkheadRejection("bh-ev");
+        recorder.recordTimeLimiterTimeout("tl-ev");
+
+        ResilienceMetricsService serviceWithEvents = new ResilienceMetricsService(
+                circuitBreakerRegistry, retryRegistry, rateLimiterRegistry, bulkheadRegistry, recorder);
+
+        Map<String, Object> events = serviceWithEvents.getEventMetrics();
+
+        assertThat(events).containsKeys("circuitBreakerTransitions", "circuitBreakerLastTransitions",
+                "retryAttempts", "rateLimiterRejections", "bulkheadRejections", "timeLimiterTimeouts");
+        assertThat(section(events, "circuitBreakerTransitions")).containsEntry("cb-ev", 1L);
+        assertThat(section(events, "circuitBreakerLastTransitions"))
+                .containsEntry("cb-ev", "CLOSED->OPEN");
+        assertThat(section(events, "retryAttempts")).containsEntry("retry-ev", 1L);
+        assertThat(section(events, "rateLimiterRejections")).containsEntry("rl-ev", 1L);
+        assertThat(section(events, "bulkheadRejections")).containsEntry("bh-ev", 1L);
+        assertThat(section(events, "timeLimiterTimeouts")).containsEntry("tl-ev", 1L);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> section(Map<String, Object> events, String key) {
+        return (Map<String, Object>) events.get(key);
+    }
+
+    @Test
     @DisplayName("Lombok metrics value objects expose builder, accessors and value semantics")
     void metricsValueObjects() {
         ResilienceMetricsService.CircuitBreakerMetrics cb =

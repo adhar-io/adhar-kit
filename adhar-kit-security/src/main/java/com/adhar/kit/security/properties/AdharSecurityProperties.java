@@ -80,6 +80,16 @@ public class AdharSecurityProperties {
     private TokenRefreshProperties tokenRefresh = new TokenRefreshProperties();
 
     /**
+     * Configuration for API-key authentication.
+     */
+    private ApiKeyProperties apiKey = new ApiKeyProperties();
+
+    /**
+     * Configuration for RBAC annotations (@RequiresRole/@RequiresPermission).
+     */
+    private RbacProperties rbac = new RbacProperties();
+
+    /**
      * Configuration properties for JWT token validation.
      */
     @Data
@@ -575,5 +585,59 @@ public class AdharSecurityProperties {
          * Must be at least 256 bits (32 characters) for HS256.
          */
         private String secret;
+    }
+
+    /**
+     * Configuration properties for API-key authentication.
+     */
+    @Data
+    public static class ApiKeyProperties {
+        /**
+         * Whether API-key authentication is enabled.
+         */
+        private boolean enabled = false;
+
+        /**
+         * The request header carrying the API key.
+         */
+        private String headerName = "X-API-Key";
+
+        /**
+         * The accepted API keys, declared as SHA-256 hashes with associated identity.
+         */
+        private List<ApiKeyCredential> keys = new ArrayList<>();
+
+        /**
+         * A single API-key credential (hash + identity).
+         */
+        @Data
+        public static class ApiKeyCredential {
+            /**
+             * Lowercase hex SHA-256 hash of the API key value.
+             */
+            private String keyHash;
+
+            /**
+             * Principal name associated with the key.
+             */
+            private String principal;
+
+            /**
+             * Roles granted to the key.
+             */
+            private List<String> roles = new ArrayList<>();
+        }
+    }
+
+    /**
+     * Configuration properties for RBAC annotation enforcement.
+     */
+    @Data
+    public static class RbacProperties {
+        /**
+         * Whether the access-control aspect enforcing @RequiresRole and
+         * @RequiresPermission is enabled.
+         */
+        private boolean enabled = true;
     }
 }

@@ -3,7 +3,9 @@ package com.adhar.kit.config.properties;
 import lombok.Data;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -172,6 +174,16 @@ public class ConfigProperties {
         private String keyAlias;
 
         /**
+         * PBKDF2 salt for key derivation (set a deployment-specific value in production).
+         */
+        private String salt = "adhar-kit-config-salt";
+
+        /**
+         * PBKDF2 iteration count for key derivation.
+         */
+        private int keyIterations = 210_000;
+
+        /**
          * Prefix for encrypted values (default: ENC()).
          */
         private String encryptedPrefix = "ENC(";
@@ -201,6 +213,16 @@ public class ConfigProperties {
          * Log validation warnings.
          */
         private boolean logWarnings = true;
+
+        /**
+         * Required property keys (validation fails when missing).
+         */
+        private List<String> required = new ArrayList<>();
+
+        /**
+         * Regex pattern rules per property key (validated when the key is present).
+         */
+        private Map<String, String> patterns = new HashMap<>();
     }
 }
 

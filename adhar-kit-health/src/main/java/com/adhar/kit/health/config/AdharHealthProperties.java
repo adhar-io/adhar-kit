@@ -98,6 +98,36 @@ public class AdharHealthProperties {
     private GrpcConfig grpc = new GrpcConfig();
 
     /**
+     * Health result cache configuration.
+     */
+    private CacheConfig cache = new CacheConfig();
+
+    /**
+     * Heap memory health check configuration.
+     */
+    private MemoryConfig memory = new MemoryConfig();
+
+    /**
+     * Thread pool health check configuration.
+     */
+    private ThreadPoolConfig threadPool = new ThreadPoolConfig();
+
+    /**
+     * Certificate expiry health check configuration.
+     */
+    private CertificateConfig certificate = new CertificateConfig();
+
+    /**
+     * Readiness gate (graceful shutdown) configuration.
+     */
+    private ReadinessGateConfig readinessGate = new ReadinessGateConfig();
+
+    /**
+     * Health transition history / flapping detection configuration.
+     */
+    private HistoryConfig history = new HistoryConfig();
+
+    /**
      * Custom health indicators.
      */
     private Map<String, IndicatorConfig> custom = new HashMap<>();
@@ -155,6 +185,79 @@ public class AdharHealthProperties {
     public static class GrpcConfig {
         private boolean enabled = true;
         private long timeout = 3000;
+    }
+
+    /**
+     * Health result cache configuration.
+     */
+    @Data
+    public static class CacheConfig {
+        /** Enable TTL caching of health results. */
+        private boolean enabled = true;
+        /** Cache TTL in milliseconds (0 = disabled). */
+        private long ttl = 10_000;
+    }
+
+    /**
+     * Heap memory health configuration.
+     */
+    @Data
+    public static class MemoryConfig {
+        private boolean enabled = true;
+        /** Heap usage ratio [0..1] at which memory is DOWN. */
+        private double threshold = 0.90;
+    }
+
+    /**
+     * Thread pool health configuration.
+     */
+    @Data
+    public static class ThreadPoolConfig {
+        private boolean enabled = true;
+        /** Queue usage ratio [0..1] at which the pool is DOWN. */
+        private double queueUsageThreshold = 0.90;
+    }
+
+    /**
+     * Certificate expiry health configuration.
+     */
+    @Data
+    public static class CertificateConfig {
+        private boolean enabled = false;
+        /** Keystore path (keystore mode when set). */
+        private String keystorePath;
+        private String keystorePassword;
+        private String keystoreType = "PKCS12";
+        /** TLS endpoint host (endpoint mode when keystore path is unset). */
+        private String host;
+        private int port = 443;
+        /** Report DOWN when expiry is within this many days. */
+        private int warningDays = 30;
+    }
+
+    /**
+     * Readiness gate configuration.
+     */
+    @Data
+    public static class ReadinessGateConfig {
+        private boolean enabled = true;
+        /** Whether the gate starts open (ready) before lifecycle events fire. */
+        private boolean initiallyReady = false;
+        /** Register a JVM shutdown hook that closes the gate. */
+        private boolean shutdownHook = true;
+    }
+
+    /**
+     * Health transition history and flapping detection configuration.
+     */
+    @Data
+    public static class HistoryConfig {
+        /** Maximum retained health transitions. */
+        private int capacity = 100;
+        /** Number of transitions within the window considered flapping. */
+        private int flappingThreshold = 5;
+        /** Flapping detection window in milliseconds. */
+        private long flappingWindow = 60_000;
     }
 
     /**
