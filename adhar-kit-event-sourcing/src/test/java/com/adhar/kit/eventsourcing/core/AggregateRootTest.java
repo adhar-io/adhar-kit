@@ -75,4 +75,55 @@ class AggregateRootTest {
 
         assertThat(aggregate.getVersion()).isEqualTo(5);
     }
+
+    @Test
+    @DisplayName("createSnapshotState default implementation is unsupported")
+    void createSnapshotStateDefaultUnsupported() {
+        TestAggregate aggregate = new TestAggregate();
+
+        assertThatThrownBy(aggregate::createSnapshotState)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("TestAggregate");
+    }
+
+    @Test
+    @DisplayName("restoreFromSnapshot default implementation is unsupported")
+    void restoreFromSnapshotDefaultUnsupported() {
+        TestAggregate aggregate = new TestAggregate();
+
+        assertThatThrownBy(() -> aggregate.restoreFromSnapshot("{}", 5))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("TestAggregate");
+    }
+
+    @Test
+    @DisplayName("applySnapshot on a non-snapshotting aggregate propagates UnsupportedOperationException")
+    void applySnapshotDefaultUnsupported() {
+        TestAggregate aggregate = new TestAggregate();
+
+        assertThatThrownBy(() -> aggregate.applySnapshot("order-1", "{}", 5))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    @DisplayName("applySnapshot restores state, aggregate id, and version for a snapshotting aggregate")
+    void applySnapshotRestoresState() {
+        TestSnapshottableAggregate aggregate = new TestSnapshottableAggregate();
+
+        aggregate.applySnapshot("order-42", "{\"counter\":7}", 7);
+
+        assertThat(aggregate.getAggregateId()).isEqualTo("order-42");
+        assertThat(aggregate.getVersion()).isEqualTo(7);
+        assertThat(aggregate.getCounter()).isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("createSnapshotState on a snapshotting aggregate reflects internal state")
+    void createSnapshotStateReturnsSerializedState() {
+        TestSnapshottableAggregate aggregate = new TestSnapshottableAggregate();
+        aggregate.raise(event("order-1", 1, "OrderCreated"));
+        aggregate.raise(event("order-1", 2, "OrderUpdated"));
+
+        assertThat(aggregate.createSnapshotState()).isEqualTo("{\"counter\":2}");
+    }
 }

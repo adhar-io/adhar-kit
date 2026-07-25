@@ -248,6 +248,12 @@ public class AdharTracingProperties {
          * Whether to include response body in spans.
          */
         private boolean includeResponseBody = false;
+
+        /**
+         * Whether to register the {@code TraceContextMdcFilter} that injects the current
+         * traceId/spanId into the SLF4J MDC for the duration of each HTTP request.
+         */
+        private boolean mdcEnabled = true;
     }
 
     /**

@@ -21,6 +21,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *     api-versioning:
  *       enabled: true
  *       validate-request-version: false
+ *     error-catalog:
+ *       enabled: true
  * </pre>
  *
  * @author Adhar Platform Team
@@ -44,6 +46,9 @@ public class AdharCommonsProperties {
 
     /** API versioning interceptor settings. */
     private final ApiVersioning apiVersioning = new ApiVersioning();
+
+    /** Error catalog (i18n) settings. */
+    private final ErrorCatalog errorCatalog = new ErrorCatalog();
 
     /** Toggle for the {@code SpringGlobalExceptionHandler} bean. */
     @Data
@@ -80,5 +85,12 @@ public class AdharCommonsProperties {
         private boolean enabled = true;
         /** Whether a mismatching {@code X-API-Version} request header is rejected with 400. */
         private boolean validateRequestVersion = false;
+    }
+
+    /** Toggle for the localized {@code ErrorCatalog} bean. */
+    @Data
+    public static class ErrorCatalog {
+        /** Whether the error catalog is registered and wired into the exception handler. */
+        private boolean enabled = true;
     }
 }

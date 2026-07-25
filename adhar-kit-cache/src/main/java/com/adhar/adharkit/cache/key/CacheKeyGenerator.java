@@ -1,5 +1,6 @@
 package com.adhar.adharkit.cache.key;
 
+import com.adhar.adharkit.cache.partition.KeyPartitionResolver;
 import org.springframework.core.DefaultParameterNameDiscoverer;
 import org.springframework.core.ParameterNameDiscoverer;
 import org.springframework.expression.Expression;
@@ -28,14 +29,58 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>When no key expression is supplied, a deterministic default key of
  * {@code className.methodName:argsHash} is used.</p>
  *
+ * <p><b>Partitioning:</b> when {@link #setPartitioningEnabled(boolean) enabled}
+ * (globally via {@code adhar.cache.partitioning.enabled}) and the configured
+ * {@link KeyPartitionResolver} yields a non-blank partition (e.g. the current
+ * tenant), every generated key is prefixed with
+ * {@code <partition><separator>} so tenants never share cache entries.</p>
+ *
  * @author Adhar Platform Team
  * @since 1.1.0
  */
 public class CacheKeyGenerator {
 
+    /**
+     * Default separator between the partition prefix and the key.
+     */
+    public static final String DEFAULT_PARTITION_SEPARATOR = "::";
+
     private final ExpressionParser parser = new SpelExpressionParser();
     private final ParameterNameDiscoverer parameterNameDiscoverer = new DefaultParameterNameDiscoverer();
     private final Map<String, Expression> expressionCache = new ConcurrentHashMap<>();
+
+    private volatile KeyPartitionResolver partitionResolver;
+    private volatile boolean partitioningEnabled;
+    private volatile String partitionSeparator = DEFAULT_PARTITION_SEPARATOR;
+
+    /**
+     * Sets the partition resolver used to prefix keys when partitioning is enabled.
+     *
+     * @param partitionResolver the resolver (may be null to disable prefixing)
+     */
+    public void setPartitionResolver(KeyPartitionResolver partitionResolver) {
+        this.partitionResolver = partitionResolver;
+    }
+
+    /**
+     * Enables or disables global key partitioning.
+     *
+     * @param partitioningEnabled true to prefix every generated key with the
+     *                            resolved partition
+     */
+    public void setPartitioningEnabled(boolean partitioningEnabled) {
+        this.partitioningEnabled = partitioningEnabled;
+    }
+
+    /**
+     * Sets the separator between the partition prefix and the key.
+     *
+     * @param partitionSeparator the separator (blank falls back to the default)
+     */
+    public void setPartitionSeparator(String partitionSeparator) {
+        this.partitionSeparator = partitionSeparator == null || partitionSeparator.isBlank()
+            ? DEFAULT_PARTITION_SEPARATOR : partitionSeparator;
+    }
 
     /**
      * Generates a cache key for the given method invocation.
@@ -49,10 +94,31 @@ public class CacheKeyGenerator {
     public Object generate(String keyExpression, Method method, Object target, Object[] args) {
         Objects.requireNonNull(method, "Method must not be null");
         if (keyExpression == null || keyExpression.isBlank()) {
-            return defaultKey(method, args);
+            return applyPartition(defaultKey(method, args));
         }
         Object value = parse(keyExpression).getValue(createContext(method, target, args, null));
-        return value != null ? value : defaultKey(method, args);
+        return applyPartition(value != null ? value : defaultKey(method, args));
+    }
+
+    /**
+     * Prefixes the key with the resolved partition when partitioning is enabled.
+     *
+     * <p>Returns the key unchanged when partitioning is disabled, no resolver
+     * is configured, or the resolver yields a null/blank partition.</p>
+     *
+     * @param key the base key
+     * @return the (possibly partitioned) key
+     */
+    public Object applyPartition(Object key) {
+        if (!partitioningEnabled) {
+            return key;
+        }
+        KeyPartitionResolver resolver = this.partitionResolver;
+        String partition = resolver != null ? resolver.resolvePartition() : null;
+        if (partition == null || partition.isBlank()) {
+            return key;
+        }
+        return partition + partitionSeparator + key;
     }
 
     /**

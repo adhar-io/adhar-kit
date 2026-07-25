@@ -1,19 +1,29 @@
 package com.adhar.kit.tracing.util;
 
+import com.adhar.kit.tracing.properties.AdharTracingProperties;
+import io.micrometer.tracing.Baggage;
+import io.micrometer.tracing.BaggageInScope;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.TraceContext;
 import io.micrometer.tracing.Tracer;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * Consolidated utility class for all tracing operations including spans, context management,
@@ -23,14 +33,55 @@ import java.util.function.Supplier;
  * handling async operations with proper context propagation, and managing baggage
  * for passing context information across service boundaries.
  * </p>
+ * <p>
+ * Baggage is backed by Micrometer Tracing's real {@link Tracer} baggage API
+ * ({@link Tracer#createBaggageInScope(String, String)} / {@link Tracer#getAllBaggage()}), so
+ * it is context-scoped and, when the underlying {@code Tracer} is wired with a baggage-aware
+ * propagator (as done by the auto-configuration), it participates in cross-process
+ * propagation. This class additionally maintains its own W3C {@code baggage} HTTP header
+ * (de)serialization so callers can propagate baggage manually across process boundaries
+ * without depending on a specific web framework.
+ * </p>
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class AdharTracing {
 
+    /** Standard W3C Baggage HTTP header name (see https://www.w3.org/TR/baggage/). */
+    private static final String W3C_BAGGAGE_HEADER = "baggage";
+
     private final Tracer tracer;
-    private final Map<String, String> localBaggage = new ConcurrentHashMap<>();
+    private final AdharTracingProperties.BaggageProperties baggageProperties;
+
+    /**
+     * Tracks the currently open {@link BaggageInScope} for each baggage key set through this
+     * instance, so that {@link #removeBaggage(String)}/{@link #clearBaggage()} and repeated
+     * {@link #setBaggage(String, String)} calls can properly close the previous scope instead
+     * of leaking it.
+     */
+    private final Map<String, BaggageInScope> baggageScopes = new ConcurrentHashMap<>();
+
+    /**
+     * Create an {@link AdharTracing} instance with default baggage configuration (baggage
+     * enabled, no correlation fields, no remote-field allow-list).
+     *
+     * @param tracer the Micrometer {@link Tracer}
+     */
+    public AdharTracing(Tracer tracer) {
+        this(tracer, new AdharTracingProperties.BaggageProperties());
+    }
+
+    /**
+     * Create an {@link AdharTracing} instance honoring the given baggage configuration
+     * (remote/correlation fields, max entries, etc.).
+     *
+     * @param tracer the Micrometer {@link Tracer}
+     * @param baggageProperties the baggage configuration to honor
+     */
+    public AdharTracing(Tracer tracer, AdharTracingProperties.BaggageProperties baggageProperties) {
+        this.tracer = tracer;
+        this.baggageProperties = baggageProperties != null ? baggageProperties : new AdharTracingProperties.BaggageProperties();
+    }
 
     // ========== SPAN MANAGEMENT METHODS ==========
 
@@ -377,66 +428,112 @@ public class AdharTracing {
 
     /**
      * Wrap a function to propagate trace context.
+     * <p>
+     * Captures the current span (if any) at wrap-time, and re-attaches it (via
+     * {@link Tracer#withSpan(Span)}, opening a new {@link Tracer.SpanInScope}) for the
+     * duration of every invocation of the returned function, closing the scope afterward
+     * regardless of outcome. This allows the wrapped function to be safely handed off to
+     * another thread (e.g. an executor) while still seeing the original trace context as
+     * "current".
+     * </p>
      *
      * @param function the function to wrap
      * @param <T> input type
      * @param <R> return type
-     * @return wrapped function with trace context
+     * @return wrapped function with trace context re-attached on invocation
      */
     public <T, R> Function<T, R> wrapWithTraceContext(Function<T, R> function) {
-        Span currentSpan = getCurrentSpan();
-        if (currentSpan == null) {
+        Span capturedSpan = getCurrentSpan();
+        if (capturedSpan == null) {
             return function;
         }
 
         return input -> {
-            try {
+            try (Tracer.SpanInScope ignored = tracer.withSpan(capturedSpan)) {
                 return function.apply(input);
-            } finally {
-                // No-op, span is managed by the tracing context
             }
         };
     }
 
     /**
-     * Wrap a consumer to propagate trace context.
+     * Wrap a consumer to propagate trace context. See {@link #wrapWithTraceContext(Function)}
+     * for the propagation semantics.
      *
      * @param consumer the consumer to wrap
      * @param <T> input type
-     * @return wrapped consumer with trace context
+     * @return wrapped consumer with trace context re-attached on invocation
      */
     public <T> Consumer<T> wrapWithTraceContext(Consumer<T> consumer) {
-        Span currentSpan = getCurrentSpan();
-        if (currentSpan == null) {
+        Span capturedSpan = getCurrentSpan();
+        if (capturedSpan == null) {
             return consumer;
         }
 
         return input -> {
-            try {
+            try (Tracer.SpanInScope ignored = tracer.withSpan(capturedSpan)) {
                 consumer.accept(input);
-            } finally {
-                // No-op, span is managed by the tracing context
             }
         };
     }
 
     /**
-     * Wrap a runnable to propagate trace context.
+     * Wrap a runnable to propagate trace context. See {@link #wrapWithTraceContext(Function)}
+     * for the propagation semantics.
      *
      * @param runnable the runnable to wrap
-     * @return wrapped runnable with trace context
+     * @return wrapped runnable with trace context re-attached on invocation
      */
     public Runnable wrapWithTraceContext(Runnable runnable) {
-        Span currentSpan = getCurrentSpan();
-        if (currentSpan == null) {
+        Span capturedSpan = getCurrentSpan();
+        if (capturedSpan == null) {
             return runnable;
         }
 
         return () -> {
-            try {
+            try (Tracer.SpanInScope ignored = tracer.withSpan(capturedSpan)) {
                 runnable.run();
-            } finally {
-                // No-op, span is managed by the tracing context
+            }
+        };
+    }
+
+    /**
+     * Wrap a supplier to propagate trace context. See {@link #wrapWithTraceContext(Function)}
+     * for the propagation semantics.
+     *
+     * @param supplier the supplier to wrap
+     * @param <T> return type
+     * @return wrapped supplier with trace context re-attached on invocation
+     */
+    public <T> Supplier<T> wrapWithTraceContext(Supplier<T> supplier) {
+        Span capturedSpan = getCurrentSpan();
+        if (capturedSpan == null) {
+            return supplier;
+        }
+
+        return () -> {
+            try (Tracer.SpanInScope ignored = tracer.withSpan(capturedSpan)) {
+                return supplier.get();
+            }
+        };
+    }
+
+    /**
+     * Wrap a callable to propagate trace context. See {@link #wrapWithTraceContext(Function)}
+     * for the propagation semantics.
+     *
+     * @param callable the callable to wrap
+     * @param <T> return type
+     * @return wrapped callable with trace context re-attached on invocation
+     */
+    public <T> Callable<T> wrapWithTraceContext(Callable<T> callable) {
+        Span capturedSpan = getCurrentSpan();
+        if (capturedSpan == null) {
+            return callable;
+        }
+
+        return () -> {
+            try (Tracer.SpanInScope ignored = tracer.withSpan(capturedSpan)) {
+                return callable.call();
             }
         };
     }
@@ -508,25 +605,52 @@ public class AdharTracing {
     /**
      * Set a baggage item in the current trace context.
      * <p>
-     * Baggage is key-value data that travels with a trace and can be used to
-     * pass context information across service boundaries.
+     * Baggage is key-value data that travels with a trace and can be used to pass context
+     * information across service boundaries. This is backed by the real Micrometer
+     * {@link Tracer#createBaggageInScope(String, String)} API: the resulting
+     * {@link BaggageInScope} is tracked internally and kept open until the key is
+     * overwritten, removed ({@link #removeBaggage(String)}), or all baggage is cleared
+     * ({@link #clearBaggage()}), so the value is visible to {@link #getBaggage(String)} and
+     * propagators for as long as it is "set". If {@code key} is listed in
+     * {@link AdharTracingProperties.BaggageProperties#getCorrelationFields()}, the value is
+     * also tagged onto the current span (if any) as {@code baggage.<key>} for visibility in
+     * the trace backend.
      * </p>
      *
      * @param key the baggage key
      * @param value the baggage value
      */
     public void setBaggage(String key, String value) {
+        if (key == null) {
+            log.warn("Attempted to set baggage with a null key");
+            return;
+        }
+        if (value == null) {
+            log.warn("Attempted to set baggage with a null value for key: {}", key);
+            return;
+        }
+        if (!baggageProperties.isEnabled()) {
+            log.debug("Baggage is disabled; ignoring setBaggage({}, {})", key, value);
+            return;
+        }
         try {
-            Span currentSpan = tracer.currentSpan();
-            if (currentSpan != null) {
-                // Note: Micrometer doesn't directly support baggage
-                // This is a simplified implementation using span tags
-                currentSpan.tag("baggage." + key, value);
-                localBaggage.put(key, value);
-                log.debug("Set baggage: {}={}", key, value);
-            } else {
-                log.warn("Attempted to set baggage but no current span exists: {}={}", key, value);
+            // Close any previously open scope for this key BEFORE opening the new one, so the
+            // underlying context stack is unwound in the correct (LIFO) order rather than
+            // leaving a stale scope buried under the new one.
+            BaggageInScope previous = baggageScopes.remove(key);
+            if (previous != null) {
+                previous.close();
             }
+            BaggageInScope scope = tracer.createBaggageInScope(key, value);
+            baggageScopes.put(key, scope);
+
+            if (isCorrelationField(key)) {
+                Span currentSpan = tracer.currentSpan();
+                if (currentSpan != null) {
+                    currentSpan.tag("baggage." + key, value);
+                }
+            }
+            log.debug("Set baggage: {}={}", key, value);
         } catch (Exception e) {
             log.error("Failed to set baggage: {}={}", key, value, e);
         }
@@ -539,8 +663,12 @@ public class AdharTracing {
      * @return the baggage value, or null if not found
      */
     public String getBaggage(String key) {
+        if (key == null) {
+            return null;
+        }
         try {
-            return localBaggage.get(key);
+            Baggage baggage = tracer.getBaggage(key);
+            return baggage != null ? baggage.get() : null;
         } catch (Exception e) {
             log.error("Failed to get baggage: {}", key, e);
             return null;
@@ -554,7 +682,10 @@ public class AdharTracing {
      */
     public void removeBaggage(String key) {
         try {
-            localBaggage.remove(key);
+            BaggageInScope scope = baggageScopes.remove(key);
+            if (scope != null) {
+                scope.close();
+            }
             log.debug("Removed baggage: {}", key);
         } catch (Exception e) {
             log.error("Failed to remove baggage: {}", key, e);
@@ -567,7 +698,13 @@ public class AdharTracing {
      * @return map of all baggage items
      */
     public Map<String, String> getAllBaggage() {
-        return Map.copyOf(localBaggage);
+        try {
+            Map<String, String> all = tracer.getAllBaggage();
+            return all != null ? Map.copyOf(all) : Map.of();
+        } catch (Exception e) {
+            log.error("Failed to get all baggage", e);
+            return Map.of();
+        }
     }
 
     /**
@@ -575,7 +712,8 @@ public class AdharTracing {
      */
     public void clearBaggage() {
         try {
-            localBaggage.clear();
+            baggageScopes.values().forEach(BaggageInScope::close);
+            baggageScopes.clear();
             log.debug("Cleared all baggage");
         } catch (Exception e) {
             log.error("Failed to clear baggage", e);
@@ -588,6 +726,9 @@ public class AdharTracing {
      * @param baggageItems map of baggage items to set
      */
     public void setBaggageItems(Map<String, String> baggageItems) {
+        if (baggageItems == null) {
+            return;
+        }
         baggageItems.forEach(this::setBaggage);
     }
 
@@ -598,10 +739,8 @@ public class AdharTracing {
      */
     public void copyBaggageToSpan(Span span) {
         try {
-            localBaggage.forEach((key, value) -> {
-                span.tag("baggage." + key, value);
-            });
-            log.debug("Copied {} baggage items to span", localBaggage.size());
+            getAllBaggage().forEach((key, value) -> span.tag("baggage." + key, value));
+            log.debug("Copied baggage items to span");
         } catch (Exception e) {
             log.error("Failed to copy baggage to span", e);
         }
@@ -609,17 +748,28 @@ public class AdharTracing {
 
     /**
      * Extract baggage from HTTP headers (for incoming requests).
+     * <p>
+     * Reads the standard W3C {@code baggage} header (see
+     * <a href="https://www.w3.org/TR/baggage/">https://www.w3.org/TR/baggage/</a>), a single
+     * header whose value is a comma-separated list of {@code key=value} members (each key and
+     * value percent-decoded), and calls {@link #setBaggage(String, String)} for each member
+     * (up to {@link AdharTracingProperties.BaggageProperties#getMaxEntries()}, truncating
+     * values longer than {@link AdharTracingProperties.BaggageProperties#getMaxValueLength()}).
+     * The header lookup is case-insensitive to tolerate both HTTP header maps (case-insensitive
+     * by convention) and plain {@code Map}s.
+     * </p>
      *
      * @param headers map of HTTP headers
      */
     public void extractBaggageFromHeaders(Map<String, String> headers) {
+        if (headers == null) {
+            return;
+        }
         try {
             headers.entrySet().stream()
-                    .filter(entry -> entry.getKey().toLowerCase().startsWith("baggage-"))
-                    .forEach(entry -> {
-                        String key = entry.getKey().substring("baggage-".length());
-                        setBaggage(key, entry.getValue());
-                    });
+                    .filter(entry -> W3C_BAGGAGE_HEADER.equalsIgnoreCase(entry.getKey()))
+                    .findFirst()
+                    .ifPresent(entry -> parseBaggageHeader(entry.getValue()));
         } catch (Exception e) {
             log.error("Failed to extract baggage from headers", e);
         }
@@ -627,15 +777,35 @@ public class AdharTracing {
 
     /**
      * Inject baggage into HTTP headers (for outgoing requests).
+     * <p>
+     * Writes the standard W3C {@code baggage} header. If
+     * {@link AdharTracingProperties.BaggageProperties#getRemoteFields()} is non-empty, only
+     * those keys are propagated; otherwise all current baggage entries are propagated.
+     * </p>
      *
      * @param headers mutable map of HTTP headers to inject into
      */
     public void injectBaggageIntoHeaders(Map<String, String> headers) {
+        if (headers == null) {
+            return;
+        }
         try {
-            localBaggage.forEach((key, value) -> {
-                headers.put("baggage-" + key, value);
-            });
-            log.debug("Injected {} baggage items into headers", localBaggage.size());
+            Map<String, String> all = getAllBaggage();
+            if (all.isEmpty()) {
+                return;
+            }
+
+            Set<String> remoteFields = remoteFieldsLowerCase();
+
+            String encoded = all.entrySet().stream()
+                    .filter(entry -> remoteFields.isEmpty() || remoteFields.contains(entry.getKey().toLowerCase()))
+                    .map(entry -> encode(entry.getKey()) + "=" + encode(entry.getValue()))
+                    .collect(Collectors.joining(","));
+
+            if (StringUtils.hasText(encoded)) {
+                headers.put(W3C_BAGGAGE_HEADER, encoded);
+                log.debug("Injected baggage into headers: {}", encoded);
+            }
         } catch (Exception e) {
             log.error("Failed to inject baggage into headers", e);
         }
@@ -648,7 +818,7 @@ public class AdharTracing {
      * @return true if the key exists in baggage
      */
     public boolean containsBaggageKey(String key) {
-        return localBaggage.containsKey(key);
+        return getAllBaggage().containsKey(key);
     }
 
     /**
@@ -657,7 +827,7 @@ public class AdharTracing {
      * @return the count of baggage items
      */
     public int getBaggageCount() {
-        return localBaggage.size();
+        return getAllBaggage().size();
     }
 
     /**
@@ -666,6 +836,84 @@ public class AdharTracing {
      * @return true if no baggage items exist
      */
     public boolean isBaggageEmpty() {
-        return localBaggage.isEmpty();
+        return getAllBaggage().isEmpty();
+    }
+
+    /**
+     * Parse a raw W3C {@code baggage} header value and apply each member via
+     * {@link #setBaggage(String, String)}.
+     */
+    private void parseBaggageHeader(String headerValue) {
+        if (!StringUtils.hasText(headerValue)) {
+            return;
+        }
+
+        int maxEntries = baggageProperties.getMaxEntries();
+        int maxValueLength = baggageProperties.getMaxValueLength();
+        int applied = 0;
+
+        for (String member : headerValue.split(",")) {
+            if (maxEntries > 0 && applied >= maxEntries) {
+                break;
+            }
+            String trimmed = member.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            // Strip any W3C baggage member properties (";key=value" suffix); we only care
+            // about the primary key=value pair.
+            String keyValue = trimmed.split(";", 2)[0];
+            int separatorIndex = keyValue.indexOf('=');
+            if (separatorIndex <= 0) {
+                continue;
+            }
+
+            String key = decode(keyValue.substring(0, separatorIndex).trim());
+            String value = decode(keyValue.substring(separatorIndex + 1).trim());
+            if (!StringUtils.hasText(key)) {
+                continue;
+            }
+            if (maxValueLength > 0 && value.length() > maxValueLength) {
+                value = value.substring(0, maxValueLength);
+            }
+
+            setBaggage(key, value);
+            applied++;
+        }
+    }
+
+    /**
+     * Whether the given baggage key is configured as a correlation field (and should
+     * therefore also be tagged onto the current span for visibility in trace backends).
+     */
+    private boolean isCorrelationField(String key) {
+        String[] correlationFields = baggageProperties.getCorrelationFields();
+        if (correlationFields == null || correlationFields.length == 0) {
+            return false;
+        }
+        for (String field : correlationFields) {
+            if (field.equalsIgnoreCase(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Set<String> remoteFieldsLowerCase() {
+        String[] remoteFields = baggageProperties.getRemoteFields();
+        if (remoteFields == null || remoteFields.length == 0) {
+            return Set.of();
+        }
+        return Arrays.stream(remoteFields)
+                .map(String::toLowerCase)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private static String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private static String decode(String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
 }

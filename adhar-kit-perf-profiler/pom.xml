@@ -14,6 +14,7 @@
     <description>Performance profiling, method tracing, and bottleneck detection for Adhar Kit applications</description>
 
     <properties>
+        <hdrhistogram.version>2.2.2</hdrhistogram.version>
     </properties>
 
     <dependencies>
@@ -43,6 +44,13 @@
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-core</artifactId>
+        </dependency>
+
+        <!-- HdrHistogram for bounded-memory, high-accuracy latency percentiles -->
+        <dependency>
+            <groupId>org.hdrhistogram</groupId>
+            <artifactId>HdrHistogram</artifactId>
+            <version>${hdrhistogram.version}</version>
         </dependency>
 
         <!-- Adhar Kit Commons -->

@@ -102,6 +102,7 @@ Enforce enterprise standards and best practices:
 - **API documentation** completeness
 - **Exception handling** patterns
 - **Logging usage** validation
+- **Layered architecture** dependency direction (controller → service → repository, no reverse dependencies)
 - **Test coverage** requirements
 
 ```bash
@@ -120,7 +121,36 @@ mvn adhar:validate \
   -Dvalidate.naming=true \
   -Dvalidate.annotations=true \
   -Dvalidate.documentation=true \
+  -Dvalidate.architecture=true \
   -Dvalidate.minCoverage=80
+```
+
+The architecture check (`ArchitectureRuleValidator`) determines each class's layer
+from its actual `package` declaration and inspects its `import` statements - it
+does not rely on file-path substring matching, so it works the same on Windows
+and Unix checkouts and isn't fooled by incidental path segments. It flags any
+`repository` class importing a `service`/`controller` type, or any `service`
+class importing a `controller` type.
+
+### 📦 Dependency Hygiene (`adhar:deps`)
+Offline dependency hygiene report - reads only the already-built Maven project
+model (no artifact resolution, no repository/network access, no CVE/OWASP
+database downloads):
+- **Duplicate dependencies** - the same `groupId:artifactId` declared more than once
+- **Version convergence conflicts** - a declared version that diverges from the
+  version already managed for it in `<dependencyManagement>`/an imported BOM
+- **Dependencies not managed by a BOM** - a hard-coded version with no
+  corresponding `<dependencyManagement>` entry at all
+
+```bash
+# Run the dependency hygiene check
+mvn adhar:deps
+
+# Fail the build on duplicates/convergence conflicts (unmanaged findings are informational only)
+mvn adhar:deps -Ddeps.fail=true
+
+# Customize the report location
+mvn adhar:deps -Ddeps.reportFile=target/my-dependency-report.txt
 ```
 
 ## Installation
@@ -207,9 +237,11 @@ mvn adhar:validate \
     <name>User</name>                            <!-- Entity/class name -->
     <basePackage>${project.groupId}</basePackage>
     <outputDirectory>target/generated-sources/adhar</outputDirectory>
-    <generateTests>true</generateTests>          <!-- Generate tests -->
+    <testOutputDirectory>target/generated-test-sources/adhar</testOutputDirectory>
+    <generateTests>true</generateTests>          <!-- Generate tests (type=all only) -->
     <useLombok>true</useLombok>                  <!-- Use Lombok -->
     <withOpenApi>true</withOpenApi>              <!-- OpenAPI docs -->
+    <tableName></tableName>                      <!-- Optional @Table name override (entity generation) -->
 </configuration>
 ```
 
@@ -224,9 +256,20 @@ mvn adhar:validate \
     <validateDocumentation>true</validateDocumentation>
     <validateExceptions>true</validateExceptions>
     <validateLogging>true</validateLogging>
+    <validateArchitecture>true</validateArchitecture>  <!-- Layered dependency direction check -->
     <minCoverage>80</minCoverage>                <!-- Minimum test coverage -->
     <generateReport>true</generateReport>
     <reportFile>target/adhar-validation-report.txt</reportFile>
+</configuration>
+```
+
+### Dependency Hygiene Configuration
+
+```xml
+<configuration>
+    <failOnError>false</failOnError>             <!-- Fail on duplicates/convergence conflicts -->
+    <generateReport>true</generateReport>
+    <reportFile>target/adhar-dependency-report.txt</reportFile>
 </configuration>
 ```
 
@@ -279,33 +322,40 @@ docs(readme): update API documentation"
 
 ## Generated Code Structure
 
-When generating code with `type=all`, the plugin creates:
+When generating code with `type=all`, the plugin creates (sources under
+`generate.outputDir`, tests under `generate.testOutputDir`):
 
 ```
-src/main/java/
+target/generated-sources/adhar/
 └── com/example/project/
     ├── entity/
-    │   └── User.java                    # JPA entity with auditing
+    │   └── User.java                              # JPA entity with auditing (@Entity/@Table/@Id/@Version)
     ├── repository/
-    │   └── UserRepository.java          # Spring Data JPA repository
+    │   └── UserRepository.java                     # Spring Data JPA repository
     ├── service/
-    │   ├── UserService.java             # Service interface
+    │   ├── UserService.java                        # Service interface
     │   └── impl/
-    │       └── UserServiceImpl.java     # Service implementation
+    │       └── UserServiceImpl.java                # Service implementation
     ├── controller/
-    │   └── UserController.java          # REST controller with OpenAPI
+    │   └── UserController.java                      # REST controller with OpenAPI
     └── dto/
-        ├── UserCreateDto.java           # Creation DTO
-        ├── UserUpdateDto.java           # Update DTO
-        └── UserResponseDto.java         # Response DTO
+        ├── UserCreateDto.java                       # Creation DTO
+        ├── UserUpdateDto.java                        # Update DTO
+        └── UserResponseDto.java                      # Response DTO
 
-src/test/java/
+target/generated-test-sources/adhar/     (when generate.withTests=true)
 └── com/example/project/
     ├── service/
-    │   └── UserServiceTest.java         # Unit tests
+    │   └── UserServiceIntegrationTest.java          # JUnit 5 / Spring Boot test skeleton
     └── controller/
-        └── UserControllerTest.java      # Integration tests
+        └── UserControllerIntegrationTest.java       # MockMvc test skeleton
 ```
+
+The entity generator (`EntityGenerator`) derives a default `@Table` name from the
+entity name (e.g. `OrderItem` → `order_items`) unless `-Dgenerate.tableName=...`
+is supplied. The integration test generator (`IntegrationTestGenerator`) produces
+compiling `@Test` method stubs wired against the generated service/controller -
+they are a starting point (marked with `TODO` comments), not a finished suite.
 
 ## Validation Rules
 
@@ -332,6 +382,12 @@ src/test/java/
 ### Exception Handling
 - Controllers: `@ExceptionHandler` or `@ControllerAdvice`
 - Services: Proper exception propagation
+
+### Architecture Layering
+- Allowed dependency direction: `controller` → `service` → `repository`
+- A `repository` class must never import a `service` or `controller` type
+- A `service` class must never import a `controller` type
+- Determined from actual `package`/`import` declarations, not file paths
 
 ### Logging
 - Services: Logger field (SLF4J recommended)

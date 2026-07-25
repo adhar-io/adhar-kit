@@ -51,7 +51,16 @@ import static org.junit.jupiter.api.Assertions.*;
         "adhar.messaging.common.validation-enabled=true",
         "adhar.messaging.common.default-timeout-ms=60000",
         "adhar.messaging.common.default-retries=3",
-        "adhar.messaging.common.default-backoff-ms=1000"
+        "adhar.messaging.common.default-backoff-ms=1000",
+        "adhar.messaging.common.retry.enabled=false",
+        "adhar.messaging.common.retry.max-attempts=5",
+        "adhar.messaging.common.retry.initial-delay-ms=100",
+        "adhar.messaging.common.retry.backoff-multiplier=1.5",
+        "adhar.messaging.common.retry.max-delay-ms=2000",
+        "adhar.messaging.common.dlq.enabled=false",
+        "adhar.messaging.common.dlq.topic-suffix=.deadletter",
+        "adhar.messaging.common.dedup.enabled=true",
+        "adhar.messaging.common.dedup.ttl-ms=120000"
 })
 class AdharMessagingPropertiesTest {
 
@@ -129,6 +138,27 @@ class AdharMessagingPropertiesTest {
     }
 
     @Test
+    void testCommonRetryProperties() {
+        assertFalse(properties.getCommon().getRetry().isEnabled());
+        assertEquals(5, properties.getCommon().getRetry().getMaxAttempts());
+        assertEquals(100, properties.getCommon().getRetry().getInitialDelayMs());
+        assertEquals(1.5, properties.getCommon().getRetry().getBackoffMultiplier());
+        assertEquals(2000, properties.getCommon().getRetry().getMaxDelayMs());
+    }
+
+    @Test
+    void testCommonDlqProperties() {
+        assertFalse(properties.getCommon().getDlq().isEnabled());
+        assertEquals(".deadletter", properties.getCommon().getDlq().getTopicSuffix());
+    }
+
+    @Test
+    void testCommonDedupProperties() {
+        assertTrue(properties.getCommon().getDedup().isEnabled());
+        assertEquals(120000, properties.getCommon().getDedup().getTtlMs());
+    }
+
+    @Test
     void testDefaultValues() {
         // Create a new instance to test default values
         AdharMessagingProperties defaultProperties = new AdharMessagingProperties();
@@ -178,6 +208,18 @@ class AdharMessagingPropertiesTest {
         assertEquals(30000, defaultProperties.getCommon().getDefaultTimeoutMs());
         assertEquals(3, defaultProperties.getCommon().getDefaultRetries());
         assertEquals(1000, defaultProperties.getCommon().getDefaultBackoffMs());
+
+        assertTrue(defaultProperties.getCommon().getRetry().isEnabled());
+        assertEquals(3, defaultProperties.getCommon().getRetry().getMaxAttempts());
+        assertEquals(200, defaultProperties.getCommon().getRetry().getInitialDelayMs());
+        assertEquals(2.0, defaultProperties.getCommon().getRetry().getBackoffMultiplier());
+        assertEquals(5000, defaultProperties.getCommon().getRetry().getMaxDelayMs());
+
+        assertTrue(defaultProperties.getCommon().getDlq().isEnabled());
+        assertEquals(".dlq", defaultProperties.getCommon().getDlq().getTopicSuffix());
+
+        assertFalse(defaultProperties.getCommon().getDedup().isEnabled());
+        assertEquals(600_000, defaultProperties.getCommon().getDedup().getTtlMs());
     }
 
     /**

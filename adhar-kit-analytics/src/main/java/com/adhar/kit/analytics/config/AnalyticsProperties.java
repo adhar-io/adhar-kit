@@ -4,6 +4,10 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
 /**
  * Configuration properties for Analytics module.
  *
@@ -35,6 +39,16 @@ public class AnalyticsProperties {
      */
     private EventTracking eventTracking = new EventTracking();
 
+    /**
+     * Consent / opt-out governance configuration.
+     */
+    private Consent consent = new Consent();
+
+    /**
+     * PII scrubbing configuration.
+     */
+    private Pii pii = new Pii();
+
     @Data
     public static class PostHog {
         /**
@@ -53,14 +67,74 @@ public class AnalyticsProperties {
         private String personalApiKey;
 
         /**
-         * Batch size for events.
+         * Batch size for events. Also used as the chunk size when draining the
+         * queue so a single HTTP call never carries more than this many events.
          */
         private int batchSize = 100;
 
         /**
-         * Flush interval in seconds.
+         * Flush interval in seconds for the background batch sender.
          */
         private int flushInterval = 10;
+
+        /**
+         * Enable real async batching via {@link com.adhar.kit.analytics.batching.BatchingEventSender}.
+         * When {@code false}, events are sent synchronously one-by-one (legacy fallback path).
+         */
+        private boolean batchingEnabled = true;
+
+        /**
+         * Maximum number of events buffered in memory awaiting flush.
+         */
+        private int queueCapacity = 10_000;
+
+        /**
+         * Behavior when the in-memory queue is full.
+         */
+        private OverflowPolicy overflowPolicy = OverflowPolicy.DROP_OLDEST;
+
+        /**
+         * Time-to-live, in seconds, for cached feature flag decisions before
+         * they are re-fetched from the PostHog {@code /decide} endpoint.
+         */
+        private long featureFlagCacheTtlSeconds = 60;
+    }
+
+    /**
+     * Overflow behavior for the bounded event batch queue.
+     */
+    public enum OverflowPolicy {
+        /** Drop the oldest queued event to make room for the newest one. */
+        DROP_OLDEST,
+        /** Block the calling thread until space is available. */
+        BLOCK
+    }
+
+    @Data
+    public static class Consent {
+        /**
+         * Distinct IDs that have opted out of analytics tracking. Events for
+         * these IDs are suppressed before ever reaching PostHog.
+         */
+        private List<String> optedOutIds = List.of();
+    }
+
+    @Data
+    public static class Pii {
+        /**
+         * Property keys (case-insensitive) whose values are always redacted
+         * before being sent to PostHog.
+         */
+        private Set<String> redactedKeys = new LinkedHashSet<>(List.of(
+                "password", "passwd", "secret", "token", "apikey", "api_key",
+                "ssn", "creditcard", "credit_card", "cardnumber", "card_number"
+        ));
+
+        /**
+         * Also redact string values that look like obvious PII (emails, SSNs,
+         * credit card numbers, phone numbers) regardless of their property key.
+         */
+        private boolean patternDetectionEnabled = true;
     }
 
     @Data

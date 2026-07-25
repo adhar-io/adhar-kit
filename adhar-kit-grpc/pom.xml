@@ -73,6 +73,31 @@
             <artifactId>spring-boot-starter</artifactId>
             <optional>true</optional>
         </dependency>
+
+        <!-- Micrometer (Optional) - per-method call/error/latency metrics and
+             in-flight gauges for MetricsServerInterceptor / MetricsClientInterceptor.
+             Version is managed by the Spring Boot 4.1 BOM (spring-boot-starter-parent). -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- gRPC testing support (InProcess server/channel helpers, GrpcCleanupRule) -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-testing</artifactId>
+            <version>${grpc.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- grpc-testing only depends on this at runtime scope; declare it explicitly
+             so InProcessServerBuilder/InProcessChannelBuilder are compile-visible in tests. -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-inprocess</artifactId>
+            <version>${grpc.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <repositories>

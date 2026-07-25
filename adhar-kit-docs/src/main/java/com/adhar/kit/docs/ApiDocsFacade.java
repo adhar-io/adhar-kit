@@ -1,18 +1,24 @@
 package com.adhar.kit.docs;
 
 import com.adhar.kit.docs.api.ApiDocsService;
+import com.adhar.kit.docs.export.OpenApiSpecExporter;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -58,6 +64,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 @Slf4j
 public class ApiDocsFacade implements ApiDocsService {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    private static final Set<String> HTTP_METHOD_KEYS = Set.of(
+            "get", "put", "post", "delete", "options", "head", "patch", "trace");
 
     private static volatile ApiDocsFacade instance;
 
@@ -491,6 +502,31 @@ public class ApiDocsFacade implements ApiDocsService {
         this.openApiResource = openApiResource;
     }
 
+    /**
+     * Exports the current OpenAPI JSON and YAML specifications (as returned by
+     * {@link #getOpenApiSpec()} and {@link #getOpenApiSpecYaml()}) to
+     * {@code openapi.json}/{@code openapi.yaml} under the given directory.
+     *
+     * @param outputDirectory the directory to write the spec files to (created if missing)
+     * @return the paths of the written JSON and YAML files
+     */
+    public OpenApiSpecExporter.ExportResult exportOpenApiSpec(Path outputDirectory) {
+        OpenApiSpecExporter exporter = new OpenApiSpecExporter();
+        Path json = exporter.exportJson(getOpenApiSpec(), outputDirectory);
+        Path yaml = exporter.exportYaml(getOpenApiSpecYaml(), outputDirectory);
+        return new OpenApiSpecExporter.ExportResult(json, yaml);
+    }
+
+    /**
+     * Exports the current OpenAPI JSON and YAML specifications to
+     * {@code target/openapi.json}/{@code target/openapi.yaml}.
+     *
+     * @return the paths of the written JSON and YAML files
+     */
+    public OpenApiSpecExporter.ExportResult exportOpenApiSpec() {
+        return exportOpenApiSpec(OpenApiSpecExporter.DEFAULT_OUTPUT_DIR);
+    }
+
     // ---- Accessor Methods ----
 
     @Override
@@ -714,154 +750,45 @@ public class ApiDocsFacade implements ApiDocsService {
     }
 
     /**
-     * Parses endpoint information from an OpenAPI JSON spec string.
-     * Uses lightweight string parsing to avoid a hard dependency on Jackson at facade level.
+     * Parses endpoint information from an OpenAPI JSON spec string using Jackson,
+     * enumerating every HTTP method under every path.
      */
-    private List<Map<String, String>> parseEndpointsFromJson(String json) {
+    private List<Map<String, String>> parseEndpointsFromJson(String json) throws Exception {
         List<Map<String, String>> endpoints = new ArrayList<>();
 
-        // Find the "paths" object
-        int pathsIndex = json.indexOf("\"paths\"");
-        if (pathsIndex == -1) {
+        JsonNode root = OBJECT_MAPPER.readTree(json);
+        JsonNode paths = root.path("paths");
+        if (!paths.isObject()) {
             return endpoints;
         }
 
-        // Find the opening brace of the paths object
-        int braceStart = json.indexOf('{', pathsIndex + 7);
-        if (braceStart == -1) {
-            return endpoints;
-        }
-
-        // Extract the paths block by brace matching
-        String pathsBlock = extractJsonBlock(json, braceStart);
-        if (pathsBlock == null || pathsBlock.equals("{}")) {
-            return endpoints;
-        }
-
-        // Parse each path key
-        int searchFrom = 0;
-        while (true) {
-            int pathKeyStart = pathsBlock.indexOf('"', searchFrom);
-            if (pathKeyStart == -1) break;
-            int pathKeyEnd = pathsBlock.indexOf('"', pathKeyStart + 1);
-            if (pathKeyEnd == -1) break;
-
-            String path = pathsBlock.substring(pathKeyStart + 1, pathKeyEnd);
-
-            // Skip if this looks like a nested key inside a method block
-            if (!path.startsWith("/")) {
-                searchFrom = pathKeyEnd + 1;
+        Iterator<Map.Entry<String, JsonNode>> pathEntries = paths.properties().iterator();
+        while (pathEntries.hasNext()) {
+            Map.Entry<String, JsonNode> pathEntry = pathEntries.next();
+            String path = pathEntry.getKey();
+            JsonNode pathItem = pathEntry.getValue();
+            if (!pathItem.isObject()) {
                 continue;
             }
 
-            // Find the path's object block
-            int pathObjStart = pathsBlock.indexOf('{', pathKeyEnd);
-            if (pathObjStart == -1) break;
-            String pathObj = extractJsonBlock(pathsBlock, pathObjStart);
-            if (pathObj == null) break;
-
-            // Extract methods from this path object
-            String[] methods = {"get", "post", "put", "delete", "patch", "head", "options"};
-            for (String method : methods) {
-                String methodKey = "\"" + method + "\"";
-                int methodIndex = pathObj.indexOf(methodKey);
-                if (methodIndex != -1) {
-                    Map<String, String> endpoint = new HashMap<>();
-                    endpoint.put("method", method.toUpperCase());
-                    endpoint.put("path", path);
-
-                    // Try to extract summary
-                    int methodObjStart = pathObj.indexOf('{', methodIndex);
-                    if (methodObjStart != -1) {
-                        String methodBlock = extractJsonBlock(pathObj, methodObjStart);
-                        if (methodBlock != null) {
-                            String summary = extractJsonStringValue(methodBlock, "summary");
-                            endpoint.put("summary", summary != null ? summary : "");
-                        }
-                    }
-
-                    endpoints.add(endpoint);
+            Iterator<Map.Entry<String, JsonNode>> methodEntries = pathItem.properties().iterator();
+            while (methodEntries.hasNext()) {
+                Map.Entry<String, JsonNode> methodEntry = methodEntries.next();
+                String method = methodEntry.getKey();
+                if (!HTTP_METHOD_KEYS.contains(method.toLowerCase())) {
+                    continue;
                 }
-            }
+                JsonNode operation = methodEntry.getValue();
 
-            searchFrom = pathObjStart + (pathObj != null ? pathObj.length() : 1);
+                Map<String, String> endpoint = new HashMap<>();
+                endpoint.put("method", method.toUpperCase());
+                endpoint.put("path", path);
+                endpoint.put("summary", operation.path("summary").asText(""));
+                endpoints.add(endpoint);
+            }
         }
 
         return endpoints;
-    }
-
-    /**
-     * Extracts a JSON block starting at the given brace position, matching braces.
-     */
-    private String extractJsonBlock(String json, int braceStart) {
-        if (braceStart >= json.length() || json.charAt(braceStart) != '{') {
-            return null;
-        }
-        int depth = 0;
-        boolean inString = false;
-        boolean escaped = false;
-        for (int i = braceStart; i < json.length(); i++) {
-            char c = json.charAt(i);
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (c == '\\') {
-                escaped = true;
-                continue;
-            }
-            if (c == '"') {
-                inString = !inString;
-                continue;
-            }
-            if (inString) continue;
-            if (c == '{') depth++;
-            if (c == '}') {
-                depth--;
-                if (depth == 0) {
-                    return json.substring(braceStart, i + 1);
-                }
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Extracts a simple string value for a given key from a JSON object string.
-     */
-    private String extractJsonStringValue(String json, String key) {
-        String searchKey = "\"" + key + "\"";
-        int keyIndex = json.indexOf(searchKey);
-        if (keyIndex == -1) return null;
-
-        int colonIndex = json.indexOf(':', keyIndex + searchKey.length());
-        if (colonIndex == -1) return null;
-
-        // Find the opening quote of the value
-        int valueStart = json.indexOf('"', colonIndex + 1);
-        if (valueStart == -1) return null;
-
-        // Find the closing quote (handle escapes)
-        int valueEnd = valueStart + 1;
-        boolean esc = false;
-        while (valueEnd < json.length()) {
-            char c = json.charAt(valueEnd);
-            if (esc) {
-                esc = false;
-                valueEnd++;
-                continue;
-            }
-            if (c == '\\') {
-                esc = true;
-                valueEnd++;
-                continue;
-            }
-            if (c == '"') {
-                return json.substring(valueStart + 1, valueEnd);
-            }
-            valueEnd++;
-        }
-        return null;
     }
 
     private String escapeJson(String value) {

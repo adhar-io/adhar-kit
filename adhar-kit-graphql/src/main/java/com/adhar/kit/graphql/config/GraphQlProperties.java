@@ -66,6 +66,26 @@ public class GraphQlProperties {
     private Security security = new Security();
 
     /**
+     * Automatic Persisted Queries (APQ) configuration.
+     */
+    private PersistedQueries persistedQueries = new PersistedQueries();
+
+    /**
+     * Query allow-listing configuration.
+     */
+    private AllowList allowList = new AllowList();
+
+    /**
+     * Per-client query-cost rate limiting configuration.
+     */
+    private RateLimit rateLimit = new RateLimit();
+
+    /**
+     * Resolver tracing (Micrometer timers and Apollo-style tracing extension) configuration.
+     */
+    private Tracing tracing = new Tracing();
+
+    /**
      * Pagination settings for cursor-based GraphQL pagination.
      */
     @Data
@@ -93,5 +113,107 @@ public class GraphQlProperties {
          * in the security context. Unauthenticated requests will be rejected.
          */
         private boolean requireAuthentication = false;
+
+        /**
+         * Enable field-level authorization via the {@code @auth(roles: [...])} schema
+         * directive and the {@code @FieldAuthorization} annotation. Only takes effect
+         * when Spring Security is on the classpath.
+         */
+        private boolean fieldAuthorizationEnabled = true;
+    }
+
+    /**
+     * Settings for query allow-listing (approved/persisted operations only).
+     */
+    @Data
+    public static class AllowList {
+
+        /**
+         * Enable allow-list enforcement. When enabled, requests whose query is not
+         * registered in the {@code AllowedQueryRegistry} (by SHA-256 hash or operation
+         * name) are rejected before execution.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Classpath directory to load approved query documents from. Every
+         * {@code *.graphql}/{@code *.gql} file below this directory is registered.
+         */
+        private String location = "graphql/allowed-queries";
+    }
+
+    /**
+     * Settings for per-client query-cost rate limiting (token bucket).
+     */
+    @Data
+    public static class RateLimit {
+
+        /**
+         * Enable per-client cost-based rate limiting.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Token bucket capacity: the maximum query-cost budget a client can burst.
+         */
+        private long capacity = 1000;
+
+        /**
+         * Number of cost tokens refilled per second for each client bucket.
+         */
+        private double refillPerSecond = 100.0;
+
+        /**
+         * HTTP header used to identify the client. Falls back to the authenticated
+         * principal name and then the remote address when absent.
+         */
+        private String clientIdHeader = "X-Client-Id";
+
+        /**
+         * Maximum number of distinct client buckets to retain in memory.
+         */
+        private int maxClients = 10_000;
+    }
+
+    /**
+     * Settings for resolver (DataFetcher) tracing.
+     */
+    @Data
+    public static class Tracing {
+
+        /**
+         * Enable resolver tracing: each non-trivial DataFetcher invocation is timed
+         * and emitted as a Micrometer timer.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Debug flag: when true, an Apollo-tracing-style {@code tracing} extension with
+         * per-resolver timings is added to every GraphQL response.
+         */
+        private boolean apolloTracingEnabled = false;
+
+        /**
+         * Also time trivial (property-access) DataFetchers. Disabled by default to
+         * keep metric cardinality and overhead low.
+         */
+        private boolean includeTrivialDataFetchers = false;
+    }
+
+    /**
+     * Settings for Automatic Persisted Queries (Apollo APQ protocol).
+     */
+    @Data
+    public static class PersistedQueries {
+
+        /**
+         * Enable Automatic Persisted Query support.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Maximum number of persisted queries to retain in the bounded in-memory cache.
+         */
+        private int maxCacheSize = 1000;
     }
 }

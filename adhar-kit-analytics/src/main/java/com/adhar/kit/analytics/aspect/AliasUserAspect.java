@@ -31,6 +31,15 @@ public class AliasUserAspect {
         this.analytics = AnalyticsFacade.getInstance();
     }
 
+    /**
+     * Package-private constructor for injecting a controllable
+     * {@link AnalyticsFacade} (e.g. a Mockito mock) in tests, without going
+     * through the process-wide singleton.
+     */
+    AliasUserAspect(AnalyticsFacade analytics) {
+        this.analytics = analytics;
+    }
+
     @Around("@annotation(aliasUser)")
     public Object processAliasUser(ProceedingJoinPoint joinPoint, AliasUser aliasUser) throws Throwable {
         if (!analytics.isAvailable()) {

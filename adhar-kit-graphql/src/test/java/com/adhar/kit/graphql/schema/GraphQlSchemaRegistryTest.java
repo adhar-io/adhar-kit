@@ -1,5 +1,6 @@
 package com.adhar.kit.graphql.schema;
 
+import graphql.schema.idl.TypeDefinitionRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -67,6 +68,21 @@ class GraphQlSchemaRegistryTest {
             assertThatThrownBy(() -> registry.registerType("User", ""))
                     .isInstanceOf(IllegalArgumentException.class);
         }
+
+        @Test
+        @DisplayName("should throw a clear error on syntactically invalid SDL")
+        void throwsOnInvalidSyntax() {
+            assertThatThrownBy(() -> registry.registerType("User", "type User { id: ID!"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Invalid SDL for type 'User'");
+        }
+
+        @Test
+        @DisplayName("should reject a bare field definition (not a valid standalone type)")
+        void rejectsBareFieldAsType() {
+            assertThatThrownBy(() -> registry.registerType("Bogus", "user(id: ID!): User"))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     // ----------------------------------------------------------------
@@ -91,6 +107,14 @@ class GraphQlSchemaRegistryTest {
             assertThatThrownBy(() -> registry.registerQuery(null, "user: User"))
                     .isInstanceOf(IllegalArgumentException.class);
         }
+
+        @Test
+        @DisplayName("should throw a clear error on syntactically invalid field SDL")
+        void throwsOnInvalidSyntax() {
+            assertThatThrownBy(() -> registry.registerQuery("user", "user(id: ID!"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Invalid SDL for query field 'user'");
+        }
     }
 
     // ----------------------------------------------------------------
@@ -114,6 +138,14 @@ class GraphQlSchemaRegistryTest {
         void throwsOnBlankName() {
             assertThatThrownBy(() -> registry.registerMutation("  ", "createUser: User"))
                     .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        @DisplayName("should throw a clear error on syntactically invalid field SDL")
+        void throwsOnInvalidSyntax() {
+            assertThatThrownBy(() -> registry.registerMutation("createUser", "createUser(name: String!"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Invalid SDL for mutation field 'createUser'");
         }
     }
 
@@ -211,6 +243,86 @@ class GraphQlSchemaRegistryTest {
             assertThat(registry.getQueryCount()).isZero();
             assertThat(registry.getMutationCount()).isZero();
             assertThat(registry.getSchema()).isEmpty();
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // getTypeDefinitionRegistry
+    // ----------------------------------------------------------------
+
+    @Nested
+    @DisplayName("getTypeDefinitionRegistry()")
+    class GetTypeDefinitionRegistry {
+
+        @Test
+        @DisplayName("should return an empty registry when nothing is registered")
+        void emptyWhenNothingRegistered() {
+            TypeDefinitionRegistry typeDefinitionRegistry = registry.getTypeDefinitionRegistry();
+
+            assertThat(typeDefinitionRegistry.types()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should expose the merged schema as a parsed TypeDefinitionRegistry")
+        void exposesMergedRegistry() {
+            registry.registerType("User", "type User { id: ID!, name: String! }");
+            registry.registerQuery("user", "user(id: ID!): User");
+            registry.registerMutation("createUser", "createUser(name: String!): User");
+
+            TypeDefinitionRegistry typeDefinitionRegistry = registry.getTypeDefinitionRegistry();
+
+            assertThat(typeDefinitionRegistry.getType("User")).isPresent();
+            assertThat(typeDefinitionRegistry.getType("Query")).isPresent();
+            assertThat(typeDefinitionRegistry.getType("Mutation")).isPresent();
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // merge
+    // ----------------------------------------------------------------
+
+    @Nested
+    @DisplayName("merge()")
+    class Merge {
+
+        @Test
+        @DisplayName("should copy all types, queries, and mutations from another registry")
+        void mergesAnotherRegistry() {
+            GraphQlSchemaRegistry other = new GraphQlSchemaRegistry();
+            other.registerType("Post", "type Post { id: ID! }");
+            other.registerQuery("posts", "posts: [Post]");
+            other.registerMutation("createPost", "createPost(title: String!): Post");
+
+            registry.registerType("User", "type User { id: ID! }");
+            registry.merge(other);
+
+            assertThat(registry.getTypeCount()).isEqualTo(2);
+            assertThat(registry.hasType("Post")).isTrue();
+            assertThat(registry.getQueryCount()).isEqualTo(1);
+            assertThat(registry.getMutationCount()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("should be a no-op when merging null")
+        void mergeNullIsNoOp() {
+            registry.registerType("User", "type User { id: ID! }");
+
+            registry.merge(null);
+
+            assertThat(registry.getTypeCount()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("merged entries overwrite existing entries with the same name")
+        void mergeOverwritesSameName() {
+            registry.registerType("User", "type User { id: ID! }");
+            GraphQlSchemaRegistry other = new GraphQlSchemaRegistry();
+            other.registerType("User", "type User { id: ID!, name: String! }");
+
+            registry.merge(other);
+
+            assertThat(registry.getTypeCount()).isEqualTo(1);
+            assertThat(registry.getSchema()).contains("name: String!");
         }
     }
 

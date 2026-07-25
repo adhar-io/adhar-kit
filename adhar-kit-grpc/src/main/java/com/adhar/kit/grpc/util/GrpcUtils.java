@@ -1,8 +1,11 @@
 package com.adhar.kit.grpc.util;
 
+import com.adhar.kit.grpc.exception.GrpcServiceConfigurationException;
 import io.grpc.Metadata;
 import io.grpc.Status;
 
+import java.io.File;
+import java.net.URL;
 import java.util.UUID;
 
 /**
@@ -62,6 +65,17 @@ public final class GrpcUtils {
      */
     public static final Metadata.Key<String> AUTHORIZATION_KEY =
         Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
+
+    /**
+     * API key metadata key, used as an alternative to a Bearer token.
+     */
+    public static final Metadata.Key<String> API_KEY_KEY =
+        Metadata.Key.of("x-api-key", Metadata.ASCII_STRING_MARSHALLER);
+
+    /**
+     * Bearer authorization scheme prefix.
+     */
+    private static final String BEARER_PREFIX = "Bearer ";
 
     private GrpcUtils() {
         // Utility class
@@ -252,6 +266,66 @@ public final class GrpcUtils {
                method.contains("list") ||
                method.contains("search") ||
                method.contains("query");
+    }
+
+    /**
+     * Extracts a credential token from request metadata, checking the
+     * {@code authorization} header (stripping a {@code Bearer } prefix if
+     * present) and then the {@code x-api-key} header.
+     *
+     * @param headers request metadata
+     * @return the extracted token, or {@code null} if none present
+     */
+    public static String extractCredentialToken(Metadata headers) {
+        String authHeader = headers.get(AUTHORIZATION_KEY);
+        if (authHeader != null && !authHeader.isBlank()) {
+            if (authHeader.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
+                return authHeader.substring(BEARER_PREFIX.length()).trim();
+            }
+            return authHeader.trim();
+        }
+        return headers.get(API_KEY_KEY);
+    }
+
+    /**
+     * Resolves a configured certificate/key file location to a {@link File},
+     * validating that it actually exists so misconfiguration fails fast with
+     * a clear error rather than a confusing TLS handshake failure.
+     *
+     * <p>Supports a {@code classpath:} prefix (resolved via the context
+     * classloader) in addition to plain filesystem paths.</p>
+     *
+     * @param location configured file location, e.g. {@code classpath:certs/server.crt}
+     *                 or {@code /etc/adhar/certs/server.crt}
+     * @return the resolved, existing file
+     * @throws GrpcServiceConfigurationException if the location is blank or the file cannot be found
+     */
+    public static File resolveCertFile(String location) {
+        if (location == null || location.isBlank()) {
+            throw new GrpcServiceConfigurationException("Certificate/key file location must not be blank");
+        }
+
+        if (location.startsWith("classpath:")) {
+            String resourcePath = location.substring("classpath:".length());
+            URL resource = Thread.currentThread().getContextClassLoader().getResource(resourcePath);
+            if (resource == null) {
+                throw new GrpcServiceConfigurationException(
+                        "Certificate/key classpath resource not found: " + location);
+            }
+            File file = new File(resource.getFile());
+            if (!file.exists()) {
+                throw new GrpcServiceConfigurationException(
+                        "Certificate/key classpath resource not found: " + location);
+            }
+            return file;
+        }
+
+        File file = new File(location);
+        if (!file.exists() || !file.isFile()) {
+            throw new GrpcServiceConfigurationException(
+                    "Certificate/key file not found: " + location);
+        }
+        return file;
     }
 }
 

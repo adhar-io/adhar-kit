@@ -3,6 +3,7 @@ package com.adhar.kit.dapr;
 import com.adhar.kit.dapr.api.ConfigurationCallback;
 import com.adhar.kit.dapr.api.StateOperation;
 import com.adhar.kit.dapr.api.StateWithETag;
+import com.adhar.kit.dapr.resilience.DaprInvocationResilience;
 import io.dapr.client.DaprClient;
 import io.dapr.client.DaprClientBuilder;
 import io.dapr.client.domain.*;
@@ -13,6 +14,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -273,6 +275,7 @@ public class DaprFacade {
 
     private static volatile DaprFacade instance;
     private final DaprClient daprClient;
+    private final DaprInvocationResilience resilience = new DaprInvocationResilience();
     private volatile boolean available = false;
 
     private DaprFacade() {
@@ -291,11 +294,13 @@ public class DaprFacade {
     }
 
     /**
-     * Package-private constructor for testing with an injected Dapr client.
+     * Constructor for injecting a Dapr client directly - typically a mock in tests, or a
+     * pre-configured client in production/DI scenarios where the default
+     * {@link DaprClientBuilder#build()} construction in {@link #getInstance()} isn't desired.
      *
-     * @param daprClient the Dapr client (typically a mock in tests)
+     * @param daprClient the Dapr client
      */
-    DaprFacade(DaprClient daprClient) {
+    public DaprFacade(DaprClient daprClient) {
         this.daprClient = daprClient;
         this.available = true;
     }
@@ -503,6 +508,35 @@ public class DaprFacade {
             log.error("Failed to invoke service: appId={}, method={}", appId, methodName, e);
             throw new DaprException("Failed to invoke service", e);
         }
+    }
+
+    /**
+     * Invokes a service with retry, per-attempt timeout, and circuit-breaker protection applied
+     * (see {@link DaprInvocationResilience}), throwing on final failure.
+     *
+     * @see #invokeServiceResilient(String, String, String, Object, Class, Function)
+     */
+    public <T, R> R invokeServiceResilient(String appId, String methodName, T request, Class<R> responseClass) {
+        return invokeServiceResilient(appId, methodName, "POST", request, responseClass, null);
+    }
+
+    /**
+     * Invokes a service with retry, per-attempt timeout, and circuit-breaker protection applied
+     * (see {@link DaprInvocationResilience}), falling back to {@code fallback} instead of
+     * throwing on final failure (or when the circuit breaker is open).
+     *
+     * @param appId         target app ID
+     * @param methodName    method/endpoint name
+     * @param httpMethod    HTTP method (GET/POST/PUT/DELETE)
+     * @param request       request payload
+     * @param responseClass response type
+     * @param fallback      invoked with the failure cause instead of throwing, or {@code null}
+     *                      to propagate the failure
+     * @return the response, or the fallback's result
+     */
+    public <T, R> R invokeServiceResilient(String appId, String methodName, String httpMethod, T request,
+                                           Class<R> responseClass, Function<Throwable, R> fallback) {
+        return resilience.execute(() -> invokeService(appId, methodName, httpMethod, request, responseClass), fallback);
     }
 
     // ==================== Bindings ====================

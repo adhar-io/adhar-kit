@@ -1,9 +1,14 @@
 package com.adhar.kit.tracing.config;
 
+import com.adhar.kit.tracing.async.TraceContextTaskDecorator;
 import com.adhar.kit.tracing.aspect.TracingAspect;
 import com.adhar.kit.tracing.properties.AdharTracingProperties;
 import com.adhar.kit.tracing.util.AdharTracing;
+import com.adhar.kit.tracing.web.TraceContextMdcFilter;
+import io.micrometer.tracing.BaggageManager;
 import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.otel.bridge.OtelBaggageManager;
+import io.micrometer.tracing.otel.bridge.OtelCurrentTraceContext;
 import io.micrometer.tracing.otel.bridge.OtelTracer;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
@@ -28,12 +33,15 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 import org.springframework.core.env.Environment;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -87,13 +95,43 @@ public class AdharTracingAutoConfiguration {
 
     /**
      * Create the Micrometer Tracer bean.
+     * <p>
+     * The {@link OtelCurrentTraceContext} and {@link BaggageManager} are wired explicitly
+     * (rather than left {@code null}/defaulted) so that {@link Tracer#withSpan(io.micrometer.tracing.Span)}
+     * has a real current-trace-context scope to push/pop, and so that baggage
+     * ({@link Tracer#createBaggageInScope(String, String)} et al., as used by
+     * {@link AdharTracing}) is backed by a real, context-scoped implementation instead of
+     * silently no-op'ing.
+     * </p>
      */
     @Bean
     @ConditionalOnMissingBean
     public Tracer tracer(OpenTelemetry openTelemetry) {
+        OtelCurrentTraceContext currentTraceContext = new OtelCurrentTraceContext();
+        BaggageManager baggageManager = createBaggageManager(currentTraceContext);
         return new OtelTracer(openTelemetry.getTracer("adhar-kit-tracing"),
-                             null,  // OtelCurrentTraceContext is no longer required
-                             event -> {});  // EventPublisher that does nothing
+                             currentTraceContext,
+                             event -> {},  // EventPublisher that does nothing
+                             baggageManager);
+    }
+
+    /**
+     * Create the {@link BaggageManager} used by the {@link Tracer}, honoring
+     * {@link AdharTracingProperties.BaggageProperties#getRemoteFields()} and
+     * {@link AdharTracingProperties.BaggageProperties#getCorrelationFields()}. Returns
+     * {@link BaggageManager#NOOP} when baggage is disabled.
+     */
+    private BaggageManager createBaggageManager(OtelCurrentTraceContext currentTraceContext) {
+        AdharTracingProperties.BaggageProperties baggageProperties = properties.getBaggage();
+        if (!baggageProperties.isEnabled()) {
+            log.info("Baggage support is disabled");
+            return BaggageManager.NOOP;
+        }
+
+        List<String> remoteFields = Arrays.asList(baggageProperties.getRemoteFields());
+        List<String> correlationFields = Arrays.asList(baggageProperties.getCorrelationFields());
+        log.debug("Configuring baggage manager with remoteFields={}, correlationFields={}", remoteFields, correlationFields);
+        return new OtelBaggageManager(currentTraceContext, remoteFields, correlationFields);
     }
 
     /**
@@ -111,7 +149,18 @@ public class AdharTracingAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public AdharTracing adharTracing(Tracer tracer) {
-        return new AdharTracing(tracer);
+        return new AdharTracing(tracer, properties.getBaggage());
+    }
+
+    /**
+     * Create the {@link TraceContextTaskDecorator}, which users can wire into their own
+     * {@code @Async} executors (e.g. {@code ThreadPoolTaskExecutor#setTaskDecorator}) so that
+     * submitted tasks continue to see the submitting thread's span as "current".
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public TraceContextTaskDecorator traceContextTaskDecorator(Tracer tracer) {
+        return new TraceContextTaskDecorator(tracer);
     }
 
     /**
@@ -374,5 +423,35 @@ public class AdharTracingAutoConfiguration {
                 propagators.size(), propagationType);
 
         return ContextPropagators.create(composite);
+    }
+
+    /**
+     * Registers the {@link TraceContextMdcFilter}, which injects the current traceId/spanId
+     * into the SLF4J MDC for the duration of each HTTP request.
+     * <p>
+     * This is a separate, class-level {@code @ConditionalOnClass}-gated configuration (rather
+     * than a plain {@code @Bean} method on the outer class) so that when Servlet/Spring MVC
+     * classes are absent from the classpath (e.g. a WebFlux-only application), Spring skips
+     * this class entirely <em>before</em> it ever needs to resolve
+     * {@link TraceContextMdcFilter}/{@link FilterRegistrationBean} as method signature types -
+     * avoiding a {@code NoClassDefFoundError} during {@code @Configuration} class processing.
+     * </p>
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = {"jakarta.servlet.Filter", "org.springframework.web.filter.OncePerRequestFilter"})
+    @ConditionalOnProperty(prefix = "adhar.tracing.web", name = "mdc-enabled", havingValue = "true", matchIfMissing = true)
+    public static class TraceContextMdcFilterConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public FilterRegistrationBean<TraceContextMdcFilter> traceContextMdcFilterRegistration(
+                AdharTracing adharTracing, AdharTracingProperties properties) {
+            TraceContextMdcFilter filter = new TraceContextMdcFilter(adharTracing, properties.getWeb().getSkipPatterns());
+            FilterRegistrationBean<TraceContextMdcFilter> registration = new FilterRegistrationBean<>(filter);
+            registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
+            registration.addUrlPatterns("/*");
+            registration.setName("traceContextMdcFilter");
+            return registration;
+        }
     }
 }

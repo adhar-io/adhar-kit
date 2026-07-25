@@ -78,6 +78,11 @@ public class KubernetesProperties {
     private PodConfig pod = new PodConfig();
 
     /**
+     * Graceful shutdown configuration.
+     */
+    private GracefulShutdownConfig gracefulShutdown = new GracefulShutdownConfig();
+
+    /**
      * Service discovery configuration.
      */
     @Data
@@ -131,6 +136,19 @@ public class KubernetesProperties {
         private String podName;
         private String podIp;
         private String nodeName;
+    }
+
+    /**
+     * Graceful shutdown configuration.
+     */
+    @Data
+    public static class GracefulShutdownConfig {
+        private boolean enabled = true;
+        /**
+         * How long to keep serving (readiness=false, but process still up) after
+         * shutdown begins, giving load balancers time to drain in-flight requests.
+         */
+        private long preStopDrainSeconds = 5;
     }
 }
 

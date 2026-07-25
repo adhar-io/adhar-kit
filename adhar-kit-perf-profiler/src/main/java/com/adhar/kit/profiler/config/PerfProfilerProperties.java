@@ -2,6 +2,8 @@ package com.adhar.kit.profiler.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.time.Duration;
+
 /**
  * Configuration properties for the Adhar Kit Performance Profiler.
  */
@@ -12,10 +14,61 @@ public class PerfProfilerProperties {
     private long defaultSlowThresholdMs = 500;
     private boolean logSlowByDefault = true;
 
+    /** Length of the rolling aggregation window before stats roll over into history. */
+    private Duration windowDuration = Duration.ofMinutes(5);
+
+    /** Number of completed rolling windows to retain (bounded, oldest evicted first). */
+    private int historyWindows = 5;
+
+    /**
+     * Fraction of calls (0.0-1.0) that are actually measured and recorded. 1.0 (default)
+     * profiles every call. Lower values reduce instrumentation overhead on hot paths by
+     * randomly sampling which calls are timed; the underlying method invocation always runs
+     * regardless of sampling.
+     */
+    private double sampleRate = 1.0;
+
+    /**
+     * Maximum number of distinct method names tracked in the registry. Once reached, newly
+     * seen methods are no longer recorded (a warning is logged once) to guard against unbounded
+     * growth from highly dynamic method/metric names.
+     */
+    private int maxTrackedMethods = 1000;
+
+    /**
+     * When greater than zero, publishes a {@code SlowCallThresholdBreachedEvent} whenever a
+     * method's aggregate p99 latency crosses this threshold (in milliseconds). Zero or a
+     * negative value disables aggregate threshold alerting.
+     */
+    private long p99AlertThresholdMs = 0;
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public long getDefaultSlowThresholdMs() { return defaultSlowThresholdMs; }
     public void setDefaultSlowThresholdMs(long defaultSlowThresholdMs) { this.defaultSlowThresholdMs = defaultSlowThresholdMs; }
     public boolean isLogSlowByDefault() { return logSlowByDefault; }
     public void setLogSlowByDefault(boolean logSlowByDefault) { this.logSlowByDefault = logSlowByDefault; }
+
+    public Duration getWindowDuration() { return windowDuration; }
+    public void setWindowDuration(Duration windowDuration) { this.windowDuration = windowDuration; }
+
+    public int getHistoryWindows() { return historyWindows; }
+    public void setHistoryWindows(int historyWindows) { this.historyWindows = historyWindows; }
+
+    public double getSampleRate() { return sampleRate; }
+    public void setSampleRate(double sampleRate) {
+        if (sampleRate < 0.0) {
+            this.sampleRate = 0.0;
+        } else if (sampleRate > 1.0) {
+            this.sampleRate = 1.0;
+        } else {
+            this.sampleRate = sampleRate;
+        }
+    }
+
+    public int getMaxTrackedMethods() { return maxTrackedMethods; }
+    public void setMaxTrackedMethods(int maxTrackedMethods) { this.maxTrackedMethods = maxTrackedMethods; }
+
+    public long getP99AlertThresholdMs() { return p99AlertThresholdMs; }
+    public void setP99AlertThresholdMs(long p99AlertThresholdMs) { this.p99AlertThresholdMs = p99AlertThresholdMs; }
 }

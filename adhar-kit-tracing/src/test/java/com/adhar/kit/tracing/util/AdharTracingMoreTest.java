@@ -21,6 +21,7 @@ import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -44,6 +45,9 @@ class AdharTracingMoreTest {
     @Mock
     private TraceContext traceContext;
 
+    @Mock
+    private Tracer.SpanInScope spanInScope;
+
     private AdharTracing adharTracing;
 
     @BeforeEach
@@ -53,6 +57,7 @@ class AdharTracingMoreTest {
         when(span.tag(anyString(), anyString())).thenReturn(span);
         when(span.start()).thenReturn(span);
         when(tracer.currentSpan()).thenReturn(span);
+        when(tracer.withSpan(any())).thenReturn(spanInScope);
 
         adharTracing = new AdharTracing(tracer);
     }
@@ -208,12 +213,19 @@ class AdharTracingMoreTest {
     }
 
     // ========== Context wrappers ==========
+    //
+    // wrapWithTraceContext captures the current span at wrap-time and re-attaches it (via
+    // tracer.withSpan(...)) for the duration of every invocation of the wrapped
+    // function/consumer/runnable/supplier/callable, closing the scope afterward. We verify
+    // both that the delegate is invoked and that tracer.withSpan(capturedSpan) was actually
+    // used to re-attach the context.
 
     @Test
-    void wrapFunctionWithActiveSpanInvokesDelegate() {
+    void wrapFunctionWithActiveSpanInvokesDelegateAndReattachesContext() {
         Function<Integer, Integer> wrapped = adharTracing.wrapWithTraceContext((Function<Integer, Integer>) i -> i + 1);
-
         assertThat(wrapped.apply(1)).isEqualTo(2);
+
+        verify(tracer).withSpan(span);
     }
 
     @Test
@@ -227,12 +239,13 @@ class AdharTracingMoreTest {
     }
 
     @Test
-    void wrapConsumerWithActiveSpanInvokesDelegate() {
+    void wrapConsumerWithActiveSpanInvokesDelegateAndReattachesContext() {
         AtomicBoolean called = new AtomicBoolean(false);
         Consumer<String> wrapped = adharTracing.wrapWithTraceContext((Consumer<String>) s -> called.set(true));
-
         wrapped.accept("x");
+
         assertThat(called).isTrue();
+        verify(tracer).withSpan(span);
     }
 
     @Test
@@ -244,12 +257,13 @@ class AdharTracingMoreTest {
     }
 
     @Test
-    void wrapRunnableWithActiveSpanInvokesDelegate() {
+    void wrapRunnableWithActiveSpanInvokesDelegateAndReattachesContext() {
         AtomicBoolean called = new AtomicBoolean(false);
         Runnable wrapped = adharTracing.wrapWithTraceContext((Runnable) () -> called.set(true));
-
         wrapped.run();
+
         assertThat(called).isTrue();
+        verify(tracer).withSpan(span);
     }
 
     @Test
@@ -260,37 +274,118 @@ class AdharTracingMoreTest {
         assertThat(adharTracing.wrapWithTraceContext(original)).isSameAs(original);
     }
 
-    // ========== Baggage error / edge paths ==========
+    @Test
+    void wrapSupplierWithActiveSpanInvokesDelegateAndReattachesContext() {
+        Supplier<String> wrapped = adharTracing.wrapWithTraceContext((Supplier<String>) () -> "value");
+        assertThat(wrapped.get()).isEqualTo("value");
+
+        verify(tracer).withSpan(span);
+    }
 
     @Test
-    void setBaggageSwallowsSpanTagException() {
-        Span throwingSpan = org.mockito.Mockito.mock(Span.class);
-        when(throwingSpan.tag(anyString(), anyString())).thenThrow(new RuntimeException("tag boom"));
-        when(tracer.currentSpan()).thenReturn(throwingSpan);
+    void wrapSupplierWithoutSpanReturnsOriginal() {
+        when(tracer.currentSpan()).thenReturn(null);
+        Supplier<String> original = () -> "value";
 
-        // Exception from span.tag is caught and logged, not propagated.
+        assertThat(adharTracing.wrapWithTraceContext(original)).isSameAs(original);
+    }
+
+    @Test
+    void wrapCallableWithActiveSpanInvokesDelegateAndReattachesContext() throws Exception {
+        Callable<String> wrapped = adharTracing.wrapWithTraceContext((Callable<String>) () -> "called");
+        assertThat(wrapped.call()).isEqualTo("called");
+
+        verify(tracer).withSpan(span);
+    }
+
+    @Test
+    void wrapCallableWithoutSpanReturnsOriginal() {
+        when(tracer.currentSpan()).thenReturn(null);
+        Callable<String> original = () -> "value";
+
+        assertThat(adharTracing.wrapWithTraceContext(original)).isSameAs(original);
+    }
+
+    @Test
+    void wrapCallableClosesScopeEvenWhenDelegateThrows() {
+        RuntimeException boom = new RuntimeException("boom");
+        Callable<String> wrapped = adharTracing.wrapWithTraceContext((Callable<String>) () -> { throw boom; });
+        assertThatThrownBy(wrapped::call).isSameAs(boom);
+
+        verify(tracer).withSpan(span);
+        verify(spanInScope).close();
+    }
+
+    // ========== Baggage error / edge paths (real Tracer baggage API) ==========
+    //
+    // These use the mocked Tracer to exercise error handling / validation branches that are
+    // hard to trigger against a real Tracer implementation. Happy-path set/get/propagation
+    // coverage against a real (non-mock) Tracer lives in AdharTracingBaggageTest.
+
+    @Test
+    void setBaggageWithNullKeyIsNoOp() {
+        adharTracing.setBaggage(null, "v");
+
+        verify(tracer, never()).createBaggageInScope(anyString(), anyString());
+    }
+
+    @Test
+    void setBaggageWithNullValueIsNoOp() {
+        adharTracing.setBaggage("k", null);
+
+        verify(tracer, never()).createBaggageInScope(anyString(), anyString());
+    }
+
+    @Test
+    void setBaggageWhenDisabledIsNoOp() {
+        com.adhar.kit.tracing.properties.AdharTracingProperties.BaggageProperties disabled =
+                new com.adhar.kit.tracing.properties.AdharTracingProperties.BaggageProperties();
+        disabled.setEnabled(false);
+        AdharTracing disabledTracing = new AdharTracing(tracer, disabled);
+
+        disabledTracing.setBaggage("k", "v");
+
+        verify(tracer, never()).createBaggageInScope(anyString(), anyString());
+    }
+
+    @Test
+    void setBaggageSwallowsTracerException() {
+        when(tracer.createBaggageInScope(anyString(), anyString())).thenThrow(new RuntimeException("boom"));
+
+        // Must not throw; the exception is caught and logged.
         adharTracing.setBaggage("k", "v");
+    }
 
-        // localBaggage is only populated after the (failed) tag call, so it stays empty.
+    @Test
+    void getBaggageWithNullKeyReturnsNullWithoutCallingTracer() {
+        assertThat(adharTracing.getBaggage(null)).isNull();
+
+        verify(tracer, never()).getBaggage(anyString());
+    }
+
+    @Test
+    void getBaggageSwallowsTracerException() {
+        when(tracer.getBaggage(anyString())).thenThrow(new RuntimeException("boom"));
+
         assertThat(adharTracing.getBaggage("k")).isNull();
     }
 
     @Test
-    void getBaggageWithNullKeyReturnsNull() {
-        // ConcurrentHashMap.get(null) throws NPE which is caught -> null returned.
-        assertThat(adharTracing.getBaggage(null)).isNull();
+    void getAllBaggageSwallowsTracerExceptionReturningEmptyMap() {
+        when(tracer.getAllBaggage()).thenThrow(new RuntimeException("boom"));
+
+        assertThat(adharTracing.getAllBaggage()).isEmpty();
     }
 
     @Test
-    void removeBaggageWithNullKeySwallowsException() {
-        // ConcurrentHashMap.remove(null) throws NPE which is caught.
-        adharTracing.removeBaggage(null);
-        assertThat(adharTracing.isBaggageEmpty()).isTrue();
+    void removeBaggageWithUnknownKeyIsNoOp() {
+        // Never set via this instance, so there is no tracked scope to close; must not throw.
+        adharTracing.removeBaggage("never-set");
     }
 
     @Test
-    void copyBaggageToSpanSwallowsException() {
-        adharTracing.setBaggage("k", "v");
+    void copyBaggageToSpanSwallowsSpanTagException() {
+        when(tracer.getAllBaggage()).thenReturn(Map.of("k", "v"));
         Span throwingSpan = org.mockito.Mockito.mock(Span.class);
         when(throwingSpan.tag(anyString(), anyString())).thenThrow(new RuntimeException("copy boom"));
 
@@ -301,17 +396,27 @@ class AdharTracingMoreTest {
     }
 
     @Test
-    void extractBaggageFromNullHeadersSwallowsException() {
-        // headers.entrySet() on null throws NPE which is caught.
+    void extractBaggageFromNullHeadersIsNoOp() {
         adharTracing.extractBaggageFromHeaders(null);
-        assertThat(adharTracing.isBaggageEmpty()).isTrue();
+
+        verify(tracer, never()).createBaggageInScope(anyString(), anyString());
     }
 
     @Test
-    void injectBaggageIntoImmutableHeadersSwallowsException() {
-        adharTracing.setBaggage("k", "v");
-        // Map.of() is immutable; put() throws UnsupportedOperationException which is caught.
-        adharTracing.injectBaggageIntoHeaders(Map.of());
-        assertThat(adharTracing.getBaggage("k")).isEqualTo("v");
+    void injectBaggageIntoNullHeadersIsNoOp() {
+        when(tracer.getAllBaggage()).thenReturn(Map.of("k", "v"));
+
+        // Must not throw.
+        adharTracing.injectBaggageIntoHeaders(null);
+    }
+
+    @Test
+    void injectBaggageWithEmptyBaggageDoesNotAddHeader() {
+        when(tracer.getAllBaggage()).thenReturn(Map.of());
+        Map<String, String> headers = new java.util.HashMap<>();
+
+        adharTracing.injectBaggageIntoHeaders(headers);
+
+        assertThat(headers).isEmpty();
     }
 }

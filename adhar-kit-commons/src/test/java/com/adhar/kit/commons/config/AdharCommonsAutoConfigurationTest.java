@@ -61,6 +61,56 @@ class AdharCommonsAutoConfigurationTest {
     }
 
     @Test
+    void errorCatalog_shouldRegisterByDefaultAndWireIntoHandler() {
+        runner.run(context -> {
+            assertThat(context).hasSingleBean(com.adhar.kit.commons.i18n.ErrorCatalog.class);
+            SpringGlobalExceptionHandler handler = context.getBean(SpringGlobalExceptionHandler.class);
+            assertThat(handler.getErrorCatalog())
+                .isSameAs(context.getBean(com.adhar.kit.commons.i18n.ErrorCatalog.class));
+            assertThat(handler.getErrorCatalog().resolve("VALIDATION_ERROR", java.util.Locale.ENGLISH))
+                .isEqualTo("Validation failed");
+        });
+    }
+
+    @Test
+    void errorCatalog_shouldBeToggleable() {
+        runner.withPropertyValues("adhar.commons.error-catalog.enabled=false")
+            .run(context -> {
+                assertThat(context).doesNotHaveBean(com.adhar.kit.commons.i18n.ErrorCatalog.class);
+                assertThat(context.getBean(SpringGlobalExceptionHandler.class).getErrorCatalog())
+                    .isNull();
+            });
+    }
+
+    @Test
+    void customErrorCatalog_shouldBackOffDefault() {
+        com.adhar.kit.commons.i18n.ErrorCatalog custom =
+            com.adhar.kit.commons.i18n.ErrorCatalog.withDefaults();
+        runner.withBean("customCatalog", com.adhar.kit.commons.i18n.ErrorCatalog.class, () -> custom)
+            .run(context -> {
+                assertThat(context).hasSingleBean(com.adhar.kit.commons.i18n.ErrorCatalog.class);
+                assertThat(context.getBean(SpringGlobalExceptionHandler.class).getErrorCatalog())
+                    .isSameAs(custom);
+            });
+    }
+
+    @Test
+    void errorCatalog_shouldUseApplicationMessageSourceAsFallbackParent() {
+        org.springframework.context.support.StaticMessageSource appSource =
+            new org.springframework.context.support.StaticMessageSource();
+        appSource.addMessage("adhar.error.CUSTOM_CODE", java.util.Locale.ENGLISH, "Custom message");
+        runner.withBean("messageSource", org.springframework.context.MessageSource.class, () -> appSource)
+            .run(context -> {
+                com.adhar.kit.commons.i18n.ErrorCatalog catalog =
+                    context.getBean(com.adhar.kit.commons.i18n.ErrorCatalog.class);
+                assertThat(catalog.resolve("CUSTOM_CODE", java.util.Locale.ENGLISH))
+                    .isEqualTo("Custom message");
+                assertThat(catalog.resolve("VALIDATION_ERROR", java.util.Locale.ENGLISH))
+                    .isEqualTo("Validation failed");
+            });
+    }
+
+    @Test
     void properties_shouldBindFromEnvironment() {
         runner.withPropertyValues("adhar.commons.api-versioning.validate-request-version=true")
             .run(context -> {

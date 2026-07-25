@@ -68,6 +68,15 @@ public class FeatureFlagAspect {
     }
 
     /**
+     * Package-private constructor for injecting a controllable
+     * {@link AnalyticsFacade} (e.g. a Mockito mock) in tests, without going
+     * through the process-wide singleton.
+     */
+    FeatureFlagAspect(AnalyticsFacade analytics) {
+        this.analytics = analytics;
+    }
+
+    /**
      * Intercepts methods annotated with @FeatureFlag.
      *
      * @param joinPoint the join point

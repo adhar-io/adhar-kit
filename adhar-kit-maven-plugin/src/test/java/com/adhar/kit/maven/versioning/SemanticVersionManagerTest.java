@@ -168,4 +168,47 @@ class SemanticVersionManagerTest {
         // Second close must not throw.
         manager.close();
     }
+
+    // ---- getLastTag (semver-aware sorting) ----
+
+    @Test
+    void getLastTagReturnsHighestSemverEvenWhenTagsAreCreatedOutOfOrder(@TempDir Path dir) throws Exception {
+        try (Git git = TestSupport.initRepo(dir)) {
+            // Tags are created in an order where lexicographic ("v1.10.0" < "v1.2.0")
+            // and ref-list order would both pick the wrong "last" tag.
+            TestSupport.commit(git, "chore: init");
+            TestSupport.tag(git, "v1.2.0");
+            TestSupport.commit(git, "feat: two");
+            TestSupport.tag(git, "v1.10.0");
+            TestSupport.commit(git, "feat: three");
+            TestSupport.tag(git, "v1.9.0");
+        }
+
+        SemanticVersionManager manager = new SemanticVersionManager(dir.toString(), log);
+        assertThat(manager.getLastTag()).isEqualTo("v1.10.0");
+        manager.close();
+    }
+
+    @Test
+    void getLastTagReturnsNullWhenNoTagsExist(@TempDir Path dir) throws Exception {
+        try (Git git = TestSupport.initRepo(dir)) {
+            TestSupport.commit(git, "chore: init");
+        }
+        SemanticVersionManager manager = new SemanticVersionManager(dir.toString(), log);
+        assertThat(manager.getLastTag()).isNull();
+        manager.close();
+    }
+
+    @Test
+    void getLastTagFallsBackToLexicographicOrderForNonSemverTags(@TempDir Path dir) throws Exception {
+        try (Git git = TestSupport.initRepo(dir)) {
+            TestSupport.commit(git, "chore: init");
+            TestSupport.tag(git, "alpha");
+            TestSupport.commit(git, "chore: two");
+            TestSupport.tag(git, "zeta");
+        }
+        SemanticVersionManager manager = new SemanticVersionManager(dir.toString(), log);
+        assertThat(manager.getLastTag()).isEqualTo("zeta");
+        manager.close();
+    }
 }

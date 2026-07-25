@@ -1,11 +1,21 @@
 package com.adhar.kit.grpc.client;
 
 import com.adhar.kit.grpc.config.GrpcProperties;
-import com.adhar.kit.grpc.interceptor.RetryInterceptor;
+import com.adhar.kit.grpc.exception.GrpcServiceConfigurationException;
+import com.adhar.kit.grpc.interceptor.DeadlineClientInterceptor;
+import com.adhar.kit.grpc.interceptor.MetricsClientInterceptor;
+import com.adhar.kit.grpc.util.GrpcUtils;
+import io.grpc.ChannelCredentials;
+import io.grpc.Grpc;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.TlsChannelCredentials;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -17,12 +27,29 @@ import java.util.concurrent.TimeUnit;
  * <ul>
  *   <li>Named channel management</li>
  *   <li>Load balancing configuration</li>
- *   <li>Automatic retry with backoff</li>
+ *   <li>Automatic retry with backoff (grpc-java's built-in retry mechanism)</li>
+ *   <li>Default per-call deadlines</li>
  *   <li>Connection pooling</li>
  *   <li>Keep-alive settings</li>
  *   <li>TLS/mTLS support</li>
+ *   <li>Optional Micrometer metrics</li>
  *   <li>Graceful shutdown</li>
  * </ul>
+ *
+ * <p><b>Why grpc-java's built-in retry instead of a hand-rolled interceptor:</b>
+ * grpc-java ships a transparent retry implementation (enabled via
+ * {@link ManagedChannelBuilder#enableRetry()} plus a retry policy supplied
+ * through {@link ManagedChannelBuilder#defaultServiceConfig(Map)}) that
+ * correctly buffers and replays the request, respects the server's
+ * {@code pushback} hints, and is exercised by grpc-java's own test suite. A
+ * client interceptor cannot safely retry a unary call on its own without
+ * re-implementing exactly that machinery - the request message would need to
+ * be captured and replayed, streaming calls would need to be reset, and
+ * hedging/pushback semantics would need to be reimplemented from scratch.
+ * This module previously shipped such an interceptor
+ * ({@code RetryInterceptor}) which slept on failure but never actually
+ * retried (see its history); it has been removed in favor of the supported
+ * mechanism below.</p>
  *
  * <p><b>Example:</b></p>
  * <pre>{@code
@@ -58,6 +85,7 @@ public class AdharGrpcClientFactory {
 
     private final GrpcProperties properties;
     private final Map<String, ManagedChannel> channels = new HashMap<>();
+    private volatile MeterRegistry meterRegistry;
 
     /**
      * Creates client factory with properties.
@@ -66,6 +94,19 @@ public class AdharGrpcClientFactory {
      */
     public AdharGrpcClientFactory(GrpcProperties properties) {
         this.properties = properties;
+    }
+
+    /**
+     * Supplies a Micrometer registry so that channels created afterwards are
+     * instrumented with {@link MetricsClientInterceptor}. Optional; if never
+     * called, no client-side metrics are recorded.
+     *
+     * @param meterRegistry Micrometer registry
+     * @return this factory for chaining
+     */
+    public AdharGrpcClientFactory withMeterRegistry(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+        return this;
     }
 
     /**
@@ -103,7 +144,13 @@ public class AdharGrpcClientFactory {
         String host = parts[0];
         int port = parts.length > 1 ? Integer.parseInt(parts[1]) : 9090;
 
-        ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder.forAddress(host, port);
+        ManagedChannelBuilder<?> channelBuilder;
+        if (config.isEnableTls()) {
+            channelBuilder = Grpc.newChannelBuilderForAddress(host, port, buildClientTlsCredentials());
+            log.debug("TLS enabled for channel '{}'", channelName);
+        } else {
+            channelBuilder = ManagedChannelBuilder.forAddress(host, port).usePlaintext();
+        }
 
         // Configure channel settings
         channelBuilder
@@ -118,19 +165,25 @@ public class AdharGrpcClientFactory {
             channelBuilder.defaultLoadBalancingPolicy(config.getLoadBalancingPolicy());
         }
 
-        // TLS
-        if (!config.isEnableTls()) {
-            channelBuilder.usePlaintext();
+        // Apply the configured default timeout as a deadline when the caller didn't set one
+        channelBuilder.intercept(new DeadlineClientInterceptor(config.getDefaultTimeout()));
+
+        // Optional Micrometer instrumentation
+        MeterRegistry registry = this.meterRegistry;
+        if (registry != null && properties.getObservability().isEnableMetrics()) {
+            channelBuilder.intercept(new MetricsClientInterceptor(registry));
         }
 
-        // Retry interceptor
+        // Built-in gRPC retry - see class Javadoc for why this replaces the old RetryInterceptor
         if (config.isEnableRetry()) {
-            RetryInterceptor retryInterceptor = new RetryInterceptor(
-                config.getMaxRetryAttempts(),
-                1000 // 1 second initial backoff
-            );
-            channelBuilder.intercept(retryInterceptor);
-            log.debug("Retry interceptor enabled for channel '{}'", channelName);
+            int maxAttempts = Math.max(2, config.getMaxRetryAttempts());
+            channelBuilder
+                .enableRetry()
+                .maxRetryAttempts(maxAttempts)
+                .defaultServiceConfig(buildRetryServiceConfig(config, maxAttempts));
+            log.debug("Built-in gRPC retry enabled for channel '{}': maxAttempts={}", channelName, maxAttempts);
+        } else {
+            channelBuilder.disableRetry();
         }
 
         ManagedChannel channel = channelBuilder.build();
@@ -138,6 +191,73 @@ public class AdharGrpcClientFactory {
         log.info("gRPC channel created: name={}, target={}", channelName, config.getTarget());
 
         return channel;
+    }
+
+    /**
+     * Builds a gRPC service config map describing a retry policy from the
+     * given channel configuration. The {@code name} entry is left empty so
+     * the policy applies to every method on every service invoked through
+     * this channel.
+     *
+     * @param config      channel configuration
+     * @param maxAttempts already-clamped max attempts (must be &gt;= 2)
+     * @return service config map suitable for {@link ManagedChannelBuilder#defaultServiceConfig(Map)}
+     */
+    static Map<String, Object> buildRetryServiceConfig(GrpcProperties.ChannelConfig config, int maxAttempts) {
+        Map<String, Object> retryPolicy = new HashMap<>();
+        retryPolicy.put("maxAttempts", (double) maxAttempts);
+        retryPolicy.put("initialBackoff", toSecondsString(config.getInitialBackoffMillis()));
+        retryPolicy.put("maxBackoff", toSecondsString(config.getMaxBackoffMillis()));
+        retryPolicy.put("backoffMultiplier", config.getBackoffMultiplier());
+        retryPolicy.put("retryableStatusCodes", new ArrayList<>(config.getRetryableStatusCodes()));
+
+        // An empty "name" entry matches every service/method on the channel.
+        Map<String, Object> methodConfig = new HashMap<>();
+        methodConfig.put("name", Collections.singletonList(new HashMap<>()));
+        methodConfig.put("retryPolicy", retryPolicy);
+
+        Map<String, Object> serviceConfig = new HashMap<>();
+        serviceConfig.put("methodConfig", Collections.singletonList(methodConfig));
+        return serviceConfig;
+    }
+
+    private static String toSecondsString(long millis) {
+        return (millis / 1000.0) + "s";
+    }
+
+    /**
+     * Builds client-side TLS credentials from {@link GrpcProperties.SecurityConfig}:
+     * a trust store when {@code trust-cert-collection} is set, and a client
+     * certificate/key pair when mTLS is enabled.
+     *
+     * @return channel credentials for TLS/mTLS
+     * @throws GrpcServiceConfigurationException if mTLS is enabled but the
+     *                                            client cert/key are not configured, or a configured file is missing
+     */
+    private ChannelCredentials buildClientTlsCredentials() {
+        GrpcProperties.SecurityConfig security = properties.getSecurity();
+        TlsChannelCredentials.Builder builder = TlsChannelCredentials.newBuilder();
+
+        try {
+            if (security.getTrustCertCollection() != null && !security.getTrustCertCollection().isBlank()) {
+                builder.trustManager(GrpcUtils.resolveCertFile(security.getTrustCertCollection()));
+            }
+
+            if (security.isEnableMtls()) {
+                if (security.getCertChain() == null || security.getCertChain().isBlank()
+                        || security.getPrivateKey() == null || security.getPrivateKey().isBlank()) {
+                    throw new GrpcServiceConfigurationException(
+                            "mTLS is enabled but security.cert-chain / security.private-key are not configured");
+                }
+                builder.keyManager(
+                        GrpcUtils.resolveCertFile(security.getCertChain()),
+                        GrpcUtils.resolveCertFile(security.getPrivateKey()));
+            }
+        } catch (IOException e) {
+            throw new GrpcServiceConfigurationException("Failed to load TLS credentials for gRPC client", e);
+        }
+
+        return builder.build();
     }
 
     /**
@@ -194,4 +314,3 @@ public class AdharGrpcClientFactory {
         return channels.size();
     }
 }
-

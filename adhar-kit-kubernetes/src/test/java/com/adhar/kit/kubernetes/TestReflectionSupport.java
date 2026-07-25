@@ -50,6 +50,23 @@ public final class TestReflectionSupport {
         }
     }
 
+    /**
+     * Reads a (possibly private/final) field on the given target instance.
+     *
+     * @param target    the object whose field should be read
+     * @param fieldName the field name (searched up the class hierarchy)
+     * @return the field's current value
+     */
+    public static Object getField(Object target, String fieldName) {
+        try {
+            Field field = findField(target.getClass(), fieldName);
+            field.setAccessible(true);
+            return field.get(target);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Unable to read field '" + fieldName + "'", e);
+        }
+    }
+
     private static Field findField(Class<?> type, String name) throws NoSuchFieldException {
         Class<?> current = type;
         while (current != null) {

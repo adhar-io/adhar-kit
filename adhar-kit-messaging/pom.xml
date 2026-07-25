@@ -54,6 +54,16 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Micrometer (Optional) - powers MessagingMetrics; gated at runtime by
+             @ConditionalOnClass(MeterRegistry.class) in MessagingAutoConfiguration so the
+             module works fine without it on the classpath. Version managed by the
+             Spring Boot 4.1 BOM (imported via adhar-kit-bom). -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- CloudEvents Dependencies -->
         <dependency>
             <groupId>io.cloudevents</groupId>

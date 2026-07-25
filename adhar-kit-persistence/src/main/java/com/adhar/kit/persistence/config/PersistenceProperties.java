@@ -42,6 +42,7 @@ public class PersistenceProperties {
     private ConnectionPool connectionPool = new ConnectionPool();
     private Metrics metrics = new Metrics();
     private Outbox outbox = new Outbox();
+    private Multitenancy multitenancy = new Multitenancy();
 
     public enum MultiTenancyStrategy {
         SCHEMA, DATABASE, DISCRIMINATOR
@@ -76,5 +77,36 @@ public class PersistenceProperties {
         private boolean enabled = false;
         private long pollIntervalMs = 5000;
         private int batchSize = 100;
+
+        /** Maximum publish attempts before an event is moved to the {@code DEAD} state. */
+        private int maxAttempts = 5;
+
+        /** Backoff before the first retry, in milliseconds. */
+        private long initialBackoffMs = 1000;
+
+        /** Multiplier applied to the backoff after each failed attempt (exponential backoff). */
+        private double backoffMultiplier = 2.0;
+
+        /** Upper bound applied to the computed backoff, in milliseconds. */
+        private long maxBackoffMs = 60_000;
+
+        /**
+         * Whether {@link com.adhar.kit.persistence.outbox.DomainEventOutboxBridge} is registered
+         * to persist {@link com.adhar.kit.persistence.outbox.OutboxedEvent} application events as
+         * outbox rows automatically.
+         */
+        private boolean bridgeEnabled = false;
+    }
+
+    /**
+     * Nested multi-tenancy configuration consumed by the real Hibernate wiring in
+     * {@code PersistenceAutoConfiguration} (as opposed to the legacy flat
+     * {@code enable-multi-tenancy} / {@code multi-tenancy-strategy} properties, kept for backward
+     * compatibility).
+     */
+    @Data
+    public static class Multitenancy {
+        private boolean enabled = false;
+        private MultiTenancyStrategy strategy = MultiTenancyStrategy.SCHEMA;
     }
 }

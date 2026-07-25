@@ -1,10 +1,13 @@
 package com.adhar.kit.ai.config;
 
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -64,6 +67,7 @@ public class AiProperties {
     private Caching caching = new Caching();
     private Security security = new Security();
     private Metrics metrics = new Metrics();
+    private Costs costs = new Costs();
 
     @Data
     public static class Annotations {
@@ -206,5 +210,34 @@ public class AiProperties {
         private Boolean logRequests = false; // Be careful with PII
         private Boolean auditEnabled = true;
         private String[] allowedModels = {"gpt-3.5-turbo", "gpt-4", "llama2"};
+    }
+
+    /**
+     * Simple per-model cost table (USD per 1,000 tokens) used to estimate the cost
+     * of a chat request from the prompt/completion token usage reported by Spring AI.
+     * Real-world price lists change frequently and vary per provider, so this is
+     * intentionally a coarse, configurable approximation rather than a byte-for-byte
+     * mirror of any single vendor's pricing page.
+     */
+    @Data
+    public static class Costs {
+        /** Cost entries keyed by model id (e.g. "gpt-4", "claude-3-opus"). */
+        private Map<String, ModelCost> models = new HashMap<>(Map.of(
+            "gpt-3.5-turbo", new ModelCost(0.0005, 0.0015),
+            "gpt-4", new ModelCost(0.03, 0.06)
+        ));
+
+        /** Fallback used when the response model isn't present in {@link #models}. */
+        private ModelCost defaultCost = new ModelCost(0.0, 0.0);
+
+        @Data
+        @NoArgsConstructor
+        @AllArgsConstructor
+        public static class ModelCost {
+            /** USD cost per 1,000 prompt tokens. */
+            private double promptCostPer1k;
+            /** USD cost per 1,000 completion tokens. */
+            private double completionCostPer1k;
+        }
     }
 }

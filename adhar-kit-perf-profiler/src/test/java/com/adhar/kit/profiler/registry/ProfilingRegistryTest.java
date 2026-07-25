@@ -3,10 +3,12 @@ package com.adhar.kit.profiler.registry;
 import com.adhar.kit.profiler.model.MethodProfile;
 import com.adhar.kit.profiler.model.ProfilingReport;
 import com.adhar.kit.profiler.model.ProfilingResult;
+import com.adhar.kit.profiler.model.WindowSnapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -15,6 +17,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 class ProfilingRegistryTest {
 
@@ -163,5 +166,134 @@ class ProfilingRegistryTest {
 
         ProfilingReport report = registry.getReport(Integer.MAX_VALUE);
         assertThat(report.totalProfiledCalls()).isEqualTo((long) threadCount * recordsPerThread);
+    }
+
+    @Test
+    @DisplayName("recording a very large number of samples keeps the histogram's memory footprint bounded")
+    void memoryFootprintStaysBoundedUnderHighVolume() {
+        String className = "svc";
+        String methodName = "hot";
+        String key = className + "." + methodName;
+        Instant now = Instant.now();
+
+        // Warm up with a modest number of samples and capture the footprint.
+        for (int i = 0; i < 1_000; i++) {
+            registry.record(new ProfilingResult(methodName, className, (i % 500) + 1, true, null, now));
+        }
+        long footprintAfter1k = registry.estimatedHistogramFootprintBytes(key);
+        assertThat(footprintAfter1k).isPositive();
+
+        // Record several orders of magnitude more samples - a growing List<Long> would blow up
+        // memory here; a bounded histogram's footprint must not grow with sample count.
+        for (int i = 0; i < 2_000_000; i++) {
+            registry.record(new ProfilingResult(methodName, className, (i % 500) + 1, true, null, now));
+        }
+        long footprintAfter2m = registry.estimatedHistogramFootprintBytes(key);
+
+        assertThat(footprintAfter2m).isEqualTo(footprintAfter1k);
+        // Sanity bound: a bounded histogram over this range/precision should be well under 1MB,
+        // regardless of the 2,001,000 samples recorded above.
+        assertThat(footprintAfter2m).isLessThan(1_000_000);
+
+        ProfilingReport report = registry.getReport(Integer.MAX_VALUE);
+        assertThat(report.methodCallCounts().get(key)).isEqualTo(2_001_000L);
+    }
+
+    @Test
+    @DisplayName("percentiles computed from the bounded histogram are accurate within tolerance")
+    void percentilesAreAccurateForKnownDistribution() {
+        String className = "svc";
+        String methodName = "uniform";
+        String key = className + "." + methodName;
+        Instant now = Instant.now();
+
+        // Known uniform distribution 1..10000ms; exact p95=9500, p99=9900 by rank.
+        int n = 10_000;
+        for (int i = 1; i <= n; i++) {
+            registry.record(new ProfilingResult(methodName, className, i, true, null, now));
+        }
+
+        ProfilingReport.MethodStats stats = registry.getReport(Integer.MAX_VALUE).methodStatistics().get(key);
+        assertThat(stats).isNotNull();
+
+        // HdrHistogram at 2 significant digits has ~1% relative error; allow generous tolerance.
+        assertThat(stats.p95Ms()).isCloseTo(9500.0, within(200.0));
+        assertThat(stats.p99Ms()).isCloseTo(9900.0, within(200.0));
+        assertThat(stats.minMs()).isEqualTo(1L);
+        assertThat(stats.maxMs()).isEqualTo(n);
+    }
+
+    @Test
+    @DisplayName("getMethodStats returns stats for a tracked method and empty for an unknown one")
+    void getMethodStatsReturnsOptional() {
+        registry.record(new ProfilingResult("op", "svc", 42L, true, null, Instant.now()));
+
+        assertThat(registry.getMethodStats("svc.op")).isPresent();
+        assertThat(registry.getMethodStats("svc.op").get().averageMs()).isEqualTo(42.0);
+        assertThat(registry.getMethodStats("svc.unknown")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("rolling window rolls over into bounded history after the configured duration")
+    void windowRollsOverIntoHistory() throws InterruptedException {
+        ProfilingRegistry windowed = new ProfilingRegistry(Duration.ofMillis(30), 2);
+
+        windowed.record(new ProfilingResult("op", "svc", 10L, true, null, Instant.now()));
+        assertThat(windowed.getWindowHistory()).isEmpty();
+
+        Thread.sleep(60);
+        // Triggers rollover: current stats are snapshotted into history and cleared.
+        windowed.record(new ProfilingResult("op", "svc", 20L, true, null, Instant.now()));
+
+        List<WindowSnapshot> history = windowed.getWindowHistory();
+        assertThat(history).hasSize(1);
+        assertThat(history.getFirst().totalCalls()).isEqualTo(1);
+        assertThat(history.getFirst().methodStatistics()).containsKey("svc.op");
+
+        // The new window only contains the post-rollover record.
+        assertThat(windowed.getReport().totalProfiledCalls()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("window history is bounded to the configured number of historical windows")
+    void windowHistoryIsBounded() throws InterruptedException {
+        ProfilingRegistry windowed = new ProfilingRegistry(Duration.ofMillis(20), 2);
+
+        for (int i = 0; i < 5; i++) {
+            windowed.record(new ProfilingResult("op", "svc", 10L, true, null, Instant.now()));
+            Thread.sleep(30);
+        }
+        // One more record to force a final rollover check.
+        windowed.record(new ProfilingResult("op", "svc", 10L, true, null, Instant.now()));
+
+        assertThat(windowed.getWindowHistory()).hasSizeLessThanOrEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("an invalid window configuration falls back to sensible defaults")
+    void invalidWindowConfigurationFallsBackToDefaults() {
+        ProfilingRegistry defaulted = new ProfilingRegistry(Duration.ZERO, -1);
+
+        defaulted.record(new ProfilingResult("op", "svc", 10L, true, null, Instant.now()));
+
+        // Should behave like the default registry: no rollover happens immediately.
+        assertThat(defaulted.getWindowHistory()).isEmpty();
+        assertThat(defaulted.getReport().totalProfiledCalls()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("reset clears window history as well as stats")
+    void resetClearsWindowHistory() throws InterruptedException {
+        ProfilingRegistry windowed = new ProfilingRegistry(Duration.ofMillis(20), 3);
+        windowed.record(new ProfilingResult("op", "svc", 10L, true, null, Instant.now()));
+        Thread.sleep(40);
+        windowed.record(new ProfilingResult("op", "svc", 10L, true, null, Instant.now()));
+
+        assertThat(windowed.getWindowHistory()).isNotEmpty();
+
+        windowed.reset();
+
+        assertThat(windowed.getWindowHistory()).isEmpty();
+        assertThat(windowed.getReport().totalProfiledCalls()).isZero();
     }
 }

@@ -3,26 +3,73 @@ package com.adhar.kit.profiler.registry;
 import com.adhar.kit.profiler.model.MethodProfile;
 import com.adhar.kit.profiler.model.ProfilingReport;
 import com.adhar.kit.profiler.model.ProfilingResult;
+import com.adhar.kit.profiler.model.WindowSnapshot;
+import org.HdrHistogram.Histogram;
 
+import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.Comparator;
+import java.util.Deque;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 /**
  * Thread-safe registry that tracks all profiling results and computes
  * aggregated statistics per method.
+ *
+ * <p>Duration data is kept in a bounded {@link Histogram} per method (not a growing list),
+ * so memory stays flat regardless of how many calls are recorded. The registry also keeps a
+ * rolling time window: current-window stats are periodically snapshotted into a small,
+ * bounded history so long-running services don't retain per-call data forever while still
+ * exposing recent trend data.
  */
 public class ProfilingRegistry {
 
+    /** Default rolling window length used when none is configured. */
+    public static final Duration DEFAULT_WINDOW_DURATION = Duration.ofMinutes(5);
+    /** Default number of completed windows retained in history. */
+    public static final int DEFAULT_HISTORY_WINDOWS = 5;
+
+    // HdrHistogram sizing: tracks 1ms..1hr with 2 significant decimal digits. The footprint of a
+    // Histogram is fixed by this range/precision at construction time and does NOT grow with the
+    // number of recorded values, which is what bounds memory usage here.
+    private static final long HISTOGRAM_LOWEST_TRACKABLE_MS = 1;
+    private static final long HISTOGRAM_HIGHEST_TRACKABLE_MS = Duration.ofHours(1).toMillis();
+    private static final int HISTOGRAM_SIGNIFICANT_DIGITS = 2;
+
     private final ConcurrentHashMap<String, MutableMethodStats> stats = new ConcurrentHashMap<>();
-    private final AtomicReference<Instant> windowStart = new AtomicReference<>(Instant.now());
+    private final Duration windowDuration;
+    private final int historyWindows;
+    private final ReentrantLock rolloverLock = new ReentrantLock();
+    private final Deque<WindowSnapshot> windowHistory = new ArrayDeque<>();
+    private volatile Instant windowStart = Instant.now();
+
+    public ProfilingRegistry() {
+        this(DEFAULT_WINDOW_DURATION, DEFAULT_HISTORY_WINDOWS);
+    }
+
+    /**
+     * @param windowDuration length of the rolling aggregation window before a rollover occurs
+     * @param historyWindows number of completed windows to retain (bounded, oldest evicted first)
+     */
+    public ProfilingRegistry(Duration windowDuration, int historyWindows) {
+        this.windowDuration = (windowDuration == null || windowDuration.isZero() || windowDuration.isNegative())
+                ? DEFAULT_WINDOW_DURATION
+                : windowDuration;
+        this.historyWindows = historyWindows <= 0 ? DEFAULT_HISTORY_WINDOWS : historyWindows;
+    }
 
     /**
      * Record a profiling result into the registry.
      */
     public void record(ProfilingResult result) {
+        maybeRollover();
         String key = result.className() + "." + result.methodName();
         stats.compute(key, (k, existing) -> {
             if (existing == null) {
@@ -44,6 +91,7 @@ public class ProfilingRegistry {
      * Generate a full profiling report with the specified number of top slowest methods.
      */
     public ProfilingReport getReport(int topN) {
+        maybeRollover();
         Instant now = Instant.now();
         List<MethodProfile> allProfiles = buildProfiles();
 
@@ -70,7 +118,7 @@ public class ProfilingRegistry {
                 callCounts,
                 methodStatistics,
                 errorRates,
-                windowStart.get(),
+                windowStart,
                 now,
                 totalCalls
         );
@@ -87,11 +135,86 @@ public class ProfilingRegistry {
     }
 
     /**
-     * Reset all profiling statistics.
+     * Returns aggregated duration statistics (avg/min/max/p95/p99) for a single method key
+     * (in {@code className.methodName} form), or empty if the method has not been recorded
+     * in the current window.
+     */
+    public Optional<ProfilingReport.MethodStats> getMethodStats(String methodKey) {
+        MutableMethodStats s = stats.get(methodKey);
+        return s == null ? Optional.empty() : Optional.of(s.toMethodStats());
+    }
+
+    /**
+     * Returns the bounded, most-recent-first list of completed rolling-window snapshots.
+     * The list never exceeds the configured {@code historyWindows} size.
+     */
+    public List<WindowSnapshot> getWindowHistory() {
+        rolloverLock.lock();
+        try {
+            return List.copyOf(windowHistory);
+        } finally {
+            rolloverLock.unlock();
+        }
+    }
+
+    /**
+     * Reset all profiling statistics and window history.
      */
     public void reset() {
         stats.clear();
-        windowStart.set(Instant.now());
+        rolloverLock.lock();
+        try {
+            windowHistory.clear();
+            windowStart = Instant.now();
+        } finally {
+            rolloverLock.unlock();
+        }
+    }
+
+    /**
+     * Checks whether the current rolling window has expired and, if so, snapshots it into the
+     * bounded history and starts a new window. Cheap to call frequently: the common case is a
+     * single volatile read plus a duration comparison, with the lock only taken when a rollover
+     * is actually due (double-checked to avoid duplicate rollovers under concurrency).
+     */
+    private void maybeRollover() {
+        if (Duration.between(windowStart, Instant.now()).compareTo(windowDuration) < 0) {
+            return;
+        }
+        rolloverLock.lock();
+        try {
+            if (Duration.between(windowStart, Instant.now()).compareTo(windowDuration) < 0) {
+                return;
+            }
+            Instant completedStart = windowStart;
+            Instant completedEnd = Instant.now();
+
+            Map<String, ProfilingReport.MethodStats> snapshotStats = new LinkedHashMap<>();
+            long totalCalls = 0;
+            for (MutableMethodStats s : stats.values()) {
+                snapshotStats.put(s.name, s.toMethodStats());
+                totalCalls += s.callCount;
+            }
+
+            windowHistory.addFirst(new WindowSnapshot(completedStart, completedEnd, snapshotStats, totalCalls));
+            while (windowHistory.size() > historyWindows) {
+                windowHistory.removeLast();
+            }
+
+            stats.clear();
+            windowStart = Instant.now();
+        } finally {
+            rolloverLock.unlock();
+        }
+    }
+
+    /**
+     * Package-private hook used by tests to prove the histogram's memory footprint stays
+     * bounded regardless of how many samples have been recorded.
+     */
+    long estimatedHistogramFootprintBytes(String methodKey) {
+        MutableMethodStats s = stats.get(methodKey);
+        return s == null ? -1L : s.estimatedHistogramFootprintBytes();
     }
 
     private List<MethodProfile> buildProfiles() {
@@ -102,9 +225,12 @@ public class ProfilingRegistry {
 
     /**
      * Internal mutable accumulator for method-level statistics.
-     * All mutation happens inside ConcurrentHashMap.compute(), so field access is safe.
+     * Writes always happen inside {@code ConcurrentHashMap.compute()} (so at most one writer
+     * per key at a time), but reads (report generation, rollover snapshotting) can race with an
+     * in-flight write from another thread, so all access is additionally synchronized on the
+     * instance itself.
      */
-    private static class MutableMethodStats {
+    private static final class MutableMethodStats {
         final String name;
         long callCount;
         long totalTimeMs;
@@ -112,14 +238,15 @@ public class ProfilingRegistry {
         long maxTimeMs = Long.MIN_VALUE;
         long errorCount;
         Instant lastExecutionTime = Instant.now();
-        // Keep sorted durations for percentile calculations
-        final List<Long> durations = new ArrayList<>();
+        // Bounded histogram for percentile calculations - fixed footprint, independent of sample count.
+        final Histogram histogram = new Histogram(
+                HISTOGRAM_LOWEST_TRACKABLE_MS, HISTOGRAM_HIGHEST_TRACKABLE_MS, HISTOGRAM_SIGNIFICANT_DIGITS);
 
         MutableMethodStats(String name) {
             this.name = name;
         }
 
-        void record(long durationMs, boolean isError) {
+        synchronized void record(long durationMs, boolean isError) {
             callCount++;
             totalTimeMs += durationMs;
             minTimeMs = Math.min(minTimeMs, durationMs);
@@ -127,11 +254,11 @@ public class ProfilingRegistry {
             if (isError) {
                 errorCount++;
             }
-            durations.add(durationMs);
+            histogram.recordValue(Math.max(durationMs, 0));
             lastExecutionTime = Instant.now();
         }
 
-        MethodProfile toMethodProfile() {
+        synchronized MethodProfile toMethodProfile() {
             return new MethodProfile(
                     name,
                     callCount,
@@ -143,22 +270,18 @@ public class ProfilingRegistry {
             );
         }
 
-        ProfilingReport.MethodStats toMethodStats() {
+        synchronized ProfilingReport.MethodStats toMethodStats() {
             if (callCount == 0) {
                 return new ProfilingReport.MethodStats(0, 0, 0, 0, 0);
             }
-            List<Long> sorted = durations.stream().sorted().toList();
             double avg = (double) totalTimeMs / callCount;
-            double p95 = percentile(sorted, 0.95);
-            double p99 = percentile(sorted, 0.99);
+            double p95 = histogram.getValueAtPercentile(95.0);
+            double p99 = histogram.getValueAtPercentile(99.0);
             return new ProfilingReport.MethodStats(avg, minTimeMs, maxTimeMs, p95, p99);
         }
 
-        private static double percentile(List<Long> sortedValues, double percentile) {
-            if (sortedValues.isEmpty()) return 0.0;
-            int index = (int) Math.ceil(percentile * sortedValues.size()) - 1;
-            index = Math.max(0, Math.min(index, sortedValues.size() - 1));
-            return sortedValues.get(index);
+        synchronized long estimatedHistogramFootprintBytes() {
+            return histogram.getEstimatedFootprintInBytes();
         }
     }
 }

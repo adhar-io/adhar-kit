@@ -18,4 +18,6 @@ public interface EventEntryRepository extends JpaRepository<EventEntry, UUID> {
     List<EventEntry> findByAggregateIdOrderByVersionAsc(String aggregateId);
 
     List<EventEntry> findByAggregateIdAndVersionGreaterThanOrderByVersionAsc(String aggregateId, int version);
+
+    List<EventEntry> findAllByOrderByStoredAtAsc();
 }

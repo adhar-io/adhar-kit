@@ -18,12 +18,27 @@
 
 The **adhar-kit-dapr** module provides easy-to-use wrappers for Dapr building blocks:
 
-- 🗄️ **State Management** - Distributed state store
-- 📢 **Pub/Sub** - Event-driven messaging
-- 🔗 **Service Invocation** - Service-to-service calls
+- 🗄️ **State Management** - Distributed state store, plus a typed ETag-aware `StateRepository<T>`
+- 📢 **Pub/Sub** - Event-driven messaging: publish, and a real subscription endpoint
+  (`GET /dapr/subscribe` + CloudEvent dispatch) for `@DaprSubscribe`/`@DaprTopic` handlers
+- 🔗 **Service Invocation** - Service-to-service calls, with an optional retry/timeout/circuit-breaker wrapper
 - 🔌 **Bindings** - External system integration
 - 🔐 **Secrets** - Secure secrets management
 - 🔧 **Configuration** - Distributed configuration
+- ⚙️ **Declarative aspects** - `@DaprState`/`@DaprPublish` are enforced by real Spring AOP aspects, not just documentation
+
+### Implementation status
+
+| Capability | Status |
+|---|---|
+| State, Pub/Sub (publish), Service Invocation, Bindings, Secrets, Configuration | ✅ Implemented |
+| Pub/Sub subscription endpoint (`@DaprSubscribe`/`@DaprTopic` → `GET/POST /dapr/subscribe/...`) | ✅ Implemented (`pubsub` package) |
+| Resilient service invocation (retry, timeout, circuit breaker, fallback) | ✅ Implemented (`resilience` package) |
+| `@DaprState`/`@DaprPublish` declarative enforcement | ✅ Implemented (`aspect` package, requires `spring-boot-starter-aspectj`) |
+| Typed, ETag-aware `StateRepository<T>` with optimistic-retry `update()` | ✅ Implemented (`state` package) |
+| Distributed Lock (`@DaprLock`, `tryLock`/`unlock`) | ⛔ **Planned** - throws `UnsupportedOperationException`; the pinned Dapr Java SDK (1.18.0) does not expose a lock API on `DaprClient` |
+| Actors (`@DaprActor`, actor invocation/state/timers/reminders via the facade) | ⛔ **Planned** - use `dapr-sdk-actors`' `ActorProxyBuilder`/`ActorRuntime` directly; the facade methods are documented placeholders |
+| Cryptography (`encrypt`/`decrypt`) | ⛔ **Planned** - not available on the pinned SDK |
 
 ---
 
@@ -78,7 +93,12 @@ public class UserService {
 
 ### @DaprState
 
-Automatically manage state in Dapr state store.
+Automatically manage state in Dapr state store. Enforced by `aspect.DaprStateAspect` (requires
+`spring-boot-starter-aspectj` on the classpath and AOP proxying enabled, which
+`DaprAutoConfiguration` wires up automatically): `SAVE` proceeds then saves the return value,
+`GET` fetches the value directly (skipping the method body), and `DELETE` proceeds then deletes
+the key. The `key` attribute is a SpEL expression evaluated against the method's arguments
+(`#paramName`, `#p0`/`#a0`), exactly like Spring's own `@Cacheable(key = ...)`.
 
 ```java
 @Service
@@ -105,7 +125,9 @@ public class UserService {
 
 ### @DaprPublish
 
-Automatically publish events to Dapr pub/sub.
+Automatically publish events to Dapr pub/sub. Enforced by `aspect.DaprPublishAspect`: after the
+method executes, its return value (or a specific parameter, when `publishReturnValue = false`)
+is published to the configured topic. A `null` payload is not published.
 
 ```java
 @Service
@@ -125,48 +147,61 @@ public class OrderService {
 }
 ```
 
-### @DaprSubscribe
+### @DaprSubscribe / @DaprTopic
 
-Subscribe to Dapr pub/sub topics.
+Subscribe to Dapr pub/sub topics. **No `@RestController`/`@PostMapping` boilerplate needed** -
+just annotate a method on any Spring bean and `pubsub.DaprSubscriptionRegistrar` (a
+`SmartInitializingSingleton`) discovers it automatically once the context has started. It is
+exposed through `pubsub.DaprSubscriptionController`:
+
+- `GET /dapr/subscribe` returns the subscription metadata Dapr's sidecar polls for on startup.
+- `POST /dapr/subscribe/**` receives the CloudEvent and dispatches it to your handler method,
+  converting the event's `data` field to the method's parameter type (or wrapping the whole
+  envelope in an `io.dapr.client.domain.CloudEvent<T>` if that's what the method declares).
+
+Each handler gets a synthesized route under `/dapr/subscribe/{pubsub}/{topic-or-custom-route}`
+regardless of the `route` attribute's exact value (it's folded into the slug), so the whole
+mechanism is a single, predictable dispatch entry point - you never need to write your own
+`@PostMapping` for it.
 
 ```java
-@RestController
+@Component
 public class OrderEventHandler {
-    
+
     @DaprSubscribe(pubsubName = "pubsub", topic = "order-created")
-    @PostMapping("/orders/events")
-    public ResponseEntity<Void> handleOrderCreated(OrderCreatedEvent event) {
+    public void handleOrderCreated(OrderCreatedEvent event) {
         log.info("Order created: {}", event.getOrderId());
-        // Process event
-        return ResponseEntity.ok().build();
+        // Process event; a thrown exception here maps to a RETRY dispatch result
     }
-    
+
     @DaprSubscribe(pubsubName = "pubsub", topic = "order-updated", deadLetterTopic = "order-errors")
-    @PostMapping("/orders/updates")
-    public ResponseEntity<Void> handleOrderUpdated(OrderUpdatedEvent event) {
-        // Process event or send to dead letter if fails
-        return ResponseEntity.ok().build();
+    public void handleOrderUpdated(OrderUpdatedEvent event) {
+        // Process event or let it flow to the dead-letter topic on repeated failure
+    }
+
+    // @DaprTopic works the same way and additionally supports metadata:
+    @DaprTopic(pubsubName = "pubsub", name = "orders.cancelled", metadata = {"rawPayload=true"})
+    public void handleOrderCancelled(CloudEvent<OrderCancelledEvent> event) {
+        OrderCancelledEvent data = event.getData();
+        log.info("Order cancelled: {}", data.getOrderId());
     }
 }
 ```
 
 ### @DaprInvoke
 
-Invoke other services via Dapr service invocation.
+Documents the intent to invoke another service via Dapr service invocation. **Not yet enforced
+by an aspect** - call `DaprFacade#invokeService`/`#invokeServiceResilient` (or
+`AdharDaprClient#invokeService`) directly from the method body; the annotation is currently
+metadata only.
 
 ```java
 @Service
 public class CheckoutService {
-    
+
     @DaprInvoke(appId = "inventory-service", method = "POST", endpoint = "/validate")
     public InventoryResponse validateInventory(InventoryRequest request) {
-        // Actual invocation handled automatically
-        return null;
-    }
-    
-    @DaprInvoke(appId = "payment-service", method = "POST", endpoint = "/charge")
-    public PaymentResponse processPayment(PaymentRequest request) {
-        return null;
+        return dapr.invokeService("inventory-service", "/validate", request, InventoryResponse.class);
     }
 }
 ```
@@ -246,6 +281,11 @@ public class PaymentService {
 ### @DaprActor
 
 Define Dapr actors for stateful, single-threaded compute.
+
+> ⛔ **Planned, not implemented.** `DaprFacade#invokeActor`/`saveActorState`/`getActorState`/
+> `registerActorReminder`/`registerActorTimer` all throw `UnsupportedOperationException` -
+> use `dapr-sdk-actors`'s `ActorProxyBuilder`/`ActorRuntime` directly instead. `@DaprActor` and
+> `@ActorMethod` are documentation-only annotations today.
 
 ```java
 @DaprActor(type = "OrderActor", idleTimeout = "60m")
@@ -340,6 +380,31 @@ public class ShoppingCartService {
 }
 ```
 
+### Typed, ETag-Aware Repository
+
+`state.StateRepository<T>` wraps `DaprFacade#getStateWithETag`/`saveStateWithETag` with a typed
+read-modify-write API and an optimistic-concurrency retry loop: `update()` re-reads the current
+value and ETag and retries the save on an ETag conflict (up to `maxRetries`, default 3, with a
+short backoff), throwing `OptimisticConcurrencyException` only if every retry loses the race.
+
+```java
+StateRepository<Cart> carts = new StateRepository<>(DaprFacade.getInstance(), "statestore", Cart.class);
+
+// Unconditional read/write
+Optional<Cart> existing = carts.find("cart:" + userId);
+carts.save("cart:" + userId, cart);
+
+// Optimistic-concurrency update: safe under concurrent writers
+Cart updated = carts.update("cart:" + userId, current -> {
+    Cart cart = current != null ? current : new Cart(userId);
+    cart.addItem(product);
+    return cart;
+});
+
+// ETag-guarded delete (false if the key never existed)
+boolean deleted = carts.delete("cart:" + userId);
+```
+
 ---
 
 ## 📢 Pub/Sub Messaging
@@ -361,34 +426,19 @@ dapr.publishEvent("pubsub", "orders", event, metadata);
 
 ### Subscribe to Events
 
-Use Spring annotations (if using Spring):
-
-```java
-@RestController
-public class OrderEventHandler {
-    
-    @Topic(name = "orders", pubsubName = "pubsub")
-    @PostMapping("/orders-created")
-    public ResponseEntity<Void> handleOrderCreated(
-        @RequestBody OrderCreatedEvent event
-    ) {
-        log.info("Order created: {}", event.getOrderId());
-        // Process event
-        return ResponseEntity.ok().build();
-    }
-}
-```
-
-Or use Dapr SDK directly:
+Just annotate a method with `@DaprSubscribe` (or `@DaprTopic`) on any Spring bean - no
+`@RestController`/`@PostMapping` needed. `DaprSubscriptionRegistrar` discovers it and
+`DaprSubscriptionController` exposes `GET /dapr/subscribe` and dispatches incoming CloudEvents
+to it automatically (see [@DaprSubscribe / @DaprTopic](#daprsubscribe--daprtopic) above).
 
 ```java
 @Component
 public class EventSubscriber {
-    
+
     @DaprSubscribe(pubsubName = "pubsub", topic = "orders")
     public void handleOrder(OrderCreatedEvent event) {
         log.info("Received order: {}", event);
-        // Process event
+        // Process event; a thrown exception maps to a RETRY dispatch result
     }
 }
 ```
@@ -419,21 +469,16 @@ public class OrderService {
     }
 }
 
-@RestController
+@Component
 public class NotificationService {
-    
-    @Topic(name = "order-created", pubsubName = "pubsub")
-    @PostMapping("/order-notifications")
-    public ResponseEntity<Void> sendOrderNotification(
-        @RequestBody OrderCreatedEvent event
-    ) {
+
+    @DaprSubscribe(pubsubName = "pubsub", topic = "order-created")
+    public void sendOrderNotification(OrderCreatedEvent event) {
         // Send email notification
         emailService.sendOrderConfirmation(event);
-        
+
         // Send SMS
         smsService.sendOrderSMS(event);
-        
-        return ResponseEntity.ok().build();
     }
 }
 ```
@@ -512,6 +557,37 @@ public class CheckoutService {
         return new CheckoutResult(order.getId(), payment.getTransactionId());
     }
 }
+```
+
+### Resilient Invocation (retry, timeout, circuit breaker, fallback)
+
+Raw `invokeService`/`invokeMethod` calls rethrow whatever exception the sidecar call raised,
+with no retry or timeout. `resilience.DaprInvocationResilience` wraps invocation with:
+
+- Linear-backoff retry (`maxAttempts`, `retryBackoff`)
+- A per-attempt timeout, enforced on a shared daemon executor (`timeout`)
+- A simple consecutive-failure circuit breaker (`failureThreshold`, `openStateDuration`) that
+  fails fast without invoking the call while open, then allows a single half-open trial call
+- An optional `Function<Throwable, R>` fallback instead of throwing
+
+No Resilience4j (or other external resilience library) dependency is required - it's a small,
+self-contained helper built on `java.util.concurrent`.
+
+```java
+// Via DaprFacade (uses its own internal invokeService under the hood):
+DaprFacade dapr = DaprFacade.getInstance();
+
+InventoryResponse response = dapr.invokeServiceResilient(
+    "inventory-service", "/validate", "POST", request, InventoryResponse.class,
+    cause -> InventoryResponse.unavailable()); // fallback
+
+// Or directly wrapping AdharDaprClient with custom settings:
+ResilienceSettings settings = new ResilienceSettings(
+    3, Duration.ofMillis(100), Duration.ofSeconds(2), 5, Duration.ofSeconds(30));
+DaprInvocationResilience resilience = new DaprInvocationResilience(settings);
+
+InventoryResponse response = resilience.invokeService(
+    adharDaprClient, "inventory-service", "POST", "/validate", request, InventoryResponse.class);
 ```
 
 ---
@@ -620,6 +696,11 @@ public class NotificationService {
 ---
 
 ## 🔒 Distributed Lock
+
+> ⛔ **Planned, not implemented.** `tryLock`/`unlock` (on both `DaprFacade` and
+> `AdharDaprClient`) and `@DaprLock` throw `UnsupportedOperationException`. The pinned Dapr Java
+> SDK (`1.18.0`) does not expose a distributed lock API on `DaprClient`; this needs an SDK
+> upgrade to implement for real. The examples below describe the intended API only.
 
 Synchronize access to shared resources across multiple instances.
 
@@ -778,6 +859,10 @@ public class ConfigService {
 ---
 
 ## 🔐 Cryptography
+
+> ⛔ **Planned, not implemented.** `AdharDaprClient#encrypt`/`decrypt` throw
+> `UnsupportedOperationException`; the cryptography API is not available on the pinned Dapr
+> Java SDK (`1.18.0`). The examples below describe the intended API only.
 
 Encrypt and decrypt data using Dapr cryptography.
 

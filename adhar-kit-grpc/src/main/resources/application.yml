@@ -42,9 +42,12 @@ adhar:
       defaults:
         enable-load-balancing: true
         load-balancing-policy: "round_robin"
-        enable-retry: true
-        max-retry-attempts: 3
-        default-timeout: 60000               # 60 seconds
+        enable-retry: true                   # built-in grpc-java retry (see README)
+        max-retry-attempts: 3                # clamped to >= 2 (grpc-java requirement)
+        initial-backoff-millis: 1000
+        max-backoff-millis: 10000
+        backoff-multiplier: 2.0
+        default-timeout: 60000               # 60 seconds; applied as a deadline when unset
         max-inbound-message-size: 4194304    # 4MB
         keep-alive-time: 300
         keep-alive-timeout: 20
@@ -83,16 +86,30 @@ adhar:
       enable-mtls: false
       client-auth: "NONE"                    # NONE, OPTIONAL, REQUIRE
 
-      # TLS Certificates (when enabled)
+      # TLS Certificates (when enabled) - classpath: prefix or plain filesystem paths.
+      # Missing files fail fast at server/client startup with a clear error.
       # cert-chain: "classpath:certs/server.crt"
       # private-key: "classpath:certs/server.key"
       # trust-cert-collection: "classpath:certs/ca.crt"
 
     # ========================================
+    # AUTHENTICATION CONFIGURATION (AuthServerInterceptor)
+    # ========================================
+    auth:
+      enabled: false
+      # shared-secret: "change-me"           # required when enabled; validates Bearer/API-key
+
+    # ========================================
+    # SPRING WIRING TOGGLES
+    # ========================================
+    enable-service-registrar: true           # auto-register @GrpcService beans with AdharGrpcServer
+    enable-client-injection: true            # auto-inject @GrpcClient ManagedChannel fields
+
+    # ========================================
     # OBSERVABILITY CONFIGURATION
     # ========================================
     observability:
-      enable-metrics: true
+      enable-metrics: true                   # requires io.micrometer:micrometer-core + a MeterRegistry bean
       enable-tracing: true
       enable-logging: true
       log-level: "BASIC"                     # NONE, BASIC, HEADERS, FULL

@@ -65,7 +65,7 @@ public class AiRateLimiter {
             rateLimit.minuteCount.get(),
             rateLimit.hourCount.get(),
             rateLimit.dayCount.get(),
-            rateLimit.lastReset
+            rateLimit.lastDayReset
         );
     }
 
@@ -86,7 +86,16 @@ public class AiRateLimiter {
         private final AtomicInteger minuteCount = new AtomicInteger(0);
         private final AtomicInteger hourCount = new AtomicInteger(0);
         private final AtomicInteger dayCount = new AtomicInteger(0);
-        private LocalDateTime lastReset = LocalDateTime.now();
+
+        // Each window tracks its own "last reset" instant. Using a single shared
+        // timestamp (the original implementation) meant that once one minute had
+        // elapsed since object creation, Duration.between(lastReset, now) kept
+        // growing forever, so minuteCount (and eventually hourCount) was wiped
+        // back to zero on *every* subsequent check - effectively disabling rate
+        // limiting for any process that had been running for more than a minute/hour.
+        private volatile LocalDateTime lastMinuteReset = LocalDateTime.now();
+        private volatile LocalDateTime lastHourReset = LocalDateTime.now();
+        private volatile LocalDateTime lastDayReset = LocalDateTime.now();
 
         boolean isAllowed() {
             cleanup();
@@ -106,23 +115,28 @@ public class AiRateLimiter {
             dayCount.incrementAndGet();
         }
 
-        private void cleanup() {
+        private synchronized void cleanup() {
             LocalDateTime now = LocalDateTime.now();
 
-            // Reset minute counter
-            if (Duration.between(lastReset, now).toMinutes() >= 1) {
+            // Reset minute counter only once a full minute has actually elapsed
+            // since the *last minute reset*, then advance that window's marker.
+            if (Duration.between(lastMinuteReset, now).toMinutes() >= 1) {
                 minuteCount.set(0);
+                lastMinuteReset = now;
             }
 
-            // Reset hour counter
-            if (Duration.between(lastReset, now).toHours() >= 1) {
+            // Reset hour counter only once a full hour has elapsed since the
+            // last hour reset.
+            if (Duration.between(lastHourReset, now).toHours() >= 1) {
                 hourCount.set(0);
+                lastHourReset = now;
             }
 
-            // Reset day counter
-            if (Duration.between(lastReset, now).toDays() >= 1) {
+            // Reset day counter only once a full day has elapsed since the
+            // last day reset.
+            if (Duration.between(lastDayReset, now).toDays() >= 1) {
                 dayCount.set(0);
-                lastReset = now;
+                lastDayReset = now;
             }
         }
     }

@@ -29,6 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.ServiceLoader;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
@@ -61,30 +62,65 @@ import java.util.function.Supplier;
  * int timeout   = adhar.configInt("app.timeout", 30);
  * }</pre>
  *
+ * <h3>Module toggles</h3>
+ * <p>Every sub-facade accessor is gated by an {@link AdharModuleAccess}. When
+ * a module is disabled (e.g. {@code adhar.kit.modules.ai.enabled=false} on
+ * Spring Boot), the corresponding sub-facade is never constructed and its
+ * accessor throws {@link IllegalStateException} instead of returning a live
+ * instance. All facades - including the previously "eager" core set - are
+ * now lazily constructed on first access.</p>
+ *
  * @author Tapas Jena
  * @since 0.1.0
  */
 @Slf4j
 public class AdharFacade {
 
+    // Module ids - shared vocabulary with AdharKitModuleRegistry / adhar.kit.modules.*
+    private static final String MOD_LOGGING = "logging";
+    private static final String MOD_METRICS = "metrics";
+    private static final String MOD_TRACING = "tracing";
+    private static final String MOD_RESILIENCE = "resilience";
+    private static final String MOD_CACHE = "cache";
+    private static final String MOD_HEALTH = "health";
+    private static final String MOD_MESSAGING = "messaging";
+    private static final String MOD_PERSISTENCE = "persistence";
+    private static final String MOD_SECURITY = "security";
+    private static final String MOD_CONFIG = "config";
+    private static final String MOD_DOCS = "docs";
+    private static final String MOD_GRPC = "grpc";
+    private static final String MOD_AI = "ai";
+    private static final String MOD_ANALYTICS = "analytics";
+    private static final String MOD_KUBERNETES = "kubernetes";
+    private static final String MOD_DAPR = "dapr";
+    private static final String MOD_GRAPHQL = "graphql";
+    private static final String MOD_BATCH = "batch";
+    private static final String MOD_NOTIFICATION = "notification";
+    private static final String MOD_EVENT_SOURCING = "event-sourcing";
+    private static final String MOD_PERF_PROFILER = "perf-profiler";
+    private static final String MOD_REWRITE = "rewrite";
+
     private static volatile AdharFacade instance;
+    private static final Object INSTANCE_LOCK = new Object();
+
+    private final AdharModuleAccess moduleAccess;
 
     // ========================================================================
-    // Core facades (eager - most commonly used)
+    // Core facades (lazy, gated)
     // ========================================================================
-    private final LoggingFacade logging;
-    private final MetricsFacade metrics;
-    private final TracingFacade tracing;
-    private final CircuitBreakerFacade resilience;
-    private final CacheFacade cache;
-    private final HealthFacade health;
-    private final MessagingFacade messaging;
-    private final PersistenceFacade persistence;
-    private final SecurityFacade security;
-    private final ConfigFacade config;
+    private volatile LoggingFacade logging;
+    private volatile MetricsFacade metrics;
+    private volatile TracingFacade tracing;
+    private volatile CircuitBreakerFacade resilience;
+    private volatile CacheFacade cache;
+    private volatile HealthFacade health;
+    private volatile MessagingFacade messaging;
+    private volatile PersistenceFacade persistence;
+    private volatile SecurityFacade security;
+    private volatile ConfigFacade config;
 
     // ========================================================================
-    // Advanced facades (lazy - loaded on first access)
+    // Advanced facades (lazy, gated)
     // ========================================================================
     private volatile ApiDocsFacade apiDocs;
     private volatile GrpcFacade grpc;
@@ -101,25 +137,13 @@ public class AdharFacade {
     private volatile RewriteFacade rewrite;
 
     public AdharFacade() {
+        this(AdharModuleAccess.ALL_ENABLED);
+    }
+
+    public AdharFacade(AdharModuleAccess moduleAccess) {
+        this.moduleAccess = moduleAccess != null ? moduleAccess : AdharModuleAccess.ALL_ENABLED;
         Framework fw = FrameworkDetector.detect();
-        log.info("Initializing Adhar Facade on {} - unified access to all modules", fw);
-
-        this.logging = LoggingFacade.getLogger(AdharFacade.class);
-        this.metrics = MetricsFacade.getInstance();
-        this.tracing = TracingFacade.getInstance();
-        this.resilience = CircuitBreakerFacade.getInstance();
-        this.cache = CacheFacade.builder().cacheName("adhar-default").build();
-        this.health = HealthFacade.getInstance();
-        this.messaging = MessagingFacade.getInstance();
-        this.persistence = PersistenceFacade.getInstance();
-        this.security = SecurityFacade.getInstance();
-        this.config = ConfigFacade.getInstance();
-
-        if (instance == null) {
-            instance = this;
-        }
-
-        log.info("Adhar Facade ready on {} - 10 eager facades + 13 lazy facades", fw);
+        log.info("Initializing Adhar Facade on {} - modules gated by AdharModuleAccess", fw);
     }
 
     /** Returns the framework Adhar Kit detected at runtime. */
@@ -127,124 +151,237 @@ public class AdharFacade {
         return FrameworkDetector.detect();
     }
 
+    /**
+     * Returns the process-wide singleton, creating it - with every module
+     * enabled - on first call if necessary.
+     */
     public static AdharFacade getInstance() {
-        if (instance == null) {
-            synchronized (AdharFacade.class) {
-                if (instance == null) {
-                    instance = new AdharFacade();
+        return getInstance(AdharModuleAccess.ALL_ENABLED);
+    }
+
+    /**
+     * Returns the process-wide singleton, creating it with the given module
+     * access on first call. If the singleton already exists, {@code
+     * moduleAccess} is ignored (a warning is logged) since module gating is
+     * fixed for the lifetime of the singleton.
+     */
+    public static AdharFacade getInstance(AdharModuleAccess moduleAccess) {
+        AdharFacade result = instance;
+        if (result == null) {
+            synchronized (INSTANCE_LOCK) {
+                result = instance;
+                if (result == null) {
+                    result = new AdharFacade(moduleAccess);
+                    applyServiceLoaderCustomizers(result);
+                    instance = result;
+                } else {
+                    log.debug("AdharFacade already initialized; ignoring supplied AdharModuleAccess");
                 }
             }
         }
-        return instance;
+        return result;
+    }
+
+    private static void applyServiceLoaderCustomizers(AdharFacade facade) {
+        for (AdharFacadeCustomizer customizer : ServiceLoader.load(AdharFacadeCustomizer.class)) {
+            try {
+                customizer.customize(facade);
+            } catch (RuntimeException e) {
+                log.warn("AdharFacadeCustomizer {} failed", customizer.getClass().getName(), e);
+            }
+        }
+    }
+
+    /**
+     * Clears the process-wide singleton so the next {@link #getInstance()} call
+     * creates a fresh instance. Test-only escape hatch - production code should
+     * never call this, since it can race with concurrent {@code getInstance()}
+     * callers holding a reference to the old instance.
+     */
+    public static void resetForTesting() {
+        synchronized (INSTANCE_LOCK) {
+            instance = null;
+        }
     }
 
     // ========================================================================
-    // Module Accessors - Core (eager)
+    // Module Accessors - Core
     // ========================================================================
 
     /** Structured logging with MDC context support. */
-    public LoggingFacade getLogging() { return logging; }
+    public LoggingFacade getLogging() {
+        requireEnabled(MOD_LOGGING);
+        return lazyInit(() -> logging, () -> logging = LoggingFacade.getLogger(AdharFacade.class));
+    }
 
     /** Micrometer metrics - counters, timers, gauges. */
-    public MetricsFacade getMetrics() { return metrics; }
+    public MetricsFacade getMetrics() {
+        requireEnabled(MOD_METRICS);
+        return lazyInit(() -> metrics, () -> metrics = MetricsFacade.getInstance());
+    }
 
     /** Distributed tracing - spans, context propagation. */
-    public TracingFacade getTracing() { return tracing; }
+    public TracingFacade getTracing() {
+        requireEnabled(MOD_TRACING);
+        return lazyInit(() -> tracing, () -> tracing = TracingFacade.getInstance());
+    }
 
     /** Resilience patterns - circuit breaker, retry, rate limiter, bulkhead. */
-    public CircuitBreakerFacade getResilience() { return resilience; }
+    public CircuitBreakerFacade getResilience() {
+        requireEnabled(MOD_RESILIENCE);
+        return lazyInit(() -> resilience, () -> resilience = CircuitBreakerFacade.getInstance());
+    }
 
     /** In-memory and distributed caching with Caffeine/Redis. */
-    public CacheFacade getCache() { return cache; }
+    public CacheFacade getCache() {
+        requireEnabled(MOD_CACHE);
+        return lazyInit(() -> cache, () -> cache = CacheFacade.builder().cacheName("adhar-default").build());
+    }
 
     /** Named cache access. Returns a CacheFacade for the given cache name. */
     public CacheFacade getCache(String cacheName) {
+        requireEnabled(MOD_CACHE);
         return CacheFacade.getCache(cacheName);
     }
 
     /** Health checks - liveness, readiness, detailed status. */
-    public HealthFacade getHealth() { return health; }
+    public HealthFacade getHealth() {
+        requireEnabled(MOD_HEALTH);
+        return lazyInit(() -> health, () -> health = HealthFacade.getInstance());
+    }
 
     /** Kafka/RabbitMQ messaging with CloudEvents. */
-    public MessagingFacade getMessaging() { return messaging; }
+    public MessagingFacade getMessaging() {
+        requireEnabled(MOD_MESSAGING);
+        return lazyInit(() -> messaging, () -> messaging = MessagingFacade.getInstance());
+    }
 
     /** JPA persistence with auditing, multi-tenancy, soft delete. */
-    public PersistenceFacade getPersistence() { return persistence; }
+    public PersistenceFacade getPersistence() {
+        requireEnabled(MOD_PERSISTENCE);
+        return lazyInit(() -> persistence, () -> persistence = PersistenceFacade.getInstance());
+    }
 
     /** OAuth2/JWT security - authentication, authorization, tokens. */
-    public SecurityFacade getSecurity() { return security; }
+    public SecurityFacade getSecurity() {
+        requireEnabled(MOD_SECURITY);
+        return lazyInit(() -> security, () -> security = SecurityFacade.getInstance());
+    }
 
     /** Dynamic configuration with refresh and encryption. */
-    public ConfigFacade getConfig() { return config; }
+    public ConfigFacade getConfig() {
+        requireEnabled(MOD_CONFIG);
+        return lazyInit(() -> config, () -> config = ConfigFacade.getInstance());
+    }
 
     // ========================================================================
-    // Module Accessors - Advanced (lazy)
+    // Module Accessors - Advanced
     // ========================================================================
 
     /** OpenAPI/Swagger documentation. */
     public ApiDocsFacade getApiDocs() {
+        requireEnabled(MOD_DOCS);
         return lazyInit(() -> apiDocs, () -> apiDocs = ApiDocsFacade.getInstance());
     }
 
     /** gRPC services - unary, streaming, metadata. */
     public GrpcFacade getGrpc() {
+        requireEnabled(MOD_GRPC);
         return lazyInit(() -> grpc, () -> grpc = GrpcFacade.getInstance());
     }
 
     /** Multi-provider AI - chat, embeddings, RAG, image generation. */
     public AiFacade getAi() {
+        requireEnabled(MOD_AI);
         return lazyInit(() -> ai, () -> ai = AiFacade.getInstance());
     }
 
     /** Product analytics - event tracking, feature flags. */
     public AnalyticsFacade getAnalytics() {
+        requireEnabled(MOD_ANALYTICS);
         return lazyInit(() -> analytics, () -> analytics = AnalyticsFacade.getInstance());
     }
 
     /** Kubernetes native - ConfigMaps, Secrets, scaling, pods. */
     public KubernetesFacade getKubernetes() {
+        requireEnabled(MOD_KUBERNETES);
         return lazyInit(() -> kubernetes, () -> kubernetes = KubernetesFacade.getInstance());
     }
 
     /** Dapr runtime - state, pub/sub, service invocation, actors. */
     public DaprFacade getDapr() {
+        requireEnabled(MOD_DAPR);
         return lazyInit(() -> dapr, () -> dapr = DaprFacade.getInstance());
     }
 
-    /** Core utilities - ID generation, JSON, retry, async, hashing. */
+    /** Core utilities - ID generation, JSON, retry, async, hashing. Not gated by a module toggle. */
     public CoreFacade getUtils() {
         return lazyInit(() -> utils, () -> utils = CoreFacade.getInstance());
     }
 
     /** GraphQL - schema registry, pagination, validation, data loaders. */
     public GraphQlFacade getGraphQl() {
+        requireEnabled(MOD_GRAPHQL);
         return lazyInit(() -> graphQl, () -> graphQl = GraphQlFacade.getInstance());
     }
 
     /** Batch processing - job scheduling, readers/writers, metrics. */
     public BatchFacade getBatch() {
+        requireEnabled(MOD_BATCH);
         return lazyInit(() -> batch, () -> batch = BatchFacade.getInstance());
     }
 
     /** Multi-channel notifications - email, webhook, in-app, SMS. */
     public NotificationFacade getNotification() {
+        requireEnabled(MOD_NOTIFICATION);
         return lazyInit(() -> notification, () -> notification = NotificationFacade.getInstance());
     }
 
     /** Event sourcing - event store, aggregates, CQRS. */
     public EventSourcingFacade getEventStore() {
+        requireEnabled(MOD_EVENT_SOURCING);
         return lazyInit(() -> eventStore, () -> eventStore = EventSourcingFacade.getInstance());
     }
 
     /** Performance profiler - hotspots, memory, method timing. */
     public ProfilerFacade getProfiler() {
+        requireEnabled(MOD_PERF_PROFILER);
         return lazyInit(() -> profiler, () -> profiler = ProfilerFacade.getInstance());
     }
 
     /** OpenRewrite code modernization - automated migrations and recipe catalog. */
     public RewriteFacade getRewrite() {
+        requireEnabled(MOD_REWRITE);
         return lazyInit(() -> rewrite, () -> rewrite = RewriteFacade.getInstance());
     }
+
+    // ========================================================================
+    // Sub-facade overrides (AdharFacadeCustomizer support)
+    // ========================================================================
+
+    public void setLogging(LoggingFacade logging) { this.logging = logging; }
+    public void setMetrics(MetricsFacade metrics) { this.metrics = metrics; }
+    public void setTracing(TracingFacade tracing) { this.tracing = tracing; }
+    public void setResilience(CircuitBreakerFacade resilience) { this.resilience = resilience; }
+    public void setCache(CacheFacade cache) { this.cache = cache; }
+    public void setHealth(HealthFacade health) { this.health = health; }
+    public void setMessaging(MessagingFacade messaging) { this.messaging = messaging; }
+    public void setPersistence(PersistenceFacade persistence) { this.persistence = persistence; }
+    public void setSecurity(SecurityFacade security) { this.security = security; }
+    public void setConfig(ConfigFacade config) { this.config = config; }
+    public void setApiDocs(ApiDocsFacade apiDocs) { this.apiDocs = apiDocs; }
+    public void setGrpc(GrpcFacade grpc) { this.grpc = grpc; }
+    public void setAi(AiFacade ai) { this.ai = ai; }
+    public void setAnalytics(AnalyticsFacade analytics) { this.analytics = analytics; }
+    public void setKubernetes(KubernetesFacade kubernetes) { this.kubernetes = kubernetes; }
+    public void setDapr(DaprFacade dapr) { this.dapr = dapr; }
+    public void setUtils(CoreFacade utils) { this.utils = utils; }
+    public void setGraphQl(GraphQlFacade graphQl) { this.graphQl = graphQl; }
+    public void setBatch(BatchFacade batch) { this.batch = batch; }
+    public void setNotification(NotificationFacade notification) { this.notification = notification; }
+    public void setEventStore(EventSourcingFacade eventStore) { this.eventStore = eventStore; }
+    public void setProfiler(ProfilerFacade profiler) { this.profiler = profiler; }
+    public void setRewrite(RewriteFacade rewrite) { this.rewrite = rewrite; }
 
     // ========================================================================
     // Convenience Shortcuts - Observability
@@ -255,8 +392,8 @@ public class AdharFacade {
      * Creates a span and records duration in one call.
      */
     public <T> T traced(String operationName, Supplier<T> operation) {
-        return metrics.recordTime(operationName, () ->
-                tracing.executeInSpan(operationName, operation));
+        return getMetrics().recordTime(operationName, () ->
+                getTracing().executeInSpan(operationName, operation));
     }
 
     /**
@@ -270,21 +407,21 @@ public class AdharFacade {
      * Increment a metric counter.
      */
     public void count(String metricName, String... tags) {
-        metrics.increment(metricName, tags);
+        getMetrics().increment(metricName, tags);
     }
 
     /**
      * Log an info message via the facade logger.
      */
     public LoggingFacade log() {
-        return logging;
+        return getLogging();
     }
 
     /**
      * Log an info message directly.
      */
     public void logInfo(String message, Object... args) {
-        logging.info(message, args);
+        getLogging().info(message, args);
     }
 
     /**
@@ -302,21 +439,21 @@ public class AdharFacade {
      * Execute with circuit breaker protection.
      */
     public <T> T resilient(String name, Supplier<T> operation) {
-        return resilience.execute(name, operation);
+        return getResilience().execute(name, operation);
     }
 
     /**
      * Execute with circuit breaker and fallback.
      */
     public <T> T resilient(String name, Supplier<T> operation, Supplier<T> fallback) {
-        return resilience.executeWithFallback(name, operation, fallback);
+        return getResilience().executeWithFallback(name, operation, fallback);
     }
 
     /**
      * Execute with full resilience: tracing + metrics + circuit breaker + fallback.
      */
     public <T> T safe(String name, Supplier<T> operation, Supplier<T> fallback) {
-        return traced(name, () -> resilience.executeWithFallback(name, operation, fallback));
+        return traced(name, () -> getResilience().executeWithFallback(name, operation, fallback));
     }
 
     // ========================================================================
@@ -327,6 +464,7 @@ public class AdharFacade {
      * Cache-aside pattern: get from cache or compute and store.
      */
     public <T> T cached(String cacheName, Object key, Class<T> type, Supplier<T> loader) {
+        requireEnabled(MOD_CACHE);
         CacheFacade c = CacheFacade.getCache(cacheName);
         if (c == null) {
             c = CacheFacade.builder().cacheName(cacheName).build();
@@ -346,6 +484,7 @@ public class AdharFacade {
      * Evict a key from a named cache.
      */
     public void evict(String cacheName, Object key) {
+        requireEnabled(MOD_CACHE);
         CacheFacade c = CacheFacade.getCache(cacheName);
         if (c != null) {
             c.evict(key);
@@ -360,21 +499,21 @@ public class AdharFacade {
      * Publish an event to a topic.
      */
     public <T> void publish(String topic, T event) {
-        messaging.publish(topic, event);
+        getMessaging().publish(topic, event);
     }
 
     /**
      * Publish a keyed event to a topic.
      */
     public <T> void publish(String topic, String key, T event) {
-        messaging.publish(topic, key, event);
+        getMessaging().publish(topic, key, event);
     }
 
     /**
      * Subscribe to a topic with a typed handler.
      */
     public <T> String subscribe(String topic, Class<T> type, java.util.function.Consumer<T> handler) {
-        return messaging.subscribe(topic, type, handler);
+        return getMessaging().subscribe(topic, type, handler);
     }
 
     // ========================================================================
@@ -385,63 +524,63 @@ public class AdharFacade {
      * Save an entity.
      */
     public <T> T save(T entity) {
-        return persistence.save(entity);
+        return getPersistence().save(entity);
     }
 
     /**
      * Save multiple entities in batch.
      */
     public <T> java.util.List<T> saveAll(Iterable<T> entities) {
-        return persistence.saveAll(entities);
+        return getPersistence().saveAll(entities);
     }
 
     /**
      * Find an entity by ID.
      */
     public <T, ID> Optional<T> findById(Class<T> entityClass, ID id) {
-        return persistence.findById(entityClass, id);
+        return getPersistence().findById(entityClass, id);
     }
 
     /**
      * Find all entities of a type with pagination.
      */
     public <T> Object findAll(Class<T> entityClass, int page, int size) {
-        return persistence.findAll(entityClass, page, size);
+        return getPersistence().findAll(entityClass, page, size);
     }
 
     /**
      * Delete an entity.
      */
     public <T> void delete(T entity) {
-        persistence.delete(entity);
+        getPersistence().delete(entity);
     }
 
     /**
      * Execute within a transaction.
      */
     public <T> T transactional(Supplier<T> operation) {
-        return persistence.executeInTransaction(operation);
+        return getPersistence().executeInTransaction(operation);
     }
 
     /**
      * Execute a read-only operation (optimized, no dirty checking).
      */
     public <T> T readOnly(Supplier<T> operation) {
-        return persistence.executeReadOnly(operation);
+        return getPersistence().executeReadOnly(operation);
     }
 
     /**
      * Count entities of a type.
      */
     public <T> long count(Class<T> entityClass) {
-        return persistence.count(entityClass);
+        return getPersistence().count(entityClass);
     }
 
     /**
      * Check if entity exists by ID.
      */
     public <T, ID> boolean exists(Class<T> entityClass, ID id) {
-        return persistence.existsById(entityClass, id);
+        return getPersistence().existsById(entityClass, id);
     }
 
     // ========================================================================
@@ -452,28 +591,28 @@ public class AdharFacade {
      * Check if current user has a permission.
      */
     public boolean hasPermission(String permission) {
-        return security.hasPermission(permission);
+        return getSecurity().hasPermission(permission);
     }
 
     /**
      * Check if current user has a role.
      */
     public boolean hasRole(String role) {
-        return security.hasRole(role);
+        return getSecurity().hasRole(role);
     }
 
     /**
      * Get the current authenticated user's ID.
      */
     public String currentUserId() {
-        return security.getCurrentUserId();
+        return getSecurity().getCurrentUserId();
     }
 
     /**
      * Check if the current request is authenticated.
      */
     public boolean isAuthenticated() {
-        return security.isAuthenticated();
+        return getSecurity().isAuthenticated();
     }
 
     // ========================================================================
@@ -484,21 +623,21 @@ public class AdharFacade {
      * Get a configuration value.
      */
     public String config(String key, String defaultValue) {
-        return config.get(key, defaultValue);
+        return getConfig().get(key, defaultValue);
     }
 
     /**
      * Get an integer configuration value.
      */
     public int configInt(String key, int defaultValue) {
-        return config.getInt(key, defaultValue);
+        return getConfig().getInt(key, defaultValue);
     }
 
     /**
      * Get a boolean configuration value.
      */
     public boolean configBool(String key, boolean defaultValue) {
-        return config.getBoolean(key, defaultValue);
+        return getConfig().getBoolean(key, defaultValue);
     }
 
     // ========================================================================
@@ -552,14 +691,14 @@ public class AdharFacade {
      * Quick health check - returns true if all checks pass.
      */
     public boolean isHealthy() {
-        return health.getHealth() == com.adhar.kit.health.HealthFacade.HealthStatus.UP;
+        return getHealth().getHealth() == com.adhar.kit.health.HealthFacade.HealthStatus.UP;
     }
 
     /**
      * Get detailed health for all components.
      */
     public Map<String, ?> healthDetails() {
-        return health.getDetailedHealth();
+        return getHealth().getDetailedHealth();
     }
 
     // ========================================================================
@@ -664,33 +803,23 @@ public class AdharFacade {
             """.formatted(getVersion(), currentFramework());
     }
 
+    /** Returns the running Adhar Kit version, resolved from the build (see {@link AdharKitVersion}). */
     public String getVersion() {
-        String version = getClass().getPackage().getImplementationVersion();
-        if (version != null && !version.isEmpty()) return version;
-
-        version = getClass().getPackage().getSpecificationVersion();
-        if (version != null && !version.isEmpty()) return version;
-
-        try {
-            var props = new java.util.Properties();
-            var stream = getClass().getResourceAsStream(
-                    "/META-INF/maven/com.adhar.kit/adhar-kit-starter/pom.properties");
-            if (stream != null) {
-                props.load(stream);
-                stream.close();
-                version = props.getProperty("version");
-                if (version != null && !version.isEmpty()) return version;
-            }
-        } catch (Exception e) {
-            log.debug("Could not read version from pom.properties", e);
-        }
-
-        return "1.0.0-SNAPSHOT";
+        return AdharKitVersion.getVersion();
     }
 
     // ========================================================================
     // Internal helpers
     // ========================================================================
+
+    private void requireEnabled(String moduleId) {
+        if (!moduleAccess.isEnabled(moduleId)) {
+            throw new IllegalStateException(
+                    "Adhar Kit module '" + moduleId + "' is disabled "
+                            + "(adhar.kit.modules." + moduleId + "=false); "
+                            + "enable it to use this facade.");
+        }
+    }
 
     @SuppressWarnings("unchecked")
     private <T> T lazyInit(Supplier<T> getter, Runnable initializer) {

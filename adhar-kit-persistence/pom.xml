@@ -96,6 +96,26 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Kafka (Optional) - powers KafkaOutboxRelay; gated at runtime by
+             @ConditionalOnClass(KafkaTemplate.class) in PersistenceAutoConfiguration so the
+             module works fine without it on the classpath. Version managed by the
+             Spring Boot BOM (imported via adhar-kit-bom). -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Hibernate Envers (Optional) - powers entity revision history; gated at runtime by
+             @ConditionalOnClass(AuditReader.class) in PersistenceAutoConfiguration. Envers
+             auto-registers with Hibernate when present, so consumers only need to add this
+             dependency and annotate entities with org.hibernate.envers.@Audited. -->
+        <dependency>
+            <groupId>org.hibernate.orm</groupId>
+            <artifactId>hibernate-envers</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Validation -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -116,6 +136,15 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Servlet API (optional: only needed by consumers that register TenantWebFilter in a
+             servlet container; pure batch/messaging consumers never pull this in transitively) -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -125,6 +154,16 @@
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Needed only for TenantWebFilterTest's use of org.springframework.mock.web.Mock*
+             (spring-test's servlet mocks reference org.springframework.http.MediaType, which lives
+             in spring-web; "provided" scope dependencies of our own compile-scope deps, such as
+             the jakarta.servlet-api/spring-web brought in transitively, are not themselves
+             transitive, so it must be declared directly here). -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -142,6 +181,15 @@
                         <exclude>**/Q*Entity$*.class</exclude>
                         <!-- Exclude repository interfaces (default methods are tested via implementation) -->
                         <exclude>**/repository/*Repository.class</exclude>
+                        <exclude>**/outbox/*Repository.class</exclude>
+                        <!-- Re-declared explicitly (module build overrides, rather than merges with,
+                             the parent's pluginManagement excludes list for this plugin) -->
+                        <exclude>**/annotation/**</exclude>
+                        <exclude>**/*Properties.class</exclude>
+                        <exclude>**/*Properties$*.class</exclude>
+                        <exclude>**/*AutoConfiguration.class</exclude>
+                        <exclude>**/*AutoConfiguration$*.class</exclude>
+                        <exclude>**/*Constants.class</exclude>
                     </excludes>
                 </configuration>
             </plugin>

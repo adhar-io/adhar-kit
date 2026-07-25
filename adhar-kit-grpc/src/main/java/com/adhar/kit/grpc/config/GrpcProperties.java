@@ -1,6 +1,7 @@
 package com.adhar.kit.grpc.config;
 
 import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -41,6 +42,7 @@ import java.util.Map;
  * @since 1.0.0
  */
 @Data
+@ConfigurationProperties(prefix = "adhar.grpc")
 public class GrpcProperties {
 
     /**
@@ -67,6 +69,23 @@ public class GrpcProperties {
      * Observability configuration.
      */
     private ObservabilityConfig observability = new ObservabilityConfig();
+
+    /**
+     * Authentication configuration.
+     */
+    private AuthConfig auth = new AuthConfig();
+
+    /**
+     * Enable automatic registration of {@code @GrpcService} beans with the
+     * {@code AdharGrpcServer} bean (via {@code GrpcServiceRegistrar}).
+     */
+    private boolean enableServiceRegistrar = true;
+
+    /**
+     * Enable automatic injection of {@code ManagedChannel}s into
+     * {@code @GrpcClient} fields (via {@code GrpcClientBeanPostProcessor}).
+     */
+    private boolean enableClientInjection = true;
 
     /**
      * Server configuration.
@@ -224,6 +243,29 @@ public class GrpcProperties {
          * User agent.
          */
         private String userAgent = "adhar-grpc-client/1.0.0";
+
+        /**
+         * Initial backoff before the first retry (milliseconds), used to build
+         * the gRPC built-in retry policy's {@code initialBackoff}.
+         */
+        private long initialBackoffMillis = 1000;
+
+        /**
+         * Maximum backoff between retries (milliseconds), used to build the
+         * gRPC built-in retry policy's {@code maxBackoff}.
+         */
+        private long maxBackoffMillis = 10000;
+
+        /**
+         * Backoff multiplier applied between successive retries.
+         */
+        private double backoffMultiplier = 2.0;
+
+        /**
+         * Status codes that are eligible for automatic retry.
+         */
+        private List<String> retryableStatusCodes = new ArrayList<>(List.of(
+                "UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED", "ABORTED"));
     }
 
     /**
@@ -296,6 +338,28 @@ public class GrpcProperties {
          * Enable health check.
          */
         private boolean enableHealthCheck = true;
+    }
+
+    /**
+     * Authentication configuration.
+     *
+     * <p>When {@link #enabled} is {@code true}, the server applies an
+     * {@code AuthServerInterceptor} that validates a Bearer token or API key
+     * against the configured {@link #sharedSecret} before allowing a call
+     * through. Unauthenticated calls fail with {@code UNAUTHENTICATED}.</p>
+     */
+    @Data
+    public static class AuthConfig {
+        /**
+         * Enable authentication enforcement.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Shared secret used by {@code StaticTokenAuthenticator} to validate
+         * Bearer tokens / API keys.
+         */
+        private String sharedSecret;
     }
 }
 

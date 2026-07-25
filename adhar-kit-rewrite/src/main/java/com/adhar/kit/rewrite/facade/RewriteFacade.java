@@ -1,7 +1,11 @@
 package com.adhar.kit.rewrite.facade;
 
 import com.adhar.kit.rewrite.catalog.RecipeCatalog;
+import com.adhar.kit.rewrite.catalog.RecipeCatalogValidator;
+import com.adhar.kit.rewrite.engine.InProcessRewriteRunner;
+import com.adhar.kit.rewrite.report.RewriteImpactReport;
 import lombok.extern.slf4j.Slf4j;
+import org.openrewrite.Recipe;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -192,6 +196,51 @@ public final class RewriteFacade {
     }
 
     /**
+     * Runs a recipe set in-process against a set of in-memory sources and returns a real impact
+     * report (actual per-file diffs), instead of generating a {@code rewrite.yml} and an
+     * {@code mvn rewrite:run} command like {@link #dryRun(String, Path)} / {@link #apply(String, Path)} do.
+     *
+     * <p>Each recipe name in the recipe set must resolve to a class implementing
+     * {@link org.openrewrite.Recipe} with a public no-arg constructor (all of the module's own
+     * {@code com.adhar.kit.rewrite.recipe.adhar.*} recipes qualify).</p>
+     *
+     * @param recipeSetKey the recipe set key from the catalog
+     * @param sources      the in-memory source files to run the recipe set against
+     * @return a report summarizing the changed files and their diffs
+     * @throws IllegalArgumentException if the recipe set key is not found
+     * @throws IllegalStateException    if a recipe name cannot be instantiated as a no-arg {@link org.openrewrite.Recipe}
+     */
+    public RewriteImpactReport runInProcess(String recipeSetKey, List<InProcessRewriteRunner.SourceInput> sources) {
+        RecipeCatalog.RecipeSet recipeSet = requireRecipeSet(recipeSetKey);
+        return runInProcess(recipeSet.recipeNames(), sources);
+    }
+
+    /**
+     * Runs the given recipe names in-process against a set of in-memory sources and returns a
+     * real impact report (actual per-file diffs).
+     *
+     * @param recipeNames fully-qualified names of classes implementing {@link org.openrewrite.Recipe}
+     *                    with a public no-arg constructor
+     * @param sources     the in-memory source files to run the recipes against
+     * @return a report summarizing the changed files and their diffs
+     * @throws IllegalStateException if a recipe name cannot be instantiated as a no-arg {@link org.openrewrite.Recipe}
+     */
+    public RewriteImpactReport runInProcess(List<String> recipeNames, List<InProcessRewriteRunner.SourceInput> sources) {
+        Recipe composite = compositeRecipe(recipeNames);
+        InProcessRewriteRunner.RewriteExecution execution = InProcessRewriteRunner.run(composite, sources);
+        return RewriteImpactReport.of(execution);
+    }
+
+    /**
+     * Validates that every recipe FQN referenced by the catalog resolves on the current classpath.
+     *
+     * @return a validation report describing any unresolved recipe references
+     */
+    public RecipeCatalogValidator.ValidationReport validateCatalog() {
+        return RecipeCatalogValidator.validateAll();
+    }
+
+    /**
      * Returns health information about the rewrite module.
      *
      * @return map containing status, available recipe count, and catalog keys
@@ -246,6 +295,37 @@ public final class RewriteFacade {
             yaml.append("  - ").append(recipe).append("\n");
         }
         return yaml.toString();
+    }
+
+    private Recipe compositeRecipe(List<String> recipeNames) {
+        List<Recipe> recipes = recipeNames.stream().map(this::instantiateRecipe).toList();
+        return new Recipe() {
+            @Override
+            public String getDisplayName() {
+                return "Adhar Kit Generated Recipe";
+            }
+
+            @Override
+            public String getDescription() {
+                return "Auto-generated composite recipe from RewriteFacade.runInProcess: " + recipeNames;
+            }
+
+            @Override
+            public List<Recipe> getRecipeList() {
+                return recipes;
+            }
+        };
+    }
+
+    private Recipe instantiateRecipe(String recipeFqn) {
+        try {
+            Class<?> recipeClass = Class.forName(recipeFqn);
+            return (Recipe) recipeClass.getDeclaredConstructor().newInstance();
+        } catch (ReflectiveOperationException | ClassCastException e) {
+            throw new IllegalStateException(
+                    "Cannot instantiate recipe '" + recipeFqn + "' for in-process execution. It must be a class "
+                            + "implementing org.openrewrite.Recipe with a public no-arg constructor.", e);
+        }
     }
 
     private String buildMavenCommand(String goal, List<String> recipeNames) {

@@ -1,6 +1,8 @@
 package com.adhar.kit.eventsourcing.store;
 
 import com.adhar.kit.eventsourcing.core.DomainEvent;
+import com.adhar.kit.eventsourcing.upcast.EventUpcaster;
+import com.adhar.kit.eventsourcing.upcast.UpcasterChain;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -118,5 +120,49 @@ class JpaEventStoreTest {
 
         assertThat(events).hasSize(1);
         assertThat(events.getFirst().version()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("getAllEvents maps entries fetched in stored-at order")
+    void getAllEventsMapsEntries() {
+        EventEntry e1 = entry("order-1", 1, "OrderCreated");
+        EventEntry e2 = entry("order-2", 1, "OrderCreated");
+        when(repository.findAllByOrderByStoredAtAsc()).thenReturn(List.of(e1, e2));
+        JpaEventStore store = new JpaEventStore(repository);
+
+        List<DomainEvent> events = store.getAllEvents();
+
+        assertThat(events).hasSize(2);
+        assertThat(events.get(0).aggregateId()).isEqualTo("order-1");
+        assertThat(events.get(1).aggregateId()).isEqualTo("order-2");
+    }
+
+    @Test
+    @DisplayName("events read via getEvents, getEventsAfterVersion and getAllEvents are migrated through the upcaster chain")
+    void eventsAreUpcastOnRead() {
+        EventUpcaster upcaster = new EventUpcaster() {
+            @Override
+            public boolean supports(String eventType, int version) {
+                return "OrderCreatedV1".equals(eventType);
+            }
+
+            @Override
+            public DomainEvent upcast(DomainEvent event) {
+                return new DomainEvent(event.eventId(), event.aggregateId(), event.aggregateType(),
+                        event.version(), "OrderCreatedV2", "{\"migrated\":true}", event.occurredAt());
+            }
+        };
+        EventEntry legacyEntry = entry("order-1", 1, "OrderCreatedV1");
+        when(repository.findByAggregateIdOrderByVersionAsc("order-1")).thenReturn(List.of(legacyEntry));
+        when(repository.findByAggregateIdAndVersionGreaterThanOrderByVersionAsc("order-1", 0))
+                .thenReturn(List.of(legacyEntry));
+        when(repository.findAllByOrderByStoredAtAsc()).thenReturn(List.of(legacyEntry));
+
+        JpaEventStore store = new JpaEventStore(repository, new UpcasterChain(List.of(upcaster)));
+
+        assertThat(store.getEvents("order-1").getFirst().eventType()).isEqualTo("OrderCreatedV2");
+        assertThat(store.getEventsAfterVersion("order-1", 0).getFirst().eventType()).isEqualTo("OrderCreatedV2");
+        assertThat(store.getAllEvents().getFirst().eventType()).isEqualTo("OrderCreatedV2");
+        assertThat(store.getAllEvents().getFirst().payload()).isEqualTo("{\"migrated\":true}");
     }
 }

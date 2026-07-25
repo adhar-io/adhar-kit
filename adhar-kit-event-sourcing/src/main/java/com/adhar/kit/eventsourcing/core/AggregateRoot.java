@@ -94,4 +94,56 @@ public abstract class AggregateRoot {
      * @param event the domain event to apply
      */
     protected abstract void apply(DomainEvent event);
+
+    /**
+     * Creates a serialized representation of this aggregate's internal state so it can
+     * be persisted as a {@link com.adhar.kit.eventsourcing.snapshot.Snapshot}.
+     *
+     * <p>The default implementation is unsupported. Aggregates that want to participate
+     * in snapshotting must override this method (typically by serializing their state to
+     * JSON). When unsupported, {@code AggregateRepository} transparently falls back to
+     * full event replay, so existing aggregates keep working unchanged.</p>
+     *
+     * @return a serialized (e.g. JSON) representation of this aggregate's internal state
+     * @throws UnsupportedOperationException if this aggregate does not support snapshotting
+     */
+    public String createSnapshotState() {
+        throw new UnsupportedOperationException(
+                "Snapshotting is not supported by " + getClass().getName()
+                        + "; override createSnapshotState() to enable it");
+    }
+
+    /**
+     * Restores this aggregate's internal state from a previously captured snapshot.
+     *
+     * <p>Implementations should only restore internal fields here; the aggregate
+     * identifier and version are managed separately by {@link #applySnapshot(String, String, int)}.
+     * The default implementation is unsupported, causing callers to fall back to full replay.</p>
+     *
+     * @param state   the serialized state previously produced by {@link #createSnapshotState()}
+     * @param version the aggregate version the snapshot was captured at
+     * @throws UnsupportedOperationException if this aggregate does not support snapshotting
+     */
+    public void restoreFromSnapshot(String state, int version) {
+        throw new UnsupportedOperationException(
+                "Snapshotting is not supported by " + getClass().getName()
+                        + "; override restoreFromSnapshot() to enable it");
+    }
+
+    /**
+     * Applies a snapshot to this aggregate: restores internal state via
+     * {@link #restoreFromSnapshot(String, int)}, then sets the aggregate identifier and
+     * version to match the snapshot. Callers (e.g. {@code AggregateRepository}) should
+     * catch {@link UnsupportedOperationException} and fall back to full event replay.
+     *
+     * @param aggregateId the aggregate identifier
+     * @param state       the serialized snapshot state
+     * @param version     the version the snapshot was captured at
+     * @throws UnsupportedOperationException if this aggregate does not support snapshotting
+     */
+    public final void applySnapshot(String aggregateId, String state, int version) {
+        restoreFromSnapshot(state, version);
+        setAggregateId(aggregateId);
+        setVersion(version);
+    }
 }

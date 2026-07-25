@@ -21,8 +21,15 @@ Comprehensive testing utilities and base classes for microservices integration a
 ## 🎯 Features
 
 - **Testcontainers Integration** - PostgreSQL, Redis, Kafka, MongoDB containers
-- **Base Test Classes** - Pre-configured base classes for unit, integration, and controller tests
-- **WireMock Utilities** - Easy HTTP mocking for external services
+- **Base Test Classes** - Pre-configured base classes for unit, integration, and controller tests,
+  including single-service (`MongoIntegrationTest`, `RedisIntegrationTest`, `KafkaIntegrationTest`)
+  and multi-service (`CompositeIntegrationTest`) variants
+- **Shared Container Lifecycle** - `TestContainerRegistry` reconciles the `TestContainerFacade`
+  instance API and the static `*TestContainer` helpers behind one ordered start/stop sequence and
+  one shared Testcontainers `Network`
+- **WireMock Utilities** - `WireMockTestServer` for richer HTTP stubbing/verification, plus
+  `WireMockIntegrationTest` for `@DynamicPropertySource`-based wiring
+- **Database Seeding** - `DatabaseSeeder` for loading SQL scripts or row builders into a test datasource
 - **Test Data Builders** - Fluent API for creating test data
 - **Custom Assertions** - Domain-specific assertions
 - **Test Annotations** - Convenient test markers
@@ -184,6 +191,55 @@ class ExternalApiTest {
 }
 ```
 
+### WireMockTestServer (richer stubbing)
+
+`WireMockTestServer` goes beyond `MockRestServer`/the static WireMock helper above: it is
+instance-based (so you can run several independent stub servers side by side), and offers
+convenience methods for stubbing every HTTP verb, adding response headers/delays, and verifying
+call counts.
+
+```java
+class ExternalApiWithWireMockTestServer {
+
+    private WireMockTestServer server;
+
+    @BeforeEach
+    void setUp() {
+        server = WireMockTestServer.start(); // dynamic port
+    }
+
+    @AfterEach
+    void tearDown() {
+        server.stop();
+    }
+
+    @Test
+    void shouldCallExternalApi() {
+        server.stubGetJson("/api/data", 200, "{\"status\":\"success\"}");
+
+        Response response = externalService.fetchData(server.baseUrl());
+
+        assertThat(response.getStatus()).isEqualTo("success");
+        server.verifyGetCalled("/api/data", 1);
+    }
+}
+```
+
+For Spring context tests, extend `WireMockIntegrationTest` instead: it starts the server in a
+static `@BeforeAll`, publishes `wiremock.server.base-url` via `@DynamicPropertySource`, and resets
+stubs after every test.
+
+```java
+class ExternalApiIntegrationTest extends WireMockIntegrationTest {
+
+    @Test
+    void shouldCallExternalApi() {
+        wireMockServer.stubGetJson("/api/data", 200, "{\"status\":\"success\"}");
+        // ... exercise the Spring bean wired to wiremock.server.base-url
+    }
+}
+```
+
 ### Test Data Builders
 
 ```java
@@ -236,6 +292,28 @@ class CustomAssertionsExample {
 }
 ```
 
+### Database Seeding
+
+```java
+class DatabaseSeederExample {
+
+    @Test
+    void shouldSeedTestData(DataSource dataSource) {
+        DatabaseSeeder seeder = DatabaseSeeder.forDataSource(dataSource);
+
+        seeder.runScriptFromClasspath("seed/users.sql");
+        seeder.insert("users", Map.of("id", 1, "email", "a@b.com"));
+        seeder.insertAll("orders", List.of(
+                Map.of("id", 1, "user_id", 1),
+                Map.of("id", 2, "user_id", 1)));
+
+        assertThat(seeder.countRows("orders")).isEqualTo(2);
+
+        seeder.truncate("orders", "users");
+    }
+}
+```
+
 ## Available Containers
 
 ### PostgreSQL
@@ -273,6 +351,23 @@ String connectionString = MongoTestContainer.getConnectionString();
 - Sets up Spring Boot test context
 - Configures database properties
 
+### MongoIntegrationTest / RedisIntegrationTest / KafkaIntegrationTest
+- Mirror `BaseIntegrationTest`'s `@DynamicPropertySource` approach for MongoDB, Redis, and Kafka
+  respectively
+- Start their container through the shared `TestContainerRegistry`
+- Wire `spring.data.mongodb.uri`, `spring.data.redis.host`/`port`, and
+  `spring.kafka.bootstrap-servers` respectively
+
+### CompositeIntegrationTest
+- Starts PostgreSQL, MongoDB, Redis, and Kafka together (in that order) via
+  `TestContainerRegistry`, wiring properties for all four
+- Prefer the single-service base classes above when a test only needs one backing service
+
+### WireMockIntegrationTest
+- Starts a `WireMockTestServer` once per test class and publishes its base URL as
+  `wiremock.server.base-url`
+- Resets stubs after every test method
+
 ### BaseUnitTest
 - Configures Mockito
 - Extends JUnit 5
@@ -281,6 +376,26 @@ String connectionString = MongoTestContainer.getConnectionString();
 - Configures MockMvc
 - Provides JSON conversion utilities
 - Auto-configures Spring MVC test
+
+## Container Lifecycle Registry
+
+`TestContainerRegistry` is the single source of truth behind both container mechanisms in this
+module: the `TestContainerFacade` instance API and the static `*TestContainer`/`base.*IntegrationTest`
+helpers. Every container started through either mechanism is registered here, in start order, and
+can join a shared Testcontainers `Network`.
+
+```java
+TestContainerRegistry registry = TestContainerRegistry.getInstance();
+
+// Start (or reuse) a container, joining the shared network if it hasn't started yet
+registry.registerAndStart("redis", RedisTestContainer.getInstance());
+
+registry.isRegistered("redis");       // true
+registry.registrationOrder();         // e.g. ["postgres", "mongo", "redis", "kafka"]
+
+// Tear everything down in reverse start order
+registry.stopAll();
+```
 
 ## Annotations
 
@@ -305,6 +420,12 @@ String phone = TestDataBuilder.randomPhone();
 int random = TestDataBuilder.randomInt(1, 100);
 boolean bool = TestDataBuilder.randomBoolean();
 LocalDateTime now = TestDataBuilder.now();
+
+// Additional factories
+String token = TestDataBuilder.randomAlphanumeric(16);
+String status = TestDataBuilder.randomElement(List.of("PENDING", "ACTIVE", "CLOSED"));
+LocalDateTime createdBefore = TestDataBuilder.pastTimestamp(30);   // 30 minutes ago
+LocalDateTime expiresAt = TestDataBuilder.futureTimestamp(60);     // 60 minutes from now
 ```
 
 ## Best Practices
@@ -322,10 +443,20 @@ LocalDateTime now = TestDataBuilder.now();
 - Mockito
 - Spring Boot Test
 - Testcontainers
-- WireMock
+- WireMock (`wiremock-standalone`)
 - AssertJ
 - Rest Assured
 - Awaitility
+
+## Docker Requirement
+
+Tests that actually start a Testcontainers container (PostgreSQL, MongoDB, Redis, Kafka) are
+gated behind the `testcontainers.enabled` system property (`@EnabledIfSystemProperty(named =
+"testcontainers.enabled", matches = "true")`) and are skipped, not failed, when Docker is
+unavailable. Everything else in this module - including `TestContainerRegistry` bookkeeping,
+the new `base.*IntegrationTest` static hooks, and all of `WireMockTestServer`/`DatabaseSeeder` -
+is exercised with Mockito-mocked containers/JDBC objects or a real embedded WireMock server, so
+the build passes without Docker.
 
 ## License
 

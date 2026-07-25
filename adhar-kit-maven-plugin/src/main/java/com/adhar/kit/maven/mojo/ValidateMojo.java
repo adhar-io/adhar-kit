@@ -1,5 +1,6 @@
 package com.adhar.kit.maven.mojo;
 
+import com.adhar.kit.maven.validation.ArchitectureRuleValidator;
 import com.adhar.kit.maven.validation.CodeStandardsValidator;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -96,6 +97,13 @@ public class ValidateMojo extends AbstractMojo {
     private boolean validateLogging;
 
     /**
+     * Whether to validate layered-architecture dependency direction
+     * (controller -&gt; service -&gt; repository, no reverse dependencies).
+     */
+    @Parameter(property = "validate.architecture", defaultValue = "true")
+    private boolean validateArchitecture;
+
+    /**
      * Whether to generate validation report.
      */
     @Parameter(property = "validate.report", defaultValue = "true")
@@ -155,6 +163,14 @@ public class ValidateMojo extends AbstractMojo {
             if (validateLogging) {
                 getLog().info("Validating logging usage...");
                 warningCount += validator.validateLogging();
+            }
+
+            // Validate layered-architecture dependency direction
+            if (validateArchitecture) {
+                getLog().info("Validating architecture layering (controller -> service -> repository)...");
+                ArchitectureRuleValidator architectureValidator =
+                        new ArchitectureRuleValidator(sourceDirectory, getLog());
+                errorCount += architectureValidator.validateLayering();
             }
 
             // Generate report

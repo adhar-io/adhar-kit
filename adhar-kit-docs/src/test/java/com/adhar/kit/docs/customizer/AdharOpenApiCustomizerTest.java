@@ -4,9 +4,15 @@ import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.oas.models.Paths;
+import io.swagger.v3.oas.models.media.Content;
+import io.swagger.v3.oas.models.media.MediaType;
+import io.swagger.v3.oas.models.media.Schema;
+import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,6 +26,160 @@ class AdharOpenApiCustomizerTest {
                 .addExamples()
                 .build();
         assertThat(customizer).isNotNull();
+    }
+
+    @Test
+    void builderWithNoOptionsAppliesNothing() {
+        AdharOpenApiCustomizer customizer = AdharOpenApiCustomizer.builder().build();
+
+        Operation operation = new Operation();
+        PathItem pathItem = new PathItem();
+        pathItem.setGet(operation);
+        Paths paths = new Paths();
+        paths.addPathItem("/api/noop", pathItem);
+        OpenAPI openApi = new OpenAPI();
+        openApi.setPaths(paths);
+
+        customizer.customize(openApi);
+
+        assertThat(operation.getParameters()).isNull();
+        assertThat(operation.getResponses()).isNull();
+    }
+
+    @Test
+    void builderWithOnlyHeadersDoesNotAddResponses() {
+        AdharOpenApiCustomizer customizer = AdharOpenApiCustomizer.builder()
+                .addCommonHeaders()
+                .build();
+
+        Operation operation = new Operation();
+        PathItem pathItem = new PathItem();
+        pathItem.setGet(operation);
+        Paths paths = new Paths();
+        paths.addPathItem("/api/headers-only", pathItem);
+        OpenAPI openApi = new OpenAPI();
+        openApi.setPaths(paths);
+
+        customizer.customize(openApi);
+
+        assertThat(operation.getParameters()).hasSize(2);
+        assertThat(operation.getResponses()).isNull();
+    }
+
+    @Test
+    void builderWithOnlyResponsesDoesNotAddHeaders() {
+        AdharOpenApiCustomizer customizer = AdharOpenApiCustomizer.builder()
+                .addCommonResponses()
+                .build();
+
+        Operation operation = new Operation();
+        PathItem pathItem = new PathItem();
+        pathItem.setGet(operation);
+        Paths paths = new Paths();
+        paths.addPathItem("/api/responses-only", pathItem);
+        OpenAPI openApi = new OpenAPI();
+        openApi.setPaths(paths);
+
+        customizer.customize(openApi);
+
+        assertThat(operation.getParameters()).isNull();
+        assertThat(operation.getResponses()).containsKeys("400", "401", "403", "404", "500");
+    }
+
+    @Test
+    void builderWithExamplesAttachesExampleToCommonErrorResponses() {
+        AdharOpenApiCustomizer customizer = AdharOpenApiCustomizer.builder()
+                .addCommonResponses()
+                .addExamples()
+                .build();
+
+        Operation operation = new Operation();
+        PathItem pathItem = new PathItem();
+        pathItem.setGet(operation);
+        Paths paths = new Paths();
+        paths.addPathItem("/api/examples", pathItem);
+        OpenAPI openApi = new OpenAPI();
+        openApi.setPaths(paths);
+
+        customizer.customize(openApi);
+
+        MediaType badRequestJson = operation.getResponses().get("400").getContent().get("application/json");
+        assertThat(badRequestJson.getExample()).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> example = (Map<String, Object>) badRequestJson.getExample();
+        assertThat(example).containsEntry("status", 400).containsEntry("error", "Bad Request");
+    }
+
+    @Test
+    void addExamplesAttachesExampleToExistingRequestAndResponseContent() {
+        AdharOpenApiCustomizer customizer = AdharOpenApiCustomizer.builder()
+                .addExamples()
+                .build();
+
+        Schema<?> requestSchema = new Schema<>().type("object")
+                .addProperty("name", new Schema<>().type("string"))
+                .addProperty("count", new Schema<>().type("integer"))
+                .addProperty("active", new Schema<>().type("boolean"))
+                .addProperty("createdAt", new Schema<>().type("string").format("date-time"))
+                .addProperty("id", new Schema<>().type("string").format("uuid"));
+        MediaType requestMediaType = new MediaType().schema(requestSchema);
+        RequestBody requestBody = new RequestBody().content(new Content().addMediaType("application/json", requestMediaType));
+
+        Schema<?> responseSchema = new Schema<>().type("string");
+        MediaType responseMediaType = new MediaType().schema(responseSchema);
+        ApiResponses responses = new ApiResponses();
+        responses.addApiResponse("200", new ApiResponse().description("OK")
+                .content(new Content().addMediaType("application/json", responseMediaType)));
+
+        Operation operation = new Operation();
+        operation.setRequestBody(requestBody);
+        operation.setResponses(responses);
+
+        PathItem pathItem = new PathItem();
+        pathItem.setPost(operation);
+        Paths paths = new Paths();
+        paths.addPathItem("/api/items", pathItem);
+        OpenAPI openApi = new OpenAPI();
+        openApi.setPaths(paths);
+
+        customizer.customize(openApi);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> requestExample = (Map<String, Object>) requestMediaType.getExample();
+        assertThat(requestExample)
+                .containsEntry("name", "string")
+                .containsEntry("count", 0)
+                .containsEntry("active", true)
+                .containsEntry("createdAt", "2024-01-01T00:00:00Z")
+                .containsEntry("id", "550e8400-e29b-41d4-a716-446655440000");
+
+        assertThat(responseMediaType.getExample()).isEqualTo("string");
+    }
+
+    @Test
+    void addExamplesDoesNotOverwriteExistingExample() {
+        AdharOpenApiCustomizer customizer = AdharOpenApiCustomizer.builder()
+                .addExamples()
+                .build();
+
+        Schema<?> schema = new Schema<>().type("string");
+        MediaType mediaType = new MediaType().schema(schema).example("already-set");
+        ApiResponses responses = new ApiResponses();
+        responses.addApiResponse("200", new ApiResponse().description("OK")
+                .content(new Content().addMediaType("application/json", mediaType)));
+
+        Operation operation = new Operation();
+        operation.setResponses(responses);
+        PathItem pathItem = new PathItem();
+        pathItem.setGet(operation);
+        Paths paths = new Paths();
+        paths.addPathItem("/api/preset", pathItem);
+        OpenAPI openApi = new OpenAPI();
+        openApi.setPaths(paths);
+
+        customizer.customize(openApi);
+
+        assertThat(mediaType.getExample()).isEqualTo("already-set");
     }
 
     @Test

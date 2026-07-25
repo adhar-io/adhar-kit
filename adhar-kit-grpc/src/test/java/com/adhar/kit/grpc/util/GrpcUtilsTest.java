@@ -1,8 +1,15 @@
 package com.adhar.kit.grpc.util;
 
+import com.adhar.kit.grpc.exception.GrpcServiceConfigurationException;
 import io.grpc.Metadata;
 import io.grpc.Status;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -326,6 +333,72 @@ class GrpcUtilsTest {
     }
 
     private static class EntityAlreadyExistsException extends RuntimeException {
+    }
+
+    @Test
+    void testExtractCredentialToken_bearerPrefix_isStripped() {
+        Metadata headers = new Metadata();
+        headers.put(GrpcUtils.AUTHORIZATION_KEY, "Bearer abc123");
+
+        assertEquals("abc123", GrpcUtils.extractCredentialToken(headers));
+    }
+
+    @Test
+    void testExtractCredentialToken_authorizationWithoutBearerPrefix_usedAsIs() {
+        Metadata headers = new Metadata();
+        headers.put(GrpcUtils.AUTHORIZATION_KEY, "raw-token");
+
+        assertEquals("raw-token", GrpcUtils.extractCredentialToken(headers));
+    }
+
+    @Test
+    void testExtractCredentialToken_fallsBackToApiKey() {
+        Metadata headers = new Metadata();
+        headers.put(GrpcUtils.API_KEY_KEY, "api-key-value");
+
+        assertEquals("api-key-value", GrpcUtils.extractCredentialToken(headers));
+    }
+
+    @Test
+    void testExtractCredentialToken_missing_returnsNull() {
+        assertNull(GrpcUtils.extractCredentialToken(new Metadata()));
+    }
+
+    @Test
+    void testResolveCertFile_blankLocation_throws() {
+        assertThrows(GrpcServiceConfigurationException.class, () -> GrpcUtils.resolveCertFile(""));
+        assertThrows(GrpcServiceConfigurationException.class, () -> GrpcUtils.resolveCertFile(null));
+    }
+
+    @Test
+    void testResolveCertFile_missingFilesystemFile_throws() {
+        assertThrows(GrpcServiceConfigurationException.class,
+                () -> GrpcUtils.resolveCertFile("/no/such/path/cert.pem"));
+    }
+
+    @Test
+    void testResolveCertFile_missingClasspathResource_throws() {
+        assertThrows(GrpcServiceConfigurationException.class,
+                () -> GrpcUtils.resolveCertFile("classpath:no-such-cert.pem"));
+    }
+
+    @Test
+    void testResolveCertFile_existingFilesystemFile_resolves(@TempDir Path tempDir) throws IOException {
+        Path certFile = tempDir.resolve("cert.pem");
+        Files.writeString(certFile, "dummy");
+
+        File resolved = GrpcUtils.resolveCertFile(certFile.toString());
+
+        assertTrue(resolved.exists());
+        assertEquals(certFile.toFile().getAbsolutePath(), resolved.getAbsolutePath());
+    }
+
+    @Test
+    void testResolveCertFile_existingClasspathResource_resolves() {
+        // src/test/resources/test-cert.pem is provided for this test.
+        File resolved = GrpcUtils.resolveCertFile("classpath:test-cert.pem");
+
+        assertTrue(resolved.exists());
     }
 }
 

@@ -1,6 +1,9 @@
 package com.adhar.kit.graphql.dataloader;
 
+import graphql.GraphQLContext;
 import lombok.extern.slf4j.Slf4j;
+import org.dataloader.DataLoader;
+import org.dataloader.DataLoaderFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -15,6 +18,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * fetches for the same type of resource within a single GraphQL request are
  * consolidated into a single batch call.</p>
  *
+ * <p>This class also implements Spring GraphQL's
+ * {@link org.springframework.graphql.execution.DataLoaderRegistrar} interface. Every
+ * {@link BatchLoaderFunction} registered here is adapted into a real graphql-java
+ * {@link org.dataloader.DataLoader} and installed into the per-request
+ * {@link org.dataloader.DataLoaderRegistry}, so registrations actually batch instead of
+ * sitting in a dead map.</p>
+ *
  * <p><b>Usage Example:</b></p>
  * <pre>{@code
  * DataLoaderRegistrar registrar = new DataLoaderRegistrar();
@@ -27,7 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @since 1.0.0
  */
 @Slf4j
-public class DataLoaderRegistrar {
+public class DataLoaderRegistrar implements org.springframework.graphql.execution.DataLoaderRegistrar {
 
     private final Map<String, BatchLoaderFunction<?, ?>> batchLoaders = new ConcurrentHashMap<>();
 
@@ -117,5 +127,38 @@ public class DataLoaderRegistrar {
      */
     public boolean hasLoader(String name) {
         return batchLoaders.containsKey(name);
+    }
+
+    /**
+     * Adapts every registered {@link BatchLoaderFunction} into a graphql-java
+     * {@link DataLoader} and registers it under its name into the given
+     * {@link org.dataloader.DataLoaderRegistry}.
+     *
+     * <p>Spring GraphQL invokes this method once per request (via the configured
+     * {@code BatchLoaderRegistry}/{@code DataLoaderRegistrar} beans), which is what
+     * allows multiple individual {@code load()} calls issued while resolving a single
+     * request to be coalesced into a single batched call to the underlying
+     * {@link BatchLoaderFunction}.</p>
+     *
+     * @param registry the per-request DataLoader registry to populate
+     * @param context  the GraphQL execution context (unused, part of the contract)
+     */
+    @Override
+    public void registerDataLoaders(org.dataloader.DataLoaderRegistry registry, GraphQLContext context) {
+        for (Map.Entry<String, BatchLoaderFunction<?, ?>> entry : batchLoaders.entrySet()) {
+            registry.register(entry.getKey(), toDataLoader(entry.getValue()));
+        }
+    }
+
+    @Override
+    public boolean hasRegistrations() {
+        return !batchLoaders.isEmpty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private <K, V> DataLoader<K, V> toDataLoader(BatchLoaderFunction<?, ?> function) {
+        BatchLoaderFunction<K, V> typed = (BatchLoaderFunction<K, V>) function;
+        org.dataloader.BatchLoader<K, V> adapted = typed::load;
+        return DataLoaderFactory.newDataLoader(adapted);
     }
 }

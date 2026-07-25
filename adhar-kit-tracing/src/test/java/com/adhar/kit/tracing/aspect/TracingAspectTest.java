@@ -6,6 +6,7 @@ import com.adhar.kit.tracing.annotation.DatabaseSpan;
 import com.adhar.kit.tracing.annotation.HttpClientSpan;
 import com.adhar.kit.tracing.annotation.MessagingSpan;
 import com.adhar.kit.tracing.annotation.NewSpan;
+import com.adhar.kit.tracing.annotation.SpanTag;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.TraceContext;
 import io.micrometer.tracing.Tracer;
@@ -22,6 +23,7 @@ import org.mockito.quality.Strictness;
 import java.lang.reflect.Method;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -65,6 +67,17 @@ class TracingAspectTest {
     /** A sample method used to back the mocked {@link MethodSignature}. */
     public String sampleMethod(String name) {
         return name;
+    }
+
+    /** A sample method with {@link SpanTag}-annotated parameters, used by the @SpanTag tests. */
+    public String taggedMethod(@SpanTag("user.email") String email,
+                                @SpanTag(value = "name.length", expression = "length()") String rawName) {
+        return email;
+    }
+
+    /** A sample method whose {@link SpanTag} expression is invalid for the parameter's type. */
+    public String badExpressionMethod(@SpanTag(value = "bad", expression = "noSuchProperty") String value) {
+        return value;
     }
 
     @BeforeEach
@@ -404,6 +417,162 @@ class TracingAspectTest {
 
         verify(span).tag("success", "false");
         verify(span).tag("error.class", "RuntimeException");
+        // Regression test for the double-proceed bug: the old `finally` block called
+        // joinPoint.proceed() a SECOND time (re-executing the underlying method) just to
+        // check whether the result was a Future. It must be invoked exactly once.
+        verify(joinPoint, times(1)).proceed();
+    }
+
+    // ========== @AsyncSpan: proceed() invocation count (regression for double-proceed bug) ==========
+    //
+    // TracingAspect.handleAsyncSpan used to call joinPoint.proceed() a second time inside its
+    // `finally` block purely to inspect the result type, re-executing the underlying method.
+    // These tests count actual invocations (via an AtomicInteger incremented inside the mocked
+    // proceed() call) to prove the method body only runs once, for every branch: a
+    // CompletableFuture result, a plain Future result, and the exception path.
+
+    @Test
+    void handleAsyncSpan_proceedInvokedExactlyOnce_forCompletableFutureResult() throws Throwable {
+        AsyncSpan ann = mock(AsyncSpan.class);
+        when(ann.value()).thenReturn("async.op");
+        when(ann.propagateContext()).thenReturn(true);
+        when(ann.tags()).thenReturn(new String[]{});
+
+        AtomicInteger invocationCount = new AtomicInteger();
+        when(joinPoint.proceed()).thenAnswer(invocation -> {
+            invocationCount.incrementAndGet();
+            return CompletableFuture.completedFuture("done");
+        });
+
+        Object result = aspect.handleAsyncSpan(joinPoint, ann);
+
+        assertThat(((CompletableFuture<?>) result).get()).isEqualTo("done");
+        assertThat(invocationCount.get()).isEqualTo(1);
+        verify(joinPoint, times(1)).proceed();
+    }
+
+    @Test
+    void handleAsyncSpan_proceedInvokedExactlyOnce_forPlainFutureResult() throws Throwable {
+        AsyncSpan ann = mock(AsyncSpan.class);
+        when(ann.value()).thenReturn("async.op");
+        when(ann.propagateContext()).thenReturn(false);
+        when(ann.tags()).thenReturn(new String[]{});
+
+        AtomicInteger invocationCount = new AtomicInteger();
+        Future<?> future = mock(Future.class);
+        when(joinPoint.proceed()).thenAnswer(invocation -> {
+            invocationCount.incrementAndGet();
+            return future;
+        });
+
+        Object result = aspect.handleAsyncSpan(joinPoint, ann);
+
+        assertThat(result).isSameAs(future);
+        assertThat(invocationCount.get()).isEqualTo(1);
+        verify(joinPoint, times(1)).proceed();
+    }
+
+    @Test
+    void handleAsyncSpan_proceedInvokedExactlyOnce_evenWhenMethodThrows() throws Throwable {
+        AsyncSpan ann = mock(AsyncSpan.class);
+        when(ann.value()).thenReturn("async.op");
+        when(ann.propagateContext()).thenReturn(true);
+        when(ann.tags()).thenReturn(new String[]{});
+
+        AtomicInteger invocationCount = new AtomicInteger();
+        RuntimeException boom = new RuntimeException("boom");
+        when(joinPoint.proceed()).thenAnswer(invocation -> {
+            invocationCount.incrementAndGet();
+            throw boom;
+        });
+
+        assertThatThrownBy(() -> aspect.handleAsyncSpan(joinPoint, ann)).isSameAs(boom);
+
+        assertThat(invocationCount.get()).isEqualTo(1);
+        verify(joinPoint, times(1)).proceed();
+    }
+
+    // ========== @SpanTag parameter support ==========
+
+    @Test
+    void handleNewSpan_tagsSpanTagAnnotatedParametersByNameAndExpression() throws Throwable {
+        Method method = TracingAspectTest.class.getMethod("taggedMethod", String.class, String.class);
+        when(signature.getMethod()).thenReturn(method);
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"user@example.com", "hello"});
+
+        NewSpan ann = mock(NewSpan.class);
+        when(ann.value()).thenReturn("s");
+        when(ann.tags()).thenReturn(new String[]{});
+        when(joinPoint.proceed()).thenReturn("ok");
+
+        aspect.handleNewSpan(joinPoint, ann);
+
+        verify(span).tag("user.email", "user@example.com");
+        // "length()" evaluated against the second parameter's own value ("hello") as SpEL root.
+        verify(span).tag("name.length", "5");
+    }
+
+    @Test
+    void handleNewSpan_parameterWithoutSpanTagIsNotTagged() throws Throwable {
+        // sampleMethod's single "name" parameter has no @SpanTag, so no parameter tag is added.
+        NewSpan ann = mock(NewSpan.class);
+        when(ann.value()).thenReturn("s");
+        when(ann.tags()).thenReturn(new String[]{});
+        when(joinPoint.proceed()).thenReturn("ok");
+
+        aspect.handleNewSpan(joinPoint, ann);
+
+        verify(span, never()).tag("name", "arg-value");
+    }
+
+    @Test
+    void handleNewSpan_spanTagWithNullParameterValueTagsEmptyString() throws Throwable {
+        Method method = TracingAspectTest.class.getMethod("taggedMethod", String.class, String.class);
+        when(signature.getMethod()).thenReturn(method);
+        when(joinPoint.getArgs()).thenReturn(new Object[]{null, "world"});
+
+        NewSpan ann = mock(NewSpan.class);
+        when(ann.value()).thenReturn("s");
+        when(ann.tags()).thenReturn(new String[]{});
+        when(joinPoint.proceed()).thenReturn("ok");
+
+        aspect.handleNewSpan(joinPoint, ann);
+
+        verify(span).tag("user.email", "");
+    }
+
+    @Test
+    void handleNewSpan_spanTagExpressionFailureFallsBackToParameterToString() throws Throwable {
+        Method method = TracingAspectTest.class.getMethod("badExpressionMethod", String.class);
+        when(signature.getMethod()).thenReturn(method);
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"raw-value"});
+
+        NewSpan ann = mock(NewSpan.class);
+        when(ann.value()).thenReturn("s");
+        when(ann.tags()).thenReturn(new String[]{});
+        when(joinPoint.proceed()).thenReturn("ok");
+
+        aspect.handleNewSpan(joinPoint, ann);
+
+        verify(span).tag("bad", "raw-value");
+    }
+
+    @Test
+    void handleContinueSpan_tagsSpanTagAnnotatedParameters() throws Throwable {
+        Method method = TracingAspectTest.class.getMethod("taggedMethod", String.class, String.class);
+        when(signature.getMethod()).thenReturn(method);
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"a@b.com", "world"});
+
+        ContinueSpan ann = mock(ContinueSpan.class);
+        when(ann.tags()).thenReturn(new String[]{});
+        when(ann.startEvent()).thenReturn("");
+        when(ann.endEvent()).thenReturn("");
+        when(joinPoint.proceed()).thenReturn("ok");
+
+        aspect.handleContinueSpan(joinPoint, ann);
+
+        verify(span).tag("user.email", "a@b.com");
+        verify(span).tag("name.length", "5");
     }
 
     // ========== SpEL expression evaluation ==========

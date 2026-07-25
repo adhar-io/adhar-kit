@@ -124,4 +124,73 @@ class GeneratorsTest {
         assertThat(response).contains("getCreatedAt");
         assertThat(response).contains("LocalDateTime");
     }
+
+    // ---- EntityGenerator ----
+
+    @Test
+    void entityGeneratorWithLombokWritesJpaEntity(@TempDir Path out) throws Exception {
+        new EntityGenerator("com.example", "Product", out.toFile(), true, null, log).generate();
+
+        String entity = read(out, "com/example/entity/Product.java");
+        assertThat(entity).contains("class Product");
+        assertThat(entity).contains("@Entity");
+        assertThat(entity).contains("@Table");
+        assertThat(entity).contains("products"); // default pluralized table name
+        assertThat(entity).contains("@Id");
+        assertThat(entity).contains("@GeneratedValue");
+        assertThat(entity).contains("createdAt");
+        assertThat(entity).contains("updatedAt");
+        assertThat(entity).contains("@CreatedDate");
+        assertThat(entity).contains("@LastModifiedDate");
+        assertThat(entity).contains("Getter");
+        assertThat(entity).contains("Setter");
+        // With Lombok there should be no explicit getters
+        assertThat(entity).doesNotContain("public String getName");
+    }
+
+    @Test
+    void entityGeneratorWithoutLombokAddsGettersAndSetters(@TempDir Path out) throws Exception {
+        new EntityGenerator("com.example", "Invoice", out.toFile(), false, null, log).generate();
+
+        String entity = read(out, "com/example/entity/Invoice.java");
+        assertThat(entity).doesNotContain("lombok");
+        assertThat(entity).contains("public Long getId");
+        assertThat(entity).contains("public void setName");
+        assertThat(entity).contains("invoices");
+    }
+
+    @Test
+    void entityGeneratorUsesExplicitTableName(@TempDir Path out) throws Exception {
+        new EntityGenerator("com.example", "Order", out.toFile(), true, "customer_orders", log).generate();
+
+        String entity = read(out, "com/example/entity/Order.java");
+        assertThat(entity).contains("customer_orders");
+    }
+
+    @Test
+    void entityGeneratorDefaultTableNamePluralizesCamelCaseName(@TempDir Path out) throws Exception {
+        new EntityGenerator("com.example", "OrderItem", out.toFile(), true, null, log).generate();
+
+        String entity = read(out, "com/example/entity/OrderItem.java");
+        assertThat(entity).contains("order_items");
+    }
+
+    // ---- IntegrationTestGenerator ----
+
+    @Test
+    void integrationTestGeneratorWritesServiceAndControllerTests(@TempDir Path out) throws Exception {
+        new IntegrationTestGenerator("com.example", "User", out.toFile(), log).generate();
+
+        String serviceTest = read(out, "com/example/service/UserServiceIntegrationTest.java");
+        assertThat(serviceTest).contains("class UserServiceIntegrationTest");
+        assertThat(serviceTest).contains("@SpringBootTest");
+        assertThat(serviceTest).contains("@Test");
+        assertThat(serviceTest).contains("UserService");
+
+        String controllerTest = read(out, "com/example/controller/UserControllerIntegrationTest.java");
+        assertThat(controllerTest).contains("class UserControllerIntegrationTest");
+        assertThat(controllerTest).contains("@SpringBootTest");
+        assertThat(controllerTest).contains("MockMvc");
+        assertThat(controllerTest).contains("/api/v1/users");
+    }
 }

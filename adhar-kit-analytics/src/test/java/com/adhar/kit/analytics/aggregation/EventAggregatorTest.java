@@ -87,7 +87,6 @@ class EventAggregatorTest {
     @DisplayName("getHourlyDistribution buckets by hour")
     void getHourlyDistribution() {
         Map<Integer, Long> dist = aggregator.getHourlyDistribution(events);
-        assertEquals(3, dist.get(9) + dist.get(10) >= 0 ? dist.get(9) : 0); // ensure non-null
         assertEquals(2L, dist.get(9));
         assertEquals(2L, dist.get(10));
         assertEquals(1L, dist.get(11));

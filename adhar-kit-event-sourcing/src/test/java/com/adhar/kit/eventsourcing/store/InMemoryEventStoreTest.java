@@ -1,6 +1,8 @@
 package com.adhar.kit.eventsourcing.store;
 
 import com.adhar.kit.eventsourcing.core.DomainEvent;
+import com.adhar.kit.eventsourcing.upcast.EventUpcaster;
+import com.adhar.kit.eventsourcing.upcast.UpcasterChain;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -139,5 +141,56 @@ class InMemoryEventStoreTest {
 
         assertThat(eventStore.getEvents("order-1")).hasSize(1);
         assertThat(eventStore.getEvents("order-2")).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("getAllEvents returns every event across all aggregates in persistence order")
+    void getAllEventsReturnsEventsInPersistenceOrder() {
+        eventStore.saveEvents("order-1", List.of(createEvent("order-1", 1, "OrderCreated")), 0);
+        eventStore.saveEvents("order-2", List.of(createEvent("order-2", 1, "OrderCreated")), 0);
+        eventStore.saveEvents("order-1", List.of(createEvent("order-1", 2, "OrderUpdated")), 1);
+
+        List<DomainEvent> all = eventStore.getAllEvents();
+
+        assertThat(all).hasSize(3);
+        assertThat(all.get(0).aggregateId()).isEqualTo("order-1");
+        assertThat(all.get(0).eventType()).isEqualTo("OrderCreated");
+        assertThat(all.get(1).aggregateId()).isEqualTo("order-2");
+        assertThat(all.get(2).aggregateId()).isEqualTo("order-1");
+        assertThat(all.get(2).eventType()).isEqualTo("OrderUpdated");
+    }
+
+    @Test
+    @DisplayName("getAllEvents returns empty list when nothing has been stored")
+    void getAllEventsReturnsEmptyWhenNothingStored() {
+        assertThat(eventStore.getAllEvents()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("events read back are migrated through the configured upcaster chain")
+    void eventsAreUpcastOnRead() {
+        EventUpcaster upcaster = new EventUpcaster() {
+            @Override
+            public boolean supports(String eventType, int version) {
+                return "OrderCreatedV1".equals(eventType);
+            }
+
+            @Override
+            public DomainEvent upcast(DomainEvent event) {
+                return new DomainEvent(event.eventId(), event.aggregateId(), event.aggregateType(),
+                        event.version(), "OrderCreatedV2", "{\"migrated\":true}", event.occurredAt());
+            }
+        };
+        InMemoryEventStore upcastingStore = new InMemoryEventStore(new UpcasterChain(List.of(upcaster)));
+        upcastingStore.saveEvents("order-1", List.of(createEvent("order-1", 1, "OrderCreatedV1")), 0);
+
+        DomainEvent event = upcastingStore.getEvents("order-1").getFirst();
+        DomainEvent viaAfterVersion = upcastingStore.getEventsAfterVersion("order-1", 0).getFirst();
+        DomainEvent viaAll = upcastingStore.getAllEvents().getFirst();
+
+        assertThat(event.eventType()).isEqualTo("OrderCreatedV2");
+        assertThat(event.payload()).isEqualTo("{\"migrated\":true}");
+        assertThat(viaAfterVersion.eventType()).isEqualTo("OrderCreatedV2");
+        assertThat(viaAll.eventType()).isEqualTo("OrderCreatedV2");
     }
 }

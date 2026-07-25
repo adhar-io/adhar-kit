@@ -42,6 +42,11 @@ public class AdharCacheProperties {
     private boolean allowNullValues = true;
 
     /**
+     * Configuration for tenant-based cache key partitioning.
+     */
+    private final PartitioningProperties partitioning = new PartitioningProperties();
+
+    /**
      * Configuration for Kafka-based distributed caching.
      */
     private final KafkaProperties kafka = new KafkaProperties();
@@ -50,6 +55,27 @@ public class AdharCacheProperties {
      * Configuration for Redis-based distributed caching.
      */
     private final RedisProperties redis = new RedisProperties();
+
+    /**
+     * Properties for tenant-based cache key partitioning.
+     *
+     * <p>When enabled, every key produced by the
+     * {@code CacheKeyGenerator} is prefixed with the partition resolved by the
+     * configured {@code KeyPartitionResolver} (by default the thread-local
+     * tenant from {@code TenantContextHolder}).</p>
+     */
+    @Data
+    public static class PartitioningProperties {
+        /**
+         * Whether to globally partition cache keys by the resolved partition.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Separator between the partition prefix and the cache key.
+         */
+        private String separator = "::";
+    }
 
     /**
      * Properties for Kafka-based distributed caching.

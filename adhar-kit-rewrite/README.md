@@ -5,6 +5,8 @@
 ## Features
 
 - **RewriteFacade** - unified access via `adhar.getRewrite()`
+- **In-process execution** - `InProcessRewriteRunner` runs recipes directly against in-memory
+  sources via the OpenRewrite API and returns real per-file diffs, no `mvn rewrite:run` required
 - **26 Pre-built Recipe Sets** across 10 categories
 - **Java Migrations** - Java 17, 21, 25 upgrades with language feature adoption
 - **Spring Boot Migrations** - Spring Boot 3.x and 4.x with starter renames and package moves
@@ -48,6 +50,46 @@ public class ModernizationService {
         // Full Adhar Kit modernization
         adhar.getRewrite().apply("adhar-full-modernization", Path.of("."));
     }
+}
+```
+
+## Running Recipes In-Process
+
+`dryRun`/`apply` generate a `rewrite.yml` and an `mvn rewrite:run` command for use with the
+OpenRewrite Maven plugin. For recipes that are real `org.openrewrite.Recipe` classes with a
+no-arg constructor (all of `com.adhar.kit.rewrite.recipe.adhar.*`, e.g. `UseConvenienceShortcuts`
+and `AdoptCloudEvents`), you can instead run them immediately, in-process, against in-memory
+sources and get back a real, human-readable diff:
+
+```java
+List<InProcessRewriteRunner.SourceInput> sources = List.of(
+        new InProcessRewriteRunner.SourceInput("Demo.java", """
+                class Demo {
+                    void run(AdharKitFacade adhar) {
+                        adhar.getMetrics().increment("requests");
+                    }
+                }
+                """)
+);
+
+// Via the facade, by catalog key or explicit recipe class names:
+RewriteImpactReport report = adhar.getRewrite().runInProcess("adhar-convenience-api", sources);
+
+// Or directly:
+InProcessRewriteRunner.RewriteExecution execution =
+        InProcessRewriteRunner.run(new UseConvenienceShortcuts(), sources);
+RewriteImpactReport report2 = RewriteImpactReport.of(execution);
+
+report.changedFileCount();  // 1
+System.out.println(report.toMarkdown()); // or report.toJson()
+```
+
+Validate that every recipe FQN referenced by the catalog actually resolves on the classpath:
+
+```java
+RecipeCatalogValidator.ValidationReport validation = adhar.getRewrite().validateCatalog();
+if (!validation.isValid()) {
+    log.warn(validation.toSummary());
 }
 ```
 
@@ -114,3 +156,5 @@ Run: `mvn rewrite:run`
 | `listRecipeSetKeys()` | List recipe set keys |
 | `getRecipeSet(key)` | Get details for a specific recipe set |
 | `isRecipeAvailable(key)` | Check if recipe classes are on classpath |
+| `runInProcess(key, sources)` / `runInProcess(recipeNames, sources)` | Run recipe(s) in-process against in-memory sources; returns a `RewriteImpactReport` with real diffs |
+| `validateCatalog()` | Validate that every catalog recipe FQN resolves on the classpath |

@@ -1,8 +1,17 @@
 package com.adhar.kit.rewrite.recipe.adhar;
 
+import org.openrewrite.ExecutionContext;
+import org.openrewrite.Recipe;
+import org.openrewrite.TreeVisitor;
+import org.openrewrite.java.JavaIsoVisitor;
+import org.openrewrite.java.tree.Expression;
+import org.openrewrite.java.tree.J;
+
+import java.util.List;
+import java.util.Map;
+
 /**
- * Generates OpenRewrite YAML recipe definitions for migrating verbose Adhar Kit
- * facade API calls to concise convenience shortcuts.
+ * Rewrites verbose Adhar Kit facade chaining patterns to concise convenience shortcuts.
  *
  * <p>Transformations performed:</p>
  * <table>
@@ -21,91 +30,96 @@ package com.adhar.kit.rewrite.recipe.adhar;
  *   <tr><td>{@code adhar.getCore()}</td><td>{@code adhar.getUtils()}</td></tr>
  * </table>
  *
- * <p>The generated YAML uses the {@code org.openrewrite.java.ChangeMethodName} recipe
- * for each transformation.</p>
+ * <p>This is a real, executable {@link org.openrewrite.Recipe}: the rewrite is performed by a
+ * {@link JavaIsoVisitor} that structurally recognizes the two-call chain {@code x.accessor().method(..)}
+ * and flattens it to {@code x.shortcut(..)}, preserving the original argument list. The match is
+ * purely structural (method/accessor simple names) rather than type-attributed, so it works even
+ * when the Adhar Kit facade types are not present on the parser's classpath.</p>
  *
  * @author Adhar Platform Team
  * @since 1.0.0
  */
-public final class UseConvenienceShortcuts {
-
-    private UseConvenienceShortcuts() {}
+public class UseConvenienceShortcuts extends Recipe {
 
     /**
-     * Returns the YAML recipe definition for migrating verbose Adhar Kit API
-     * calls to convenience shortcuts.
-     *
-     * @return YAML string defining the composite convenience API recipe
+     * Two-call chains of the form {@code accessor().innerMethod(..)} that collapse to a single
+     * {@code shortcutName(..)} call on the original receiver, with arguments left untouched.
      */
-    public static String getYamlDefinition() {
-        return """
-                ---
-                type: specs.openrewrite.org/v1beta/recipe
-                name: com.adhar.kit.rewrite.recipe.adhar.UseConvenienceShortcuts
-                displayName: Adopt Adhar Kit Convenience API
-                description: >-
-                  Migrates verbose Adhar Kit facade chaining patterns to concise convenience
-                  shortcuts. For example, adhar.getMetrics().increment(x) becomes adhar.count(x).
-                recipeList:
-                  # ---------------------------------------------------------------
-                  # Metrics shortcuts
-                  # ---------------------------------------------------------------
-                  - org.openrewrite.java.search.FindMethodCalls:
-                      methodPattern: "*.getMetrics().increment(..)"
-                      comment: "Replace adhar.getMetrics().increment(x) with adhar.count(x)"
+    private static final List<ChainedShortcut> CHAINED_SHORTCUTS = List.of(
+            new ChainedShortcut("getMetrics", "increment", "count"),
+            new ChainedShortcut("getCircuitBreaker", "execute", "resilient"),
+            new ChainedShortcut("getCircuitBreaker", "executeWithFallback", "resilient"),
+            new ChainedShortcut("getPersistence", "save", "save"),
+            new ChainedShortcut("getPersistence", "findById", "findById"),
+            new ChainedShortcut("getPersistence", "executeInTransaction", "transactional"),
+            new ChainedShortcut("getMessaging", "publish", "publish"),
+            new ChainedShortcut("getSecurity", "hasPermission", "hasPermission"),
+            new ChainedShortcut("getSecurity", "hasRole", "hasRole"),
+            new ChainedShortcut("getSecurity", "getCurrentUserId", "currentUserId")
+    );
 
-                  # ---------------------------------------------------------------
-                  # Resilience shortcuts
-                  # ---------------------------------------------------------------
-                  - org.openrewrite.java.search.FindMethodCalls:
-                      methodPattern: "*.getCircuitBreaker().execute(..)"
-                      comment: "Replace adhar.getCircuitBreaker().execute(x, y) with adhar.resilient(x, y)"
-                  - org.openrewrite.java.search.FindMethodCalls:
-                      methodPattern: "*.getCircuitBreaker().executeWithFallback(..)"
-                      comment: "Replace adhar.getCircuitBreaker().executeWithFallback(x, y, z) with adhar.resilient(x, y, z)"
+    /** Direct no-arg accessor renames, e.g. {@code adhar.getDocs()} -> {@code adhar.getApiDocs()}. */
+    private static final Map<String, String> ACCESSOR_RENAMES = Map.of(
+            "getDocs", "getApiDocs",
+            "getCore", "getUtils"
+    );
 
-                  # ---------------------------------------------------------------
-                  # Persistence shortcuts
-                  # ---------------------------------------------------------------
-                  - org.openrewrite.java.search.FindMethodCalls:
-                      methodPattern: "*.getPersistence().save(..)"
-                      comment: "Replace adhar.getPersistence().save(x) with adhar.save(x)"
-                  - org.openrewrite.java.search.FindMethodCalls:
-                      methodPattern: "*.getPersistence().findById(..)"
-                      comment: "Replace adhar.getPersistence().findById(x, y) with adhar.findById(x, y)"
-                  - org.openrewrite.java.search.FindMethodCalls:
-                      methodPattern: "*.getPersistence().executeInTransaction(..)"
-                      comment: "Replace adhar.getPersistence().executeInTransaction(x) with adhar.transactional(x)"
+    @Override
+    public String getDisplayName() {
+        return "Adopt Adhar Kit Convenience API";
+    }
 
-                  # ---------------------------------------------------------------
-                  # Messaging shortcuts
-                  # ---------------------------------------------------------------
-                  - org.openrewrite.java.search.FindMethodCalls:
-                      methodPattern: "*.getMessaging().publish(..)"
-                      comment: "Replace adhar.getMessaging().publish(x, y) with adhar.publish(x, y)"
+    @Override
+    public String getDescription() {
+        return "Migrates verbose Adhar Kit facade chaining patterns to concise convenience " +
+                "shortcuts. For example, `adhar.getMetrics().increment(x)` becomes `adhar.count(x)`.";
+    }
 
-                  # ---------------------------------------------------------------
-                  # Security shortcuts
-                  # ---------------------------------------------------------------
-                  - org.openrewrite.java.search.FindMethodCalls:
-                      methodPattern: "*.getSecurity().hasPermission(..)"
-                      comment: "Replace adhar.getSecurity().hasPermission(x) with adhar.hasPermission(x)"
-                  - org.openrewrite.java.search.FindMethodCalls:
-                      methodPattern: "*.getSecurity().hasRole(..)"
-                      comment: "Replace adhar.getSecurity().hasRole(x) with adhar.hasRole(x)"
-                  - org.openrewrite.java.search.FindMethodCalls:
-                      methodPattern: "*.getSecurity().getCurrentUserId()"
-                      comment: "Replace adhar.getSecurity().getCurrentUserId() with adhar.currentUserId()"
+    @Override
+    public TreeVisitor<?, ExecutionContext> getVisitor() {
+        return new ConvenienceShortcutVisitor();
+    }
 
-                  # ---------------------------------------------------------------
-                  # Accessor renames
-                  # ---------------------------------------------------------------
-                  - org.openrewrite.java.ChangeMethodName:
-                      methodPattern: "com.adhar.kit.starter.AdharKitFacade getDocs()"
-                      newMethodName: getApiDocs
-                  - org.openrewrite.java.ChangeMethodName:
-                      methodPattern: "com.adhar.kit.starter.AdharKitFacade getCore()"
-                      newMethodName: getUtils
-                """;
+    private static boolean isNoArgInvocation(J.MethodInvocation invocation) {
+        List<Expression> args = invocation.getArguments();
+        return args.isEmpty() || (args.size() == 1 && args.get(0) instanceof J.Empty);
+    }
+
+    /**
+     * Structurally matches and flattens the two-call convenience-shortcut chains. No type
+     * attribution is required: matching is done purely on method/accessor simple names, which
+     * keeps this recipe usable even without the Adhar Kit starter on the parser's classpath.
+     */
+    private static final class ConvenienceShortcutVisitor extends JavaIsoVisitor<ExecutionContext> {
+
+        @Override
+        public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
+            J.MethodInvocation mi = super.visitMethodInvocation(method, ctx);
+
+            String directRename = ACCESSOR_RENAMES.get(mi.getSimpleName());
+            if (directRename != null && isNoArgInvocation(mi)) {
+                return renameTo(mi, directRename);
+            }
+
+            if (mi.getSelect() instanceof J.MethodInvocation inner && isNoArgInvocation(inner)) {
+                for (ChainedShortcut shortcut : CHAINED_SHORTCUTS) {
+                    if (shortcut.accessor().equals(inner.getSimpleName())
+                            && shortcut.innerMethod().equals(mi.getSimpleName())) {
+                        return mi.withSelect(inner.getSelect())
+                                .withName(mi.getName().withSimpleName(shortcut.shortcutName()))
+                                .withMethodType(null);
+                    }
+                }
+            }
+
+            return mi;
+        }
+
+        private J.MethodInvocation renameTo(J.MethodInvocation mi, String newName) {
+            return mi.withName(mi.getName().withSimpleName(newName)).withMethodType(null);
+        }
+    }
+
+    private record ChainedShortcut(String accessor, String innerMethod, String shortcutName) {
     }
 }

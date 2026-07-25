@@ -2,8 +2,12 @@ package com.adhar.kit.starter.config;
 
 import com.adhar.kit.commons.framework.Framework;
 import com.adhar.kit.commons.framework.FrameworkDetector;
+import com.adhar.kit.starter.AdharKitVersion;
+import com.adhar.kit.starter.AdharModuleAccess;
+import com.adhar.kit.starter.actuator.AdharKitEndpoint;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -61,10 +65,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @AutoConfiguration
 @EnableConfigurationProperties(AdharKitProperties.class)
 @ConditionalOnProperty(prefix = "adhar.kit", name = "enabled", havingValue = "true", matchIfMissing = true)
-@Import(AdharKitAutoConfiguration.ModuleOrchestrationConfiguration.class)
+@Import({
+        AdharKitAutoConfiguration.ModuleOrchestrationConfiguration.class,
+        AdharKitAutoConfiguration.AdharKitEndpointConfiguration.class
+})
 public class AdharKitAutoConfiguration {
 
-    private static final String VERSION = "1.0.0-SNAPSHOT";
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
             .withZone(ZoneId.systemDefault());
 
@@ -97,7 +103,7 @@ public class AdharKitAutoConfiguration {
         log.info("                       ADHAR KIT - Enterprise Framework                        ");
         log.info("===============================================================================");
         log.info("  Application   : {}", appName);
-        log.info("  Version       : {}", VERSION);
+        log.info("  Version       : {}", AdharKitVersion.getVersion());
         log.info("  Runtime       : {}", runtime);
         log.info("  Profile       : {}", properties.getProfile());
         log.info("  Spring Profile: {}", activeProfiles);
@@ -178,14 +184,84 @@ public class AdharKitAutoConfiguration {
     static class ModuleOrchestrationConfiguration {
 
         /**
+         * Creates the {@link AdharModuleAccess} - the single source of truth for
+         * module enablement, consulted by both {@link AdharKitModuleRegistry} and,
+         * via {@code SpringAdharFacadeConfiguration}, {@code AdharFacade}.
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        public AdharModuleAccess adharModuleAccess(AdharKitProperties properties) {
+            return buildModuleAccess(properties.getModules());
+        }
+
+        /**
          * Creates the AdharKitModuleRegistry for runtime module introspection.
          */
         @Bean
         @ConditionalOnMissingBean
         public AdharKitModuleRegistry adharKitModuleRegistry(
-                AdharKitProperties properties,
+                AdharModuleAccess moduleAccess,
                 ApplicationContext applicationContext) {
-            return new AdharKitModuleRegistry(properties, applicationContext);
+            return new AdharKitModuleRegistry(moduleAccess, applicationContext);
+        }
+    }
+
+    /**
+     * Maps {@link AdharKitProperties.Modules} onto the module-id vocabulary
+     * shared with {@link AdharFacade}'s accessors (see its {@code MOD_*}
+     * constants) and {@link AdharKitModuleRegistry}.
+     */
+    private static AdharModuleAccess buildModuleAccess(AdharKitProperties.Modules m) {
+        Map<String, Boolean> toggles = new LinkedHashMap<>();
+        toggles.put("logging", m.isLogging());
+        toggles.put("metrics", m.isMetrics());
+        toggles.put("tracing", m.isTracing());
+        toggles.put("resilience", m.isResilience());
+        toggles.put("security", m.isSecurity());
+        toggles.put("persistence", m.isPersistence());
+        toggles.put("cache", m.isCache());
+        toggles.put("messaging", m.isMessaging());
+        toggles.put("config", m.isConfig());
+        toggles.put("health", m.isHealth());
+        toggles.put("docs", m.isDocs());
+        toggles.put("ai", m.isAi());
+        toggles.put("analytics", m.isAnalytics());
+        toggles.put("kubernetes", m.isKubernetes());
+        toggles.put("dapr", m.isDapr());
+        toggles.put("grpc", m.isGrpc());
+        toggles.put("graphql", m.isGraphql());
+        toggles.put("batch", m.isBatch());
+        toggles.put("notification", m.isNotification());
+        toggles.put("event-sourcing", m.isEventSourcing());
+        toggles.put("perf-profiler", m.isPerfProfiler());
+        toggles.put("rewrite", m.isRewrite());
+        return AdharModuleAccess.of(toggles);
+    }
+
+    /**
+     * Actuator wiring for {@link AdharKitEndpoint}. Only active when Spring Boot
+     * Actuator is on the classpath, keeping it an optional dependency.
+     *
+     * <p>Note: intentionally does not use {@code @ConditionalOnBean(AdharKitModuleRegistry.class)}
+     * here - that registry is registered by a sibling nested configuration
+     * ({@link ModuleOrchestrationConfiguration}) imported in the very same
+     * batch, and {@code @ConditionalOnBean} is not guaranteed to see bean
+     * definitions from configuration classes processed in the same round.
+     * The registry is instead taken as a plain constructor dependency, which
+     * Spring resolves normally during bean instantiation. Since this whole
+     * class is only imported alongside {@code ModuleOrchestrationConfiguration}
+     * (both gated by {@code AdharKitAutoConfiguration}'s own
+     * {@code adhar.kit.enabled} condition), the registry is always available
+     * when this configuration is active.</p>
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "org.springframework.boot.actuate.endpoint.annotation.Endpoint")
+    static class AdharKitEndpointConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public AdharKitEndpoint adharKitEndpoint(AdharKitModuleRegistry registry) {
+            return new AdharKitEndpoint(registry);
         }
     }
 
@@ -196,70 +272,69 @@ public class AdharKitAutoConfiguration {
     public static class AdharKitModuleRegistry {
 
         private final Map<String, ModuleInfo> modules = new ConcurrentHashMap<>();
-        private final AdharKitProperties properties;
+        private final AdharModuleAccess moduleAccess;
         private final ApplicationContext applicationContext;
 
-        public AdharKitModuleRegistry(AdharKitProperties properties,
+        public AdharKitModuleRegistry(AdharModuleAccess moduleAccess,
                                       ApplicationContext applicationContext) {
-            this.properties = properties;
+            this.moduleAccess = moduleAccess;
             this.applicationContext = applicationContext;
             initializeModuleRegistry();
         }
 
         private void initializeModuleRegistry() {
-            var moduleConfig = properties.getModules();
-
-            // Register core modules
-            registerModule("logging", "Logging", moduleConfig.isLogging(),
+            // Register core modules - "enabled" is always sourced from the shared
+            // AdharModuleAccess so this registry and AdharFacade never disagree.
+            registerModule("logging", "Logging",
                     "Structured logging with correlation IDs");
-            registerModule("metrics", "Metrics", moduleConfig.isMetrics(),
+            registerModule("metrics", "Metrics",
                     "Micrometer metrics collection and export");
-            registerModule("tracing", "Tracing", moduleConfig.isTracing(),
+            registerModule("tracing", "Tracing",
                     "Distributed tracing with correlation propagation");
-            registerModule("resilience", "Resilience", moduleConfig.isResilience(),
+            registerModule("resilience", "Resilience",
                     "Circuit breaker, retry, rate limiter, bulkhead patterns");
-            registerModule("security", "Security", moduleConfig.isSecurity(),
+            registerModule("security", "Security",
                     "Authentication, authorization, and security utilities");
-            registerModule("persistence", "Persistence", moduleConfig.isPersistence(),
+            registerModule("persistence", "Persistence",
                     "JPA with auditing and multi-tenancy support");
-            registerModule("cache", "Cache", moduleConfig.isCache(),
+            registerModule("cache", "Cache",
                     "Distributed caching with Kafka synchronization");
-            registerModule("messaging", "Messaging", moduleConfig.isMessaging(),
+            registerModule("messaging", "Messaging",
                     "Async messaging with Kafka and RabbitMQ");
-            registerModule("config", "Configuration", moduleConfig.isConfig(),
+            registerModule("config", "Configuration",
                     "Dynamic configuration with refresh and encryption");
-            registerModule("health", "Health", moduleConfig.isHealth(),
+            registerModule("health", "Health",
                     "Health indicators for all services");
-            registerModule("docs", "API Docs", moduleConfig.isDocs(),
+            registerModule("docs", "API Docs",
                     "OpenAPI documentation generation");
-            registerModule("ai", "AI/ML", moduleConfig.isAi(),
+            registerModule("ai", "AI/ML",
                     "Multi-provider AI integration");
-            registerModule("analytics", "Analytics", moduleConfig.isAnalytics(),
+            registerModule("analytics", "Analytics",
                     "Product analytics and feature flags");
-            registerModule("kubernetes", "Kubernetes", moduleConfig.isKubernetes(),
+            registerModule("kubernetes", "Kubernetes",
                     "Kubernetes-native deployment support");
-            registerModule("dapr", "Dapr", moduleConfig.isDapr(),
+            registerModule("dapr", "Dapr",
                     "Dapr sidecar integration");
-            registerModule("grpc", "gRPC", moduleConfig.isGrpc(),
+            registerModule("grpc", "gRPC",
                     "gRPC server and client support");
-            registerModule("graphql", "GraphQL", moduleConfig.isGraphql(),
+            registerModule("graphql", "GraphQL",
                     "GraphQL API support with query complexity limits");
-            registerModule("batch", "Batch", moduleConfig.isBatch(),
+            registerModule("batch", "Batch",
                     "Spring Batch integration for batch processing");
-            registerModule("notification", "Notification", moduleConfig.isNotification(),
+            registerModule("notification", "Notification",
                     "Multi-channel notifications (email, webhook, in-app)");
-            registerModule("event-sourcing", "Event Sourcing", moduleConfig.isEventSourcing(),
+            registerModule("event-sourcing", "Event Sourcing",
                     "Event sourcing and CQRS patterns");
-            registerModule("perf-profiler", "Perf Profiler", moduleConfig.isPerfProfiler(),
+            registerModule("perf-profiler", "Perf Profiler",
                     "Method-level performance profiling and bottleneck detection");
-            registerModule("rewrite", "Rewrite", moduleConfig.isRewrite(),
+            registerModule("rewrite", "Rewrite",
                     "Automated codebase modernization with OpenRewrite recipes");
 
             log.debug("Module registry initialized with {} modules", modules.size());
         }
 
-        private void registerModule(String id, String name, boolean enabled, String description) {
-            modules.put(id, new ModuleInfo(id, name, enabled, description));
+        private void registerModule(String id, String name, String description) {
+            modules.put(id, new ModuleInfo(id, name, moduleAccess.isEnabled(id), description));
         }
 
         /**
@@ -288,11 +363,12 @@ public class AdharKitAutoConfiguration {
         }
 
         /**
-         * Checks if a module is enabled.
+         * Checks if a module is enabled. Delegates to the same
+         * {@link AdharModuleAccess} that gates {@code AdharFacade} sub-facade
+         * access, so the two never disagree.
          */
         public boolean isModuleEnabled(String moduleId) {
-            ModuleInfo info = modules.get(moduleId);
-            return info != null && info.enabled();
+            return moduleAccess.isEnabled(moduleId);
         }
 
         /**

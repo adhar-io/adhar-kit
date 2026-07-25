@@ -1,1 +1,2 @@
 com.adhar.kit.messaging.config.CloudEventAutoConfiguration
+com.adhar.kit.messaging.config.MessagingAutoConfiguration

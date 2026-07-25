@@ -47,7 +47,6 @@ public class AdharKitProperties {
     public static class Modules {
         private boolean persistence = true;
         private boolean cache = true;
-        private boolean caching = true;
         private boolean messaging = true;
         private boolean security = true;
         private boolean resilience = true;

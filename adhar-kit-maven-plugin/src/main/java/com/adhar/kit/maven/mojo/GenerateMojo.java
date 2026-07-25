@@ -4,6 +4,8 @@ import com.adhar.kit.maven.generator.ServiceGenerator;
 import com.adhar.kit.maven.generator.ControllerGenerator;
 import com.adhar.kit.maven.generator.RepositoryGenerator;
 import com.adhar.kit.maven.generator.DtoGenerator;
+import com.adhar.kit.maven.generator.EntityGenerator;
+import com.adhar.kit.maven.generator.IntegrationTestGenerator;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
@@ -91,6 +93,14 @@ public class GenerateMojo extends AbstractMojo {
     @Parameter(property = "generate.tableName")
     private String tableName;
 
+    /**
+     * Output directory for generated test sources (used when {@code generate.withTests}
+     * is enabled, e.g. for the {@code all} generation type).
+     */
+    @Parameter(property = "generate.testOutputDir",
+            defaultValue = "${project.build.directory}/generated-test-sources/adhar")
+    private File testOutputDirectory;
+
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
         getLog().info("====================================================");
@@ -146,7 +156,10 @@ public class GenerateMojo extends AbstractMojo {
 
     private void generateEntity() throws Exception {
         getLog().info("Generating entity: " + name);
-        // Entity generation logic
+        EntityGenerator generator = new EntityGenerator(
+                basePackage, name, outputDirectory, useLombok, tableName, getLog()
+        );
+        generator.generate();
     }
 
     private void generateService() throws Exception {
@@ -191,7 +204,14 @@ public class GenerateMojo extends AbstractMojo {
 
         if (generateTests) {
             getLog().info("Generating tests...");
-            // Test generation logic
+            if (!testOutputDirectory.exists()) {
+                testOutputDirectory.mkdirs();
+            }
+            IntegrationTestGenerator testGenerator = new IntegrationTestGenerator(
+                    basePackage, name, testOutputDirectory, getLog()
+            );
+            testGenerator.generate();
+            project.addTestCompileSourceRoot(testOutputDirectory.getAbsolutePath());
         }
     }
 }

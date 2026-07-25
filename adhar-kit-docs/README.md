@@ -632,6 +632,14 @@ public class OrderRequest {
 
 ### Custom OpenAPI Customizer
 
+`AdharOpenApiCustomizer.builder()` only applies the features you explicitly opt into.
+`addCommonHeaders()` adds `X-Correlation-ID`/`X-Request-ID` request headers to every
+operation, `addCommonResponses()` adds standard 400/401/403/404/500 error responses
+(reusing a shared error schema), and `addExamples()` attaches representative example
+payloads to request bodies and response content that don't already declare one
+(including the error responses added above). A plain `new AdharOpenApiCustomizer()`
+keeps the historical default of headers + responses (no examples).
+
 ```java
 @Bean
 public OpenApiCustomizer customOpenApiCustomizer() {
@@ -640,6 +648,53 @@ public OpenApiCustomizer customOpenApiCustomizer() {
         .addCommonResponses()
         .addExamples()
         .build();
+}
+```
+
+### RFC 9457 Problem Details (`application/problem+json`)
+
+`ProblemDetailCustomizer` documents error responses using the RFC 9457
+"Problem Details for HTTP APIs" shape (`type`, `title`, `status`, `detail`,
+`instance`) as an alternative/complement to the `ApiErrorResponse`-based schema above.
+
+```java
+@Bean
+public OpenApiCustomizer problemDetailCustomizer() {
+    ProblemDetailCustomizer customizer = new ProblemDetailCustomizer();
+    return customizer::customize;
+}
+```
+
+### Exporting a Static Spec (`openapi.json` / `openapi.yaml`)
+
+`OpenApiSpecExporter` writes the generated `OpenAPI` model (or a raw spec string) to
+`openapi.json`/`openapi.yaml` — handy for CI pipelines, contract testing, or client
+generation without a running server. It defaults to `target/` if no directory is given.
+
+```java
+OpenApiSpecExporter exporter = new OpenApiSpecExporter();
+OpenApiSpecExporter.ExportResult result = exporter.exportAll(openApi, Path.of("target", "openapi"));
+// result.jsonPath(), result.yamlPath()
+
+// Or, from the facade using its currently configured/live spec:
+ApiDocsFacade.getInstance().exportOpenApiSpec(Path.of("target", "openapi"));
+```
+
+### API Group → SpringDoc Grouped Specs
+
+`GroupedApiCustomizer.buildGroupedOpenApis(...)` turns `@ApiGroup`-annotated
+controllers into SpringDoc `GroupedOpenApi` definitions — one per distinct group
+name, each producing its own `/v3/api-docs/{group}` document and Swagger UI selector
+entry — while still applying the group's `Tag` (name/description/priority) to the
+grouped spec, so existing tag-based grouping keeps working.
+
+```java
+@Bean
+public List<GroupedOpenApi> groupedOpenApis() {
+    return GroupedApiCustomizer.buildGroupedOpenApis(List.of(
+        OrderController.class,
+        PaymentController.class
+    ));
 }
 ```
 

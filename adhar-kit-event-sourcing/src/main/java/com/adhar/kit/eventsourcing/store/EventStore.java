@@ -43,4 +43,19 @@ public interface EventStore {
      * @return ordered list of domain events after the given version
      */
     List<DomainEvent> getEventsAfterVersion(String aggregateId, int version);
+
+    /**
+     * Retrieves every event stored across all aggregates, in the order they were persisted.
+     *
+     * <p>This is primarily used by {@link com.adhar.kit.eventsourcing.projection.ProjectionManager}
+     * to rebuild projections from scratch. The default implementation is unsupported;
+     * implementations that want to support projection rebuilding must override it.</p>
+     *
+     * @return every stored domain event, in persistence order
+     * @throws UnsupportedOperationException if this store does not support full replay
+     */
+    default List<DomainEvent> getAllEvents() {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support retrieving all events");
+    }
 }

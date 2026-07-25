@@ -1,6 +1,7 @@
 package com.adhar.kit.test;
 
 import com.adhar.kit.test.api.TestContainerService;
+import com.adhar.kit.test.container.TestContainerRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.kafka.ConfluentKafkaContainer;
@@ -31,6 +32,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * // Cleanup
  * containers.stopAll();
  * }</pre>
+ *
+ * <p>Every container started through this facade is also registered with the shared
+ * {@link TestContainerRegistry}, so facade-managed containers and containers started through
+ * the {@code base.*IntegrationTest} classes share one lifecycle bookkeeping mechanism.</p>
  *
  * @author Adhar Platform Team
  * @since 1.1.0
@@ -81,6 +86,7 @@ public class TestContainerFacade implements TestContainerService {
 
         postgresContainer.start();
         containers.put("postgres", postgresContainer);
+        TestContainerRegistry.getInstance().register("postgres", postgresContainer);
 
         String jdbcUrl = postgresContainer.getJdbcUrl();
         log.info("PostgreSQL started at {}", jdbcUrl);
@@ -108,6 +114,7 @@ public class TestContainerFacade implements TestContainerService {
         mongoContainer = new MongoDBContainer(DockerImageName.parse("mongo:" + version));
         mongoContainer.start();
         containers.put("mongo", mongoContainer);
+        TestContainerRegistry.getInstance().register("mongo", mongoContainer);
 
         String connectionString = mongoContainer.getReplicaSetUrl();
         log.info("MongoDB started at {}", connectionString);
@@ -137,6 +144,7 @@ public class TestContainerFacade implements TestContainerService {
 
         redisContainer.start();
         containers.put("redis", redisContainer);
+        TestContainerRegistry.getInstance().register("redis", redisContainer);
 
         String url = getRedisUrl();
         log.info("Redis started at {}", url);
@@ -160,6 +168,7 @@ public class TestContainerFacade implements TestContainerService {
         kafkaContainer = new ConfluentKafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
         kafkaContainer.start();
         containers.put("kafka", kafkaContainer);
+        TestContainerRegistry.getInstance().register("kafka", kafkaContainer);
 
         String bootstrapServers = kafkaContainer.getBootstrapServers();
         log.info("Kafka started at {}", bootstrapServers);
@@ -177,6 +186,7 @@ public class TestContainerFacade implements TestContainerService {
         if (container instanceof GenericContainer) {
             ((GenericContainer<?>) container).stop();
             containers.remove(containerType);
+            TestContainerRegistry.getInstance().unregister(containerType);
             log.info("Stopped {} container", containerType);
         }
     }
@@ -184,10 +194,11 @@ public class TestContainerFacade implements TestContainerService {
     @Override
     public void stopAll() {
         log.info("Stopping all containers");
-        containers.values().forEach(container -> {
+        containers.forEach((name, container) -> {
             if (container instanceof GenericContainer) {
                 ((GenericContainer<?>) container).stop();
             }
+            TestContainerRegistry.getInstance().unregister(name);
         });
         containers.clear();
         log.info("All containers stopped");

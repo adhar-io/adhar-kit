@@ -63,12 +63,19 @@ The **adhar-kit-kubernetes** module provides comprehensive Kubernetes integratio
 - `@KubernetesResource` - Resource limits management
 - `@KubernetesAutoScale` - Horizontal pod autoscaling
 
-✅ **Services (5)**
+✅ **Services (9)**
 - `DeploymentService` - Deployment management (scale, restart, rollback)
 - `ResourceMonitoringService` - CPU/Memory monitoring
 - `IngressService` - Ingress management
 - `NamespaceService` - Namespace operations
 - `KubernetesClient` - Core operations
+- `LeaderElectionService` - Leader election runtime (backs `@LeaderElected`)
+- `HorizontalPodAutoscalerService` - HPA reconciliation (backs `@KubernetesAutoScale`)
+- `ConfigMapReloadService` / `SecretWatchService` - watch-and-publish-event runtime
+  (backs `watch = true`)
+
+✅ **Lifecycle**
+- `GracefulShutdownHandler` - readiness-gated, drain-aware shutdown
 
 ✅ **Models (8)**
 - `PodInfo` - Pod metadata
@@ -1108,6 +1115,103 @@ public class MicroserviceManager {
     }
 }
 ```
+
+---
+
+## ⚡ Annotation Runtimes (Leader Election, Watches, Autoscaling, Graceful Shutdown)
+
+The annotations above are backed by concrete Spring runtime beans. Register them as
+regular `@Bean`s (a full auto-configuration is left to the consuming application):
+
+```java
+@Configuration
+public class KubernetesRuntimeConfig {
+
+    @Bean
+    public LeaderElectedBeanPostProcessor leaderElectedBeanPostProcessor(KubernetesProperties properties) {
+        return new LeaderElectedBeanPostProcessor(properties);
+    }
+
+    @Bean
+    public ConfigMapReloadService configMapReloadService(ApplicationEventPublisher publisher) {
+        return new ConfigMapReloadService(publisher);
+    }
+
+    @Bean
+    public SecretWatchService secretWatchService(ApplicationEventPublisher publisher) {
+        return new SecretWatchService(publisher);
+    }
+
+    @Bean
+    public KubernetesWatchBeanPostProcessor kubernetesWatchBeanPostProcessor(
+            KubernetesProperties properties, ConfigMapReloadService configMaps, SecretWatchService secrets) {
+        return new KubernetesWatchBeanPostProcessor(properties, configMaps, secrets);
+    }
+
+    @Bean
+    public HorizontalPodAutoscalerService horizontalPodAutoscalerService(KubernetesClient client) {
+        return new HorizontalPodAutoscalerService(client);
+    }
+
+    @Bean
+    public AutoScaleBeanPostProcessor autoScaleBeanPostProcessor(
+            KubernetesProperties properties, HorizontalPodAutoscalerService hpaService) {
+        return new AutoScaleBeanPostProcessor(properties, hpaService);
+    }
+
+    @Bean
+    public GracefulShutdownHandler gracefulShutdownHandler(KubernetesProperties properties) {
+        return new GracefulShutdownHandler(
+            Duration.ofSeconds(properties.getGracefulShutdown().getPreStopDrainSeconds()));
+    }
+}
+```
+
+### Leader Election (`@LeaderElected`)
+
+`LeaderElectedBeanPostProcessor` discovers `@LeaderElected` beans at startup and, once
+the context starts, creates a `LeaderElectionService` per bean backed by Fabric8's
+`LeaderElector`/Lease API. It is globally gated by
+`adhar.kubernetes.leader-election.enabled` (default `false`). Beans implementing
+`LeaderElectionAware` are notified via `onStartedLeading()`/`onStoppedLeading()`;
+otherwise poll `LeaderElectionService.isLeader()`. Outside a cluster (or when the
+Fabric8 client cannot be built) election degrades to "never leader" instead of failing
+startup.
+
+### ConfigMap/Secret Watching (`watch = true`)
+
+`KubernetesWatchBeanPostProcessor` reads `@KubernetesConfigMap`/`@KubernetesSecret`
+beans and registers a Fabric8 `SharedIndexInformer` watch via
+`ConfigMapReloadService`/`SecretWatchService`. Changes publish a
+`ConfigMapChangedEvent`/`SecretChangedEvent` on the Spring `ApplicationEventPublisher`:
+
+```java
+@Component
+public class ConfigRefreshListener {
+
+    @EventListener
+    public void onConfigMapChanged(ConfigMapChangedEvent event) {
+        log.info("ConfigMap {}/{} changed ({}): {}",
+            event.getNamespace(), event.getName(), event.getChangeType(), event.getData());
+    }
+}
+```
+
+### Autoscaling (`@KubernetesAutoScale`)
+
+`AutoScaleBeanPostProcessor` reconciles a real `autoscaling/v2` HorizontalPodAutoscaler
+for every `@KubernetesAutoScale` bean via `HorizontalPodAutoscalerService.reconcile(...)`
+using create-or-update ("apply") semantics. The Deployment/HPA name is derived from the
+bean's class name (kebab-cased); call `HorizontalPodAutoscalerService.reconcile`
+directly if you need an explicit target name.
+
+### Graceful Shutdown
+
+`GracefulShutdownHandler` is a `SmartLifecycle` that flips a readiness flag to `false`
+the moment shutdown begins (wire `isReady()` into your readiness probe) and sleeps a
+configurable pre-stop drain period (`adhar.kubernetes.graceful-shutdown.pre-stop-drain-seconds`,
+default 5s) before allowing the JVM to exit - giving kube-proxy/load balancers time to
+remove the pod from Service endpoints before in-flight requests are cut off.
 
 ---
 

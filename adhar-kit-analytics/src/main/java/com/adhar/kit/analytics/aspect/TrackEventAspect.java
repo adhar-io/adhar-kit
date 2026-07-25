@@ -35,6 +35,15 @@ public class TrackEventAspect {
     }
 
     /**
+     * Package-private constructor for injecting a controllable
+     * {@link AnalyticsFacade} (e.g. a Mockito mock) in tests, without going
+     * through the process-wide singleton.
+     */
+    TrackEventAspect(AnalyticsFacade analytics) {
+        this.analytics = analytics;
+    }
+
+    /**
      * Intercepts methods annotated with @TrackEvent.
      */
     @Around("@annotation(trackEvent)")
@@ -131,6 +140,13 @@ public class TrackEventAspect {
                 exception,
                 trackEvent
             );
+
+            // Defense-in-depth: redact configured/obvious PII from method
+            // parameters before the event even reaches AnalyticsFacade (which
+            // scrubs again on the send path).
+            if (analytics.getPiiScrubber() != null) {
+                properties = analytics.getPiiScrubber().scrub(properties);
+            }
 
             log.debug("Tracking event: {} for user: {}", eventName, userId);
             analytics.track(userId, eventName, properties);

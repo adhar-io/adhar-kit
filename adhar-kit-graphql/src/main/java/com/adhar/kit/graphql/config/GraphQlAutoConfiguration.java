@@ -1,8 +1,12 @@
 package com.adhar.kit.graphql.config;
 
+import com.adhar.kit.graphql.dataloader.CompositeBatchLoaderRegistry;
 import com.adhar.kit.graphql.dataloader.DataLoaderRegistrar;
 import com.adhar.kit.graphql.exception.GraphQlExceptionResolver;
 import com.adhar.kit.graphql.instrumentation.QueryComplexityInstrumentation;
+import com.adhar.kit.graphql.persisted.InMemoryPersistedQueryCache;
+import com.adhar.kit.graphql.persisted.PersistedQueryCache;
+import com.adhar.kit.graphql.persisted.PersistedQueryInterceptor;
 import com.adhar.kit.graphql.scalar.DateTimeScalar;
 import com.adhar.kit.graphql.schema.GraphQlSchemaRegistry;
 import com.adhar.kit.graphql.security.GraphQlSecurityInterceptor;
@@ -16,6 +20,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.graphql.execution.BatchLoaderRegistry;
 import org.springframework.graphql.execution.DataFetcherExceptionResolver;
 import org.springframework.graphql.execution.RuntimeWiringConfigurer;
 
@@ -157,6 +162,56 @@ public class GraphQlAutoConfiguration {
     public DataLoaderRegistrar dataLoaderRegistrar() {
         log.info("Registering DataLoader registrar");
         return new DataLoaderRegistrar();
+    }
+
+    /**
+     * Creates the {@link BatchLoaderRegistry} bean consumed by Spring Boot's GraphQL
+     * auto-configuration when wiring the {@code ExecutionGraphQlService}.
+     *
+     * <p>Composes the standard {@code @BatchMapping}/fluent registration mechanism with
+     * the Adhar {@link DataLoaderRegistrar}'s simple named-loader registrations, so both
+     * populate the same per-request {@code DataLoaderRegistry}.</p>
+     *
+     * @param dataLoaderRegistrar the Adhar DataLoader registrar to merge in
+     * @return the composite batch loader registry
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnClass(name = "org.springframework.graphql.execution.BatchLoaderRegistry")
+    public BatchLoaderRegistry batchLoaderRegistry(DataLoaderRegistrar dataLoaderRegistrar) {
+        log.info("Registering composite BatchLoaderRegistry backed by the Adhar DataLoaderRegistrar");
+        return new CompositeBatchLoaderRegistry(dataLoaderRegistrar);
+    }
+
+    /**
+     * Creates the persisted-query cache used for Automatic Persisted Queries (APQ).
+     *
+     * @return a bounded in-memory persisted-query cache
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public PersistedQueryCache persistedQueryCache() {
+        log.info("Registering persisted query cache with max size {}", properties.getPersistedQueries().getMaxCacheSize());
+        return new InMemoryPersistedQueryCache(properties.getPersistedQueries().getMaxCacheSize());
+    }
+
+    /**
+     * Creates the interceptor implementing the Apollo Automatic Persisted Queries
+     * protocol.
+     *
+     * <p>Only registered when {@code adhar.graphql.persisted-queries.enabled} is
+     * {@code true} and Spring GraphQL server support is on the classpath.</p>
+     *
+     * @param persistedQueryCache the cache backing persisted query lookups
+     * @return the APQ web interceptor
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.graphql.persisted-queries", name = "enabled", havingValue = "true")
+    @ConditionalOnClass(name = "org.springframework.graphql.server.WebGraphQlInterceptor")
+    public PersistedQueryInterceptor persistedQueryInterceptor(PersistedQueryCache persistedQueryCache) {
+        log.info("Registering Automatic Persisted Query interceptor");
+        return new PersistedQueryInterceptor(persistedQueryCache);
     }
 
     /**

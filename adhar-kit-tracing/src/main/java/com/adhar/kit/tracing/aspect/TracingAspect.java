@@ -6,6 +6,7 @@ import com.adhar.kit.tracing.annotation.DatabaseSpan;
 import com.adhar.kit.tracing.annotation.HttpClientSpan;
 import com.adhar.kit.tracing.annotation.MessagingSpan;
 import com.adhar.kit.tracing.annotation.NewSpan;
+import com.adhar.kit.tracing.annotation.SpanTag;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.TraceContext;
 import io.micrometer.tracing.Tracer;
@@ -59,6 +60,7 @@ public class TracingAspect {
 
         // Add custom tags
         addTags(span, newSpan.tags(), joinPoint);
+        addParameterTags(span, joinPoint);
 
         Span startedSpan = span.start();
         try (Tracer.SpanInScope spanInScope = tracer.withSpan(startedSpan)) {
@@ -96,6 +98,7 @@ public class TracingAspect {
 
         // Add tags to current span
         addTags(currentSpan, continueSpan.tags(), joinPoint);
+        addParameterTags(currentSpan, joinPoint);
 
         // Add start event
         if (StringUtils.hasText(continueSpan.startEvent())) {
@@ -152,6 +155,7 @@ public class TracingAspect {
 
         // Add custom tags
         addTags(span, databaseSpan.tags(), joinPoint);
+        addParameterTags(span, joinPoint);
 
         Span startedSpan = span.start();
         try (Tracer.SpanInScope spanInScope = tracer.withSpan(startedSpan)) {
@@ -195,6 +199,7 @@ public class TracingAspect {
 
         // Add custom tags
         addTags(span, httpClientSpan.tags(), joinPoint);
+        addParameterTags(span, joinPoint);
 
         Span startedSpan = span.start();
         try (Tracer.SpanInScope spanInScope = tracer.withSpan(startedSpan)) {
@@ -243,6 +248,7 @@ public class TracingAspect {
 
         // Add custom tags
         addTags(span, messagingSpan.tags(), joinPoint);
+        addParameterTags(span, joinPoint);
 
         Span startedSpan = span.start();
         try (Tracer.SpanInScope spanInScope = tracer.withSpan(startedSpan)) {
@@ -275,19 +281,28 @@ public class TracingAspect {
 
         // Add custom tags
         addTags(span, asyncSpan.tags(), joinPoint);
+        addParameterTags(span, joinPoint);
 
         // Capture current trace context for propagation
         TraceContext traceContext = asyncSpan.propagateContext() ? span.context() : null;
 
         Span startedSpan = span.start();
+        // Tracks whether the method's result was an async type (CompletableFuture/Future)
+        // whose completion handler (or lack thereof) is responsible for ending the span, so
+        // the `finally` block below doesn't end it again. This flag is set from the *single*
+        // `joinPoint.proceed()` call result below - it must NOT be determined by calling
+        // `proceed()` a second time, which would re-execute the underlying method.
+        boolean asyncResultReturned = false;
         try (Tracer.SpanInScope spanInScope = tracer.withSpan(startedSpan)) {
             Object result = joinPoint.proceed();
 
             // Handle async results with context propagation
-            if (result instanceof CompletableFuture<?>) {
-                return handleAsyncCompletableFuture(startedSpan, (CompletableFuture<?>) result, traceContext);
-            } else if (result instanceof Future<?>) {
-                return handleAsyncResult(startedSpan, (Future<?>) result);
+            if (result instanceof CompletableFuture<?> completableFuture) {
+                asyncResultReturned = true;
+                return handleAsyncCompletableFuture(startedSpan, completableFuture, traceContext);
+            } else if (result instanceof Future<?> future) {
+                asyncResultReturned = true;
+                return handleAsyncResult(startedSpan, future);
             }
 
             startedSpan.tag("success", "true");
@@ -299,7 +314,7 @@ public class TracingAspect {
                 .tag("error.message", throwable.getMessage());
             throw throwable;
         } finally {
-            if (!(joinPoint.proceed() instanceof Future<?>)) {
+            if (!asyncResultReturned) {
                 startedSpan.end();
             }
         }
@@ -331,6 +346,55 @@ public class TracingAspect {
             String key = tags[i];
             String value = evaluateExpression(tags[i + 1], joinPoint);
             span.tag(key, value);
+        }
+    }
+
+    /**
+     * Inspect the method's parameters for {@link SpanTag} and add a tag to {@code span} for
+     * each annotated parameter, using either the parameter's {@code toString()} value or the
+     * result of evaluating {@link SpanTag#expression()} (a SpEL expression evaluated with the
+     * parameter's value as the root object, and all method parameters bound as {@code #name}
+     * variables).
+     */
+    private void addParameterTags(Span span, ProceedingJoinPoint joinPoint) {
+        MethodSignature signature = (MethodSignature) joinPoint.getSignature();
+        Parameter[] parameters = signature.getMethod().getParameters();
+        Object[] args = joinPoint.getArgs();
+
+        for (int i = 0; i < parameters.length && i < args.length; i++) {
+            SpanTag spanTag = parameters[i].getAnnotation(SpanTag.class);
+            if (spanTag == null) {
+                continue;
+            }
+
+            String tagName = StringUtils.hasText(spanTag.value()) ? spanTag.value() : parameters[i].getName();
+            Object parameterValue = args[i];
+            String tagValue;
+            if (StringUtils.hasText(spanTag.expression())) {
+                tagValue = evaluateParameterExpression(spanTag.expression(), parameterValue, joinPoint);
+            } else {
+                tagValue = parameterValue != null ? parameterValue.toString() : "";
+            }
+            span.tag(tagName, tagValue);
+        }
+    }
+
+    /**
+     * Evaluate a {@link SpanTag#expression()} SpEL expression, with {@code parameterValue} as
+     * the SpEL root object (so expressions can navigate the parameter's own properties, e.g.
+     * {@code "id"} or {@code "address.city"}) and all method parameters additionally available
+     * as {@code #paramName} variables.
+     */
+    private String evaluateParameterExpression(String expression, Object parameterValue, ProceedingJoinPoint joinPoint) {
+        try {
+            StandardEvaluationContext context = (StandardEvaluationContext) createEvaluationContext(joinPoint);
+            context.setRootObject(parameterValue);
+            Expression expr = expressionParser.parseExpression(expression);
+            Object result = expr.getValue(context);
+            return result != null ? result.toString() : "";
+        } catch (Exception e) {
+            log.warn("Failed to evaluate @SpanTag expression: {} for method: {}", expression, joinPoint.getSignature().toShortString(), e);
+            return parameterValue != null ? parameterValue.toString() : "";
         }
     }
 

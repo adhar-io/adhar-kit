@@ -16,7 +16,7 @@
 
 ## 📖 Overview
 
-**Adhar Kit** is a complete enterprise microservices toolkit that works seamlessly across **Spring Boot**, **Quarkus**, and **Micronaut**. It provides **foundational production-ready modules** covering all aspects of modern cloud-native applications.
+**Adhar Kit** is a complete enterprise microservices toolkit that works seamlessly across **Spring Boot**, **Quarkus**, **Micronaut**, **Helidon**, and **Vert.x**. It provides **foundational production-ready modules** covering all aspects of modern cloud-native applications.
 
 ## Why Adhar Kit?
 

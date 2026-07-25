@@ -1,31 +1,30 @@
 package com.adhar.kit.graphql.instrumentation;
 
-import graphql.ExecutionResult;
-import graphql.GraphQLError;
+import graphql.analysis.MaxQueryComplexityInstrumentation;
+import graphql.analysis.MaxQueryDepthInstrumentation;
+import graphql.execution.instrumentation.ChainedInstrumentation;
 import graphql.execution.instrumentation.Instrumentation;
-import graphql.execution.instrumentation.InstrumentationContext;
-import graphql.execution.instrumentation.InstrumentationState;
-import graphql.execution.instrumentation.SimplePerformantInstrumentation;
-import graphql.execution.instrumentation.parameters.InstrumentationExecutionParameters;
-import graphql.language.Document;
-import graphql.language.Field;
-import graphql.language.OperationDefinition;
-import graphql.language.Selection;
-import graphql.language.SelectionSet;
-import graphql.parser.Parser;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.concurrent.CompletableFuture;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * GraphQL instrumentation that enforces query complexity limits.
+ * GraphQL instrumentation that enforces query complexity and depth limits
+ * <strong>before</strong> execution begins.
  *
- * <p>Calculates the complexity of incoming GraphQL queries based on field depth
- * and breadth, rejecting queries that exceed the configured maximum complexity.</p>
+ * <p>This is a thin, backward-compatible wrapper around graphql-java's own
+ * {@link MaxQueryComplexityInstrumentation} and {@link MaxQueryDepthInstrumentation},
+ * combined via {@link ChainedInstrumentation}. Both delegate instrumentations hook
+ * {@code beginExecuteOperation}, which runs after validation but strictly before any
+ * {@code DataFetcher} is invoked. When a limit is exceeded they throw a
+ * {@code graphql.execution.AbortExecutionException}, which graphql-java converts into
+ * an {@link graphql.ExecutionResult} carrying an error &mdash; without ever calling a
+ * single field data fetcher.</p>
  *
- * <p>Complexity is calculated by counting the total number of fields requested
- * across all selection sets in the query. Each field contributes a complexity
- * score of 1, and nested fields compound the total.</p>
+ * <p>This replaces a previous implementation that recomputed complexity/depth itself
+ * and rejected the query only after {@code instrumentExecutionResult} ran (i.e. after
+ * the query had already fully executed).</p>
  *
  * <p><b>Configuration:</b></p>
  * <pre>{@code
@@ -39,7 +38,7 @@ import java.util.concurrent.CompletableFuture;
  * @since 1.0.0
  */
 @Slf4j
-public class QueryComplexityInstrumentation extends SimplePerformantInstrumentation {
+public class QueryComplexityInstrumentation extends ChainedInstrumentation {
 
     private final int maxComplexity;
     private final int maxDepth;
@@ -51,97 +50,35 @@ public class QueryComplexityInstrumentation extends SimplePerformantInstrumentat
      * @param maxDepth      the maximum allowed query depth
      */
     public QueryComplexityInstrumentation(int maxComplexity, int maxDepth) {
+        super(buildDelegates(maxComplexity, maxDepth));
         this.maxComplexity = maxComplexity;
         this.maxDepth = maxDepth;
+        log.debug("Query complexity instrumentation configured (pre-execution): maxComplexity={}, maxDepth={}",
+                maxComplexity, maxDepth);
     }
 
-    @Override
-    public CompletableFuture<ExecutionResult> instrumentExecutionResult(
-            ExecutionResult executionResult,
-            InstrumentationExecutionParameters parameters,
-            InstrumentationState state) {
-
-        String query = parameters.getQuery();
-        if (query == null || query.isBlank()) {
-            return CompletableFuture.completedFuture(executionResult);
-        }
-
-        Document document;
-        try {
-            document = Parser.parse(query);
-        } catch (Exception e) {
-            log.warn("Failed to parse query for complexity analysis: {}", e.getMessage());
-            return CompletableFuture.completedFuture(executionResult);
-        }
-
-        int complexity = 0;
-        int depth = 0;
-
-        for (var definition : document.getDefinitions()) {
-            if (definition instanceof OperationDefinition operationDef) {
-                SelectionSet selectionSet = operationDef.getSelectionSet();
-                if (selectionSet != null) {
-                    complexity += calculateComplexity(selectionSet);
-                    depth = Math.max(depth, calculateDepth(selectionSet));
-                }
-            }
-        }
-
-        if (complexity > maxComplexity) {
-            log.warn("Query rejected: complexity {} exceeds maximum {}", complexity, maxComplexity);
-            GraphQLError error = GraphQLError.newError()
-                    .message("Query complexity %d exceeds the maximum allowed complexity of %d"
-                            .formatted(complexity, maxComplexity))
-                    .build();
-            return CompletableFuture.completedFuture(
-                    ExecutionResult.newExecutionResult()
-                            .addError(error)
-                            .build());
-        }
-
-        if (depth > maxDepth) {
-            log.warn("Query rejected: depth {} exceeds maximum {}", depth, maxDepth);
-            GraphQLError error = GraphQLError.newError()
-                    .message("Query depth %d exceeds the maximum allowed depth of %d"
-                            .formatted(depth, maxDepth))
-                    .build();
-            return CompletableFuture.completedFuture(
-                    ExecutionResult.newExecutionResult()
-                            .addError(error)
-                            .build());
-        }
-
-        log.debug("Query accepted: complexity={}, depth={}", complexity, depth);
-        return CompletableFuture.completedFuture(executionResult);
+    private static List<Instrumentation> buildDelegates(int maxComplexity, int maxDepth) {
+        List<Instrumentation> delegates = new ArrayList<>();
+        delegates.add(new MaxQueryComplexityInstrumentation(maxComplexity));
+        delegates.add(new MaxQueryDepthInstrumentation(maxDepth));
+        return delegates;
     }
 
     /**
-     * Recursively calculates the total field count (complexity) of a selection set.
+     * Returns the configured maximum query complexity.
+     *
+     * @return the maximum allowed complexity score
      */
-    private int calculateComplexity(SelectionSet selectionSet) {
-        int complexity = 0;
-        for (Selection<?> selection : selectionSet.getSelections()) {
-            if (selection instanceof Field field) {
-                complexity++;
-                if (field.getSelectionSet() != null) {
-                    complexity += calculateComplexity(field.getSelectionSet());
-                }
-            }
-        }
-        return complexity;
+    public int getMaxComplexity() {
+        return maxComplexity;
     }
 
     /**
-     * Recursively calculates the maximum nesting depth of a selection set.
+     * Returns the configured maximum query depth.
+     *
+     * @return the maximum allowed depth
      */
-    private int calculateDepth(SelectionSet selectionSet) {
-        int maxChildDepth = 0;
-        for (Selection<?> selection : selectionSet.getSelections()) {
-            if (selection instanceof Field field && field.getSelectionSet() != null) {
-                int childDepth = calculateDepth(field.getSelectionSet());
-                maxChildDepth = Math.max(maxChildDepth, childDepth);
-            }
-        }
-        return maxChildDepth + 1;
+    public int getMaxDepth() {
+        return maxDepth;
     }
 }

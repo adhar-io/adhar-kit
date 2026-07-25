@@ -6,9 +6,17 @@
 
 - **ProfilerFacade** - unified access via `adhar.getProfiler()`
 - **@Profiled Annotation** - AOP-based automatic method timing with slow execution detection
-- **Profiling Registry** - thread-safe aggregation of method stats (avg/min/max/p95/p99)
+- **Profiling Registry** - thread-safe aggregation of method stats (avg/min/max/p95/p99), backed
+  by a bounded [HdrHistogram](https://github.com/HdrHistogram/HdrHistogram) per method so memory
+  stays flat no matter how many calls are recorded
+- **Rolling Time Windows** - stats roll over on a configurable interval into a small, bounded
+  history of past windows, so long-running services don't retain per-call data forever
+- **Sampling & Overhead Guard** - `sampleRate` and `maxTrackedMethods` bound the instrumentation
+  cost and cardinality of the registry on hot paths
+- **Slow-Call Alerting** - `SlowCallEvent` (per call) and `SlowCallThresholdBreachedEvent`
+  (aggregate p99) are published as Spring `ApplicationEvent`s
 - **Memory Profiler** - heap/non-heap usage, GC stats, thread counts via ManagementFactory
-- **Actuator Endpoint** - `/actuator/profiling` for reports, hotspots, and memory snapshots
+- **Actuator Endpoint** - `/actuator/profiling` for reports, hotspots, memory, percentiles, and windows
 - **Manual Profiling** - `adhar.profiled("name", () -> work())` for ad-hoc timing
 - **Micrometer Integration** - all profiling data recorded as Micrometer Timer metrics
 
@@ -61,6 +69,33 @@ adhar:
     enabled: true
     default-slow-threshold-ms: 500
     log-slow-by-default: true
+    # Rolling time-window aggregation
+    window-duration: 5m          # window length before stats roll over into history
+    history-windows: 5           # number of completed windows retained (bounded)
+    # Sampling & overhead guard
+    sample-rate: 1.0             # fraction (0.0-1.0) of calls actually timed/recorded
+    max-tracked-methods: 1000    # cap on distinct method names tracked in the registry
+    # Aggregate alerting
+    p99-alert-threshold-ms: 0    # >0 publishes SlowCallThresholdBreachedEvent when p99 crosses it
+```
+
+## Slow-Call Events
+
+In addition to the existing `log.warn`, `ProfilingAspect` publishes Spring `ApplicationEvent`s
+that application code can listen for:
+
+- `SlowCallEvent` - published every time a single call exceeds its `@Profiled(slowThresholdMs=...)` threshold.
+- `SlowCallThresholdBreachedEvent` - published (debounced - once per breach, re-armed once it clears)
+  when a method's aggregate p99 latency crosses `adhar.profiler.p99-alert-threshold-ms`.
+
+```java
+@Component
+class SlowCallAlerter {
+    @EventListener
+    void onSlowCall(SlowCallEvent event) {
+        log.warn("slow: {} took {}ms", event.getMethodKey(), event.getDurationMs());
+    }
+}
 ```
 
 ## Actuator Endpoints
@@ -70,6 +105,8 @@ adhar:
 | `/actuator/profiling` | GET | Full profiling report |
 | `/actuator/profiling/hotspots?top=10` | GET | Top N slowest methods |
 | `/actuator/profiling/memory` | GET | Memory and GC snapshot |
+| `/actuator/profiling/percentiles` | GET | Per-method avg/min/max/p95/p99 for the current window |
+| `/actuator/profiling/windows` | GET | Current window plus bounded rolling-window history |
 | `/actuator/profiling` | DELETE | Reset profiling data |
 
 ## API Reference

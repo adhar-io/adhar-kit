@@ -38,4 +38,10 @@ public class EventSourcingProperties {
      * The type of event store to use. Supported values: "jpa", "in-memory".
      */
     private String eventStoreType = "jpa";
+
+    /**
+     * Maximum number of attempts {@code RetryingAggregateRepository} makes when a save
+     * fails due to an optimistic concurrency conflict.
+     */
+    private int retryMaxAttempts = 3;
 }

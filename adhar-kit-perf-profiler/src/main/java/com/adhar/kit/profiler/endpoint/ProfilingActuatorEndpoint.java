@@ -4,6 +4,7 @@ import com.adhar.kit.profiler.memory.MemoryProfiler;
 import com.adhar.kit.profiler.model.MemorySnapshot;
 import com.adhar.kit.profiler.model.MethodProfile;
 import com.adhar.kit.profiler.model.ProfilingReport;
+import com.adhar.kit.profiler.model.WindowSnapshot;
 import com.adhar.kit.profiler.registry.ProfilingRegistry;
 import org.springframework.boot.actuate.endpoint.annotation.DeleteOperation;
 import org.springframework.boot.actuate.endpoint.annotation.Endpoint;
@@ -21,6 +22,8 @@ import java.util.Map;
  *   <li>GET /actuator/profiling - full profiling report</li>
  *   <li>GET /actuator/profiling/hotspots?top=10 - top N hotspots</li>
  *   <li>GET /actuator/profiling/memory - JVM memory snapshot</li>
+ *   <li>GET /actuator/profiling/percentiles - per-method avg/min/max/p95/p99 for the current window</li>
+ *   <li>GET /actuator/profiling/windows - current window plus bounded rolling-window history</li>
  *   <li>DELETE /actuator/profiling - reset profiling statistics</li>
  * </ul>
  */
@@ -45,7 +48,7 @@ public class ProfilingActuatorEndpoint {
 
     /**
      * GET /actuator/profiling/{section} - returns specific profiling data.
-     * Supported sections: "hotspots", "memory".
+     * Supported sections: "hotspots", "memory", "percentiles", "windows".
      */
     @ReadOperation
     public Object getSection(@Selector String section, @Nullable Integer top) {
@@ -55,6 +58,14 @@ public class ProfilingActuatorEndpoint {
                 yield Map.of("hotspots", profilingRegistry.getHotspots(topN));
             }
             case "memory" -> memoryProfiler.getMemorySnapshot();
+            case "percentiles" -> Map.of("percentiles", profilingRegistry.getReport().methodStatistics());
+            case "windows" -> {
+                List<WindowSnapshot> history = profilingRegistry.getWindowHistory();
+                yield Map.of(
+                        "current", profilingRegistry.getReport(),
+                        "history", history
+                );
+            }
             default -> Map.of("error", "Unknown section: " + section);
         };
     }

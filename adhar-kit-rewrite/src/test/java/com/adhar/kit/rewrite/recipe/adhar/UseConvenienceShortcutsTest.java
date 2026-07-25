@@ -1,57 +1,199 @@
 package com.adhar.kit.rewrite.recipe.adhar;
 
 import org.junit.jupiter.api.Test;
+import org.openrewrite.test.RecipeSpec;
+import org.openrewrite.test.RewriteTest;
+import org.openrewrite.test.TypeValidation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.openrewrite.java.Assertions.java;
 
-class UseConvenienceShortcutsTest {
+class UseConvenienceShortcutsTest implements RewriteTest {
 
-    private final String yaml = UseConvenienceShortcuts.getYamlDefinition();
-
-    @Test
-    void getYamlDefinition_returnsNonEmpty() {
-        assertThat(yaml).isNotBlank();
+    @Override
+    public void defaults(RecipeSpec spec) {
+        spec.recipe(new UseConvenienceShortcuts())
+                .typeValidationOptions(TypeValidation.none());
     }
 
     @Test
-    void yaml_containsCountShortcut() {
-        assertThat(yaml).contains("getMetrics().increment");
-        assertThat(yaml).contains("adhar.count(x)");
+    void getDisplayName_isNotBlank() {
+        assertThat(new UseConvenienceShortcuts().getDisplayName()).isNotBlank();
     }
 
     @Test
-    void yaml_containsResilientShortcut() {
-        assertThat(yaml).contains("getCircuitBreaker().execute");
-        assertThat(yaml).contains("adhar.resilient(x, y)");
+    void getDescription_mentionsShortcutExample() {
+        assertThat(new UseConvenienceShortcuts().getDescription())
+                .contains("adhar.getMetrics().increment(x)")
+                .contains("adhar.count(x)");
     }
 
     @Test
-    void yaml_containsSaveShortcut() {
-        assertThat(yaml).contains("getPersistence().save");
-        assertThat(yaml).contains("adhar.save(x)");
+    void rewritesMetricsIncrementToCountShortcut() {
+        rewriteRun(
+                java(
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                adhar.getMetrics().increment("requests");
+                            }
+                        }
+                        """,
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                adhar.count("requests");
+                            }
+                        }
+                        """
+                )
+        );
     }
 
     @Test
-    void yaml_containsPublishShortcut() {
-        assertThat(yaml).contains("getMessaging().publish");
-        assertThat(yaml).contains("adhar.publish(x, y)");
+    void rewritesCircuitBreakerExecuteToResilientShortcut() {
+        rewriteRun(
+                java(
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                adhar.getCircuitBreaker().execute("a", "b");
+                            }
+                        }
+                        """,
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                adhar.resilient("a", "b");
+                            }
+                        }
+                        """
+                )
+        );
     }
 
     @Test
-    void yaml_containsHasPermissionShortcut() {
-        assertThat(yaml).contains("getSecurity().hasPermission");
-        assertThat(yaml).contains("adhar.hasPermission(x)");
+    void rewritesCircuitBreakerExecuteWithFallbackToResilientShortcut() {
+        rewriteRun(
+                java(
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                adhar.getCircuitBreaker().executeWithFallback("a", "b", "c");
+                            }
+                        }
+                        """,
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                adhar.resilient("a", "b", "c");
+                            }
+                        }
+                        """
+                )
+        );
     }
 
     @Test
-    void yaml_containsGetApiDocsRename() {
-        assertThat(yaml).contains("newMethodName: getApiDocs");
-        assertThat(yaml).contains("getDocs()");
+    void rewritesPersistenceSaveShortcut() {
+        rewriteRun(
+                java(
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                adhar.getPersistence().save("entity");
+                            }
+                        }
+                        """,
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                adhar.save("entity");
+                            }
+                        }
+                        """
+                )
+        );
     }
 
     @Test
-    void yaml_containsGetUtilsRename() {
-        assertThat(yaml).contains("newMethodName: getUtils");
-        assertThat(yaml).contains("getCore()");
+    void rewritesSecurityCurrentUserIdShortcut() {
+        rewriteRun(
+                java(
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                Object id = adhar.getSecurity().getCurrentUserId();
+                            }
+                        }
+                        """,
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                Object id = adhar.currentUserId();
+                            }
+                        }
+                        """
+                )
+        );
+    }
+
+    @Test
+    void rewritesGetDocsAccessorToGetApiDocs() {
+        rewriteRun(
+                java(
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                Object docs = adhar.getDocs();
+                            }
+                        }
+                        """,
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                Object docs = adhar.getApiDocs();
+                            }
+                        }
+                        """
+                )
+        );
+    }
+
+    @Test
+    void rewritesGetCoreAccessorToGetUtils() {
+        rewriteRun(
+                java(
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                Object utils = adhar.getCore();
+                            }
+                        }
+                        """,
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                Object utils = adhar.getUtils();
+                            }
+                        }
+                        """
+                )
+        );
+    }
+
+    @Test
+    void leavesUnrelatedMethodCallsUnchanged() {
+        rewriteRun(
+                java(
+                        """
+                        class Demo {
+                            void run(AdharKitFacade adhar) {
+                                adhar.getMetrics().reset();
+                            }
+                        }
+                        """
+                )
+        );
     }
 }

@@ -44,19 +44,65 @@ public class CodeStandardsValidator {
 
         Path srcPath = sourceDirectory.toPath();
 
-        for (String expectedPkg : expectedPackages) {
-            boolean found = Files.walk(srcPath)
-                    .anyMatch(path -> path.toString().contains(File.separator + expectedPkg + File.separator));
+        try (Stream<Path> paths = Files.walk(srcPath)) {
+            List<Path> allPaths = paths.toList();
 
-            if (!found) {
-                String error = "Missing recommended package: " + expectedPkg;
-                errors.add(error);
-                log.warn(error);
-                errorCount++;
+            for (String expectedPkg : expectedPackages) {
+                boolean found = allPaths.stream().anyMatch(path -> hasPackageSegment(path, expectedPkg));
+
+                if (!found) {
+                    String error = "Missing recommended package: " + expectedPkg;
+                    errors.add(error);
+                    log.warn(error);
+                    errorCount++;
+                }
             }
         }
 
         return errorCount;
+    }
+
+    /**
+     * Checks whether any directory component of the given path equals the given
+     * segment name. Uses {@link Path} component comparison rather than string/
+     * separator matching, so it behaves identically on Windows ({@code \}) and
+     * Unix ({@code /}) file systems.
+     */
+    private static boolean hasPackageSegment(Path path, String segment) {
+        for (Path component : path) {
+            if (component.toString().equals(segment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Checks whether the given path contains the given segments as a consecutive
+     * subsequence of directory components (e.g. {@code ["service", "impl"]} matches
+     * {@code .../service/impl/Foo.java} but not {@code .../service/Foo.java} or
+     * {@code .../impl/service/Foo.java}). OS-separator agnostic, like {@link
+     * #hasPackageSegment(Path, String)}.
+     */
+    private static boolean hasConsecutivePackageSegments(Path path, String... segments) {
+        List<String> components = new ArrayList<>();
+        for (Path component : path) {
+            components.add(component.toString());
+        }
+
+        for (int start = 0; start <= components.size() - segments.length; start++) {
+            boolean match = true;
+            for (int offset = 0; offset < segments.length; offset++) {
+                if (!components.get(start + offset).equals(segments[offset])) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public int validateNamingConventions() throws IOException {
@@ -69,19 +115,19 @@ public class CodeStandardsValidator {
                         String fileName = path.getFileName().toString();
 
                         // Controllers should end with Controller
-                        if (path.toString().contains("/controller/") && !fileName.contains("Controller")) {
+                        if (hasPackageSegment(path, "controller") && !fileName.contains("Controller")) {
                             errors.add("Controller class should end with 'Controller': " + fileName);
                         }
 
                         // Services should end with Service or ServiceImpl
-                        if (path.toString().contains("/service/") &&
+                        if (hasPackageSegment(path, "service") &&
                                 !fileName.contains("Service") &&
                                 !fileName.contains("ServiceImpl")) {
                             errors.add("Service class should end with 'Service' or 'ServiceImpl': " + fileName);
                         }
 
                         // Repositories should end with Repository
-                        if (path.toString().contains("/repository/") && !fileName.contains("Repository")) {
+                        if (hasPackageSegment(path, "repository") && !fileName.contains("Repository")) {
                             errors.add("Repository interface should end with 'Repository': " + fileName);
                         }
                     });
@@ -106,20 +152,20 @@ public class CodeStandardsValidator {
                             String fileName = path.getFileName().toString();
 
                             // Controllers should have @RestController or @Controller
-                            if (path.toString().contains("/controller/") &&
+                            if (hasPackageSegment(path, "controller") &&
                                     !content.contains("@RestController") &&
                                     !content.contains("@Controller")) {
                                 errors.add("Controller missing @RestController annotation: " + fileName);
                             }
 
                             // Services should have @Service
-                            if (path.toString().contains("/service/impl/") &&
+                            if (hasConsecutivePackageSegments(path, "service", "impl") &&
                                     !content.contains("@Service")) {
                                 errors.add("Service implementation missing @Service annotation: " + fileName);
                             }
 
                             // Repositories should have @Repository or extend Spring Data interface
-                            if (path.toString().contains("/repository/") &&
+                            if (hasPackageSegment(path, "repository") &&
                                     !content.contains("@Repository") &&
                                     !content.contains("extends JpaRepository") &&
                                     !content.contains("extends CrudRepository")) {
@@ -176,7 +222,7 @@ public class CodeStandardsValidator {
         try (Stream<Path> paths = Files.walk(sourceDirectory.toPath())) {
             paths.filter(Files::isRegularFile)
                     .filter(p -> p.toString().endsWith(".java"))
-                    .filter(p -> p.toString().contains("/controller/"))
+                    .filter(p -> hasPackageSegment(p, "controller"))
                     .forEach(path -> {
                         try {
                             String content = Files.readString(path);
@@ -210,7 +256,7 @@ public class CodeStandardsValidator {
                             String fileName = path.getFileName().toString();
 
                             // Check if service has logger
-                            if (path.toString().contains("/service/impl/")) {
+                            if (hasConsecutivePackageSegments(path, "service", "impl")) {
                                 if (!content.contains("@Slf4j") &&
                                         !content.contains("Logger") &&
                                         !content.contains("logger")) {

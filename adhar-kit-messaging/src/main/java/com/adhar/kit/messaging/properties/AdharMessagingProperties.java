@@ -38,6 +38,12 @@ public class AdharMessagingProperties {
      */
     private final CommonProperties common = new CommonProperties();
 
+    /**
+     * Configuration for the transactional outbox
+     * ({@code adhar.messaging.outbox.*}). Opt-in: disabled by default.
+     */
+    private final OutboxProperties outbox = new OutboxProperties();
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -56,6 +62,10 @@ public class AdharMessagingProperties {
 
     public CommonProperties getCommon() {
         return common;
+    }
+
+    public OutboxProperties getOutbox() {
+        return outbox;
     }
 
     /**
@@ -665,6 +675,45 @@ public class AdharMessagingProperties {
          */
         private long defaultBackoffMs = 1000;
 
+        /**
+         * Retry configuration applied by {@code RetryingMessageHandler} when consuming
+         * messages via {@link com.adhar.kit.messaging.MessagingFacade}.
+         */
+        private final RetryProperties retry = new RetryProperties();
+
+        /**
+         * Dead-letter-queue configuration applied by {@code DeadLetterPublisher} once
+         * retries are exhausted.
+         */
+        private final DlqProperties dlq = new DlqProperties();
+
+        /**
+         * Idempotent-consumer (deduplication) configuration.
+         */
+        private final DedupProperties dedup = new DedupProperties();
+
+        /**
+         * Request-reply configuration applied by
+         * {@code MessagingFacade#sendAndReceive}.
+         */
+        private final ReplyProperties reply = new ReplyProperties();
+
+        public RetryProperties getRetry() {
+            return retry;
+        }
+
+        public DlqProperties getDlq() {
+            return dlq;
+        }
+
+        public DedupProperties getDedup() {
+            return dedup;
+        }
+
+        public ReplyProperties getReply() {
+            return reply;
+        }
+
         public String getDefaultSerializationFormat() {
             return defaultSerializationFormat;
         }
@@ -711,6 +760,271 @@ public class AdharMessagingProperties {
 
         public void setDefaultBackoffMs(long defaultBackoffMs) {
             this.defaultBackoffMs = defaultBackoffMs;
+        }
+
+        /**
+         * Configuration for message-handler retry behaviour
+         * ({@code adhar.messaging.common.retry.*}).
+         */
+        public static class RetryProperties {
+            /**
+             * Whether retry is applied to message consumption via the MessagingFacade.
+             * Enabled by default.
+             */
+            private boolean enabled = true;
+
+            /**
+             * Maximum number of handling attempts (including the first attempt) before
+             * giving up and routing to the dead-letter queue (if enabled).
+             */
+            private int maxAttempts = 3;
+
+            /**
+             * Delay before the first retry, in milliseconds.
+             */
+            private long initialDelayMs = 200;
+
+            /**
+             * Multiplier applied to the delay after each failed attempt (exponential backoff).
+             */
+            private double backoffMultiplier = 2.0;
+
+            /**
+             * Upper bound for the computed backoff delay, in milliseconds.
+             */
+            private long maxDelayMs = 5000;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public int getMaxAttempts() {
+                return maxAttempts;
+            }
+
+            public void setMaxAttempts(int maxAttempts) {
+                this.maxAttempts = maxAttempts;
+            }
+
+            public long getInitialDelayMs() {
+                return initialDelayMs;
+            }
+
+            public void setInitialDelayMs(long initialDelayMs) {
+                this.initialDelayMs = initialDelayMs;
+            }
+
+            public double getBackoffMultiplier() {
+                return backoffMultiplier;
+            }
+
+            public void setBackoffMultiplier(double backoffMultiplier) {
+                this.backoffMultiplier = backoffMultiplier;
+            }
+
+            public long getMaxDelayMs() {
+                return maxDelayMs;
+            }
+
+            public void setMaxDelayMs(long maxDelayMs) {
+                this.maxDelayMs = maxDelayMs;
+            }
+        }
+
+        /**
+         * Configuration for dead-letter-queue publishing
+         * ({@code adhar.messaging.common.dlq.*}).
+         */
+        public static class DlqProperties {
+            /**
+             * Whether failed messages are published to a dead-letter topic once retries
+             * (if any) are exhausted. Enabled by default.
+             */
+            private boolean enabled = true;
+
+            /**
+             * Suffix appended to the original destination to compute the dead-letter
+             * destination, e.g. {@code order-events} becomes {@code order-events.dlq}.
+             */
+            private String topicSuffix = ".dlq";
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public String getTopicSuffix() {
+                return topicSuffix;
+            }
+
+            public void setTopicSuffix(String topicSuffix) {
+                this.topicSuffix = topicSuffix;
+            }
+        }
+
+        /**
+         * Configuration for idempotent-consumer (message deduplication) support
+         * ({@code adhar.messaging.common.dedup.*}). Opt-in: disabled by default.
+         */
+        public static class DedupProperties {
+            /**
+             * Whether inbound messages are deduplicated before being handed to the
+             * application handler. Disabled by default.
+             */
+            private boolean enabled = false;
+
+            /**
+             * How long a processed message id is remembered before it may be treated as
+             * new again, in milliseconds.
+             */
+            private long ttlMs = 600_000;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public long getTtlMs() {
+                return ttlMs;
+            }
+
+            public void setTtlMs(long ttlMs) {
+                this.ttlMs = ttlMs;
+            }
+        }
+
+        /**
+         * Configuration for the request-reply pattern
+         * ({@code adhar.messaging.common.reply.*}).
+         */
+        public static class ReplyProperties {
+            /**
+             * How long {@code sendAndReceive} waits for a reply before failing,
+             * in milliseconds.
+             */
+            private long timeoutMs = 30_000;
+
+            /**
+             * Suffix appended to the request topic to compute the reply topic used by
+             * the correlation-id based (Kafka-style) request-reply flow, e.g.
+             * {@code order-queries} replies arrive on {@code order-queries.reply}.
+             */
+            private String topicSuffix = ".reply";
+
+            public long getTimeoutMs() {
+                return timeoutMs;
+            }
+
+            public void setTimeoutMs(long timeoutMs) {
+                this.timeoutMs = timeoutMs;
+            }
+
+            public String getTopicSuffix() {
+                return topicSuffix;
+            }
+
+            public void setTopicSuffix(String topicSuffix) {
+                this.topicSuffix = topicSuffix;
+            }
+        }
+    }
+
+    /**
+     * Properties for the transactional outbox ({@code adhar.messaging.outbox.*}).
+     * <p>
+     * When enabled, an {@code OutboxStore} bean (JDBC-backed when a {@code DataSource}
+     * is available, in-memory otherwise) and a scheduled {@code OutboxRelay} are
+     * registered, and {@code MessagingFacade#publishViaOutbox} becomes usable.
+     */
+    public static class OutboxProperties {
+        /**
+         * Whether the transactional outbox is enabled. Disabled by default.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Interval between relay passes, in milliseconds.
+         */
+        private long relayIntervalMs = 1000;
+
+        /**
+         * Maximum number of entries relayed per pass.
+         */
+        private int batchSize = 50;
+
+        /**
+         * Maximum number of relay attempts before an entry is marked
+         * {@code DEAD} and no longer retried.
+         */
+        private int maxAttempts = 5;
+
+        /**
+         * Name of the outbox table used by the JDBC-backed store.
+         */
+        private String tableName = "adhar_outbox";
+
+        /**
+         * Whether the JDBC-backed store creates its table at startup if it does
+         * not exist yet.
+         */
+        private boolean initializeSchema = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public long getRelayIntervalMs() {
+            return relayIntervalMs;
+        }
+
+        public void setRelayIntervalMs(long relayIntervalMs) {
+            this.relayIntervalMs = relayIntervalMs;
+        }
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
+        }
+
+        public int getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(int maxAttempts) {
+            this.maxAttempts = maxAttempts;
+        }
+
+        public String getTableName() {
+            return tableName;
+        }
+
+        public void setTableName(String tableName) {
+            this.tableName = tableName;
+        }
+
+        public boolean isInitializeSchema() {
+            return initializeSchema;
+        }
+
+        public void setInitializeSchema(boolean initializeSchema) {
+            this.initializeSchema = initializeSchema;
         }
     }
 }

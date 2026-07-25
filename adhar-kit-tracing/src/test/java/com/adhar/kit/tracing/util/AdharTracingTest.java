@@ -10,7 +10,6 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.quality.Strictness;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -259,143 +258,9 @@ class AdharTracingTest {
         verify(span).tag("messaging.system", "kafka");
     }
 
-    // ========== BAGGAGE MANAGEMENT TESTS ==========
-
-    @Test
-    void testSetAndGetBaggage() {
-        adharTracing.setBaggage("user.id", "12345");
-        adharTracing.setBaggage("tenant.id", "tenant-abc");
-
-        assertThat(adharTracing.getBaggage("user.id")).isEqualTo("12345");
-        assertThat(adharTracing.getBaggage("tenant.id")).isEqualTo("tenant-abc");
-        assertThat(adharTracing.getBaggage("nonexistent")).isNull();
-
-        // Verify baggage was tagged on span
-        verify(span).tag("baggage.user.id", "12345");
-        verify(span).tag("baggage.tenant.id", "tenant-abc");
-    }
-
-    @Test
-    void testSetBaggageWithoutSpan() {
-        when(tracer.currentSpan()).thenReturn(null);
-
-        // Should not throw exception but will log warning
-        adharTracing.setBaggage("test.key", "test-value");
-        assertThat(adharTracing.getBaggage("test.key")).isNull();
-    }
-
-    @Test
-    void testRemoveBaggage() {
-        adharTracing.setBaggage("temp.key", "temp-value");
-        assertThat(adharTracing.getBaggage("temp.key")).isEqualTo("temp-value");
-
-        adharTracing.removeBaggage("temp.key");
-        assertThat(adharTracing.getBaggage("temp.key")).isNull();
-    }
-
-    @Test
-    void testGetAllBaggage() {
-        adharTracing.setBaggage("key1", "value1");
-        adharTracing.setBaggage("key2", "value2");
-
-        Map<String, String> allBaggage = adharTracing.getAllBaggage();
-        assertThat(allBaggage).hasSize(2);
-        assertThat(allBaggage).containsEntry("key1", "value1");
-        assertThat(allBaggage).containsEntry("key2", "value2");
-    }
-
-    @Test
-    void testClearBaggage() {
-        adharTracing.setBaggage("key1", "value1");
-        adharTracing.setBaggage("key2", "value2");
-        assertThat(adharTracing.getAllBaggage()).hasSize(2);
-
-        adharTracing.clearBaggage();
-        assertThat(adharTracing.getAllBaggage()).hasSize(0);
-        assertThat(adharTracing.getAllBaggage()).isEmpty();
-    }
-
-    @Test
-    void testSetBaggageItems() {
-        Map<String, String> baggageItems = Map.of(
-            "user.id", "12345",
-            "session.id", "session-abc",
-            "tenant.id", "tenant-xyz"
-        );
-
-        adharTracing.setBaggageItems(baggageItems);
-
-        assertThat(adharTracing.getAllBaggage()).hasSize(3);
-        assertThat(adharTracing.getBaggage("user.id")).isEqualTo("12345");
-        assertThat(adharTracing.getBaggage("session.id")).isEqualTo("session-abc");
-        assertThat(adharTracing.getBaggage("tenant.id")).isEqualTo("tenant-xyz");
-    }
-
-    @Test
-    void testCopyBaggageToSpan() {
-        adharTracing.setBaggage("key1", "value1");
-        adharTracing.setBaggage("key2", "value2");
-
-        Span childSpan = mock(Span.class);
-        when(childSpan.tag(anyString(), anyString())).thenReturn(childSpan);
-
-        adharTracing.copyBaggageToSpan(childSpan);
-
-        verify(childSpan).tag("baggage.key1", "value1");
-        verify(childSpan).tag("baggage.key2", "value2");
-    }
-
-    @Test
-    void testExtractBaggageFromHeaders() {
-        Map<String, String> headers = Map.of(
-            "baggage-user-id", "12345",
-            "baggage-session-id", "session-abc",
-            "content-type", "application/json",
-            "authorization", "Bearer token123"
-        );
-
-        adharTracing.extractBaggageFromHeaders(headers);
-
-        assertThat(adharTracing.getBaggage("user-id")).isEqualTo("12345");
-        assertThat(adharTracing.getBaggage("session-id")).isEqualTo("session-abc");
-        assertThat(adharTracing.getAllBaggage()).hasSize(2);
-    }
-
-    @Test
-    void testInjectBaggageIntoHeaders() {
-        Map<String, String> headers = new HashMap<>();
-
-        adharTracing.setBaggage("user-id", "12345");
-        adharTracing.setBaggage("tenant-id", "tenant-abc");
-
-        adharTracing.injectBaggageIntoHeaders(headers);
-
-        assertThat(headers).containsEntry("baggage-user-id", "12345");
-        assertThat(headers).containsEntry("baggage-tenant-id", "tenant-abc");
-    }
-
-    @Test
-    void testContainsBaggageKey() {
-        adharTracing.setBaggage("existing.key", "some-value");
-
-        assertThat(adharTracing.containsBaggageKey("existing.key")).isTrue();
-        assertThat(adharTracing.containsBaggageKey("nonexistent.key")).isFalse();
-    }
-
-    @Test
-    void testBaggageCountAndEmpty() {
-        assertThat(adharTracing.getBaggageCount()).isEqualTo(0);
-        assertThat(adharTracing.isBaggageEmpty()).isTrue();
-
-        adharTracing.setBaggage("key1", "value1");
-        assertThat(adharTracing.getBaggageCount()).isEqualTo(1);
-        assertThat(adharTracing.isBaggageEmpty()).isFalse();
-
-        adharTracing.setBaggage("key2", "value2");
-        assertThat(adharTracing.getBaggageCount()).isEqualTo(2);
-
-        adharTracing.clearBaggage();
-        assertThat(adharTracing.getBaggageCount()).isEqualTo(0);
-        assertThat(adharTracing.isBaggageEmpty()).isTrue();
-    }
+    // Baggage management is backed by the real Tracer baggage API (createBaggageInScope /
+    // getAllBaggage), which requires an active span/trace context and real (non-mock)
+    // semantics to exercise meaningfully. See AdharTracingBaggageTest (uses SimpleTracer)
+    // for set/get/remove/clear/propagation coverage, and AdharTracingMoreTest for the
+    // mock-based error/edge-path coverage (null args, exceptions swallowed, disabled config).
 }

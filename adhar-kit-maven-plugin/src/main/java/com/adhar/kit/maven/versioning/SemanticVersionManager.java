@@ -19,6 +19,7 @@ import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -181,20 +182,58 @@ public class SemanticVersionManager {
     }
 
     /**
-     * Gets the last Git tag.
+     * Gets the last (highest) Git tag, sorted using semantic-version comparison
+     * rather than assuming {@code git.tagList()} returns tags in version order
+     * (it returns them in lexicographic ref-name order, which is wrong for
+     * versions like "v1.9.0" vs "v1.10.0").
      */
-    private String getLastTag() throws Exception {
-        List<String> tags = new ArrayList<>();
-        git.tagList().call().forEach(ref -> {
-            tags.add(ref.getName().replace("refs/tags/", ""));
-        });
+    String getLastTag() throws Exception {
+        List<String> tagNames = new ArrayList<>();
+        git.tagList().call().forEach(ref -> tagNames.add(ref.getName().replace("refs/tags/", "")));
 
-        if (tags.isEmpty()) {
+        if (tagNames.isEmpty()) {
             return null;
         }
 
-        // Return the most recent tag (assumes sorted)
-        return tags.get(tags.size() - 1);
+        String highestTagName = null;
+        Semver highestVersion = null;
+
+        for (String tagName : tagNames) {
+            Semver candidate = parseSemver(tagName);
+            if (candidate == null) {
+                continue;
+            }
+            if (highestVersion == null || candidate.isGreaterThan(highestVersion)) {
+                highestVersion = candidate;
+                highestTagName = tagName;
+            }
+        }
+
+        if (highestTagName != null) {
+            return highestTagName;
+        }
+
+        // None of the tags parsed as semver (e.g. non-version tags); fall back to
+        // a stable lexicographic ordering rather than raw ref-list order.
+        List<String> sorted = new ArrayList<>(tagNames);
+        Collections.sort(sorted);
+        return sorted.get(sorted.size() - 1);
+    }
+
+    /**
+     * Parses a tag name as a semantic version, tolerating a leading "v"/"V" prefix.
+     * Returns {@code null} if the tag does not look like a semantic version.
+     */
+    private static Semver parseSemver(String tagName) {
+        String candidate = tagName;
+        if (!candidate.isEmpty() && (candidate.charAt(0) == 'v' || candidate.charAt(0) == 'V')) {
+            candidate = candidate.substring(1);
+        }
+        try {
+            return new Semver(candidate, SemverType.LOOSE);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**

@@ -14,6 +14,24 @@ import java.util.Optional;
  * Repository interface for entities with soft delete capability.
  * Automatically filters out soft-deleted entities in queries.
  *
+ * <p><b>Automatic filtering:</b> {@link SoftDeletableEntity} carries Hibernate's
+ * {@code @SQLRestriction("deleted = false")}, so every query issued through this repository
+ * (including plain {@code findAll()} / {@code findById()} inherited from {@link BaseRepository})
+ * already excludes soft-deleted rows -- the {@code findAllActive()} / {@code findActiveById()}
+ * family below applies the same {@code deleted = false} condition explicitly (redundant with the
+ * automatic restriction, but kept for call-site clarity and because they support paging/sorting).
+ * {@code deleteById(ID)} / {@code delete(T)} soft-delete rather than physically remove when the
+ * repository is built with {@link SoftDeleteRepositoryImpl} as its {@code repositoryBaseClass}
+ * (the default wired by {@code PersistenceAutoConfiguration}).</p>
+ *
+ * <p>{@link #findAllDeleted()} and {@link #restore(Object)} cannot be implemented as ordinary
+ * Specification/JPQL default methods: since {@code @SQLRestriction} is unconditional, any
+ * HQL/Criteria query on this entity -- including one that explicitly asks for
+ * {@code deleted = true} -- gets the restriction ANDed in and always returns nothing. Both
+ * methods are therefore declared without a default body and are implemented in
+ * {@link SoftDeleteRepositoryImpl} using a native SQL query that bypasses Hibernate's entity-query
+ * layer entirely.</p>
+ *
  * @param <T> the domain type the repository manages
  * @param <ID> the type of the id of the entity the repository manages
  * @author Adhar Platform Team
@@ -73,13 +91,19 @@ public interface SoftDeleteRepository<T extends SoftDeletableEntity, ID> extends
     }
 
     /**
-     * Restore soft-deleted entity by ID.
+     * Finds every soft-deleted row for this entity, bypassing the automatic
+     * {@code deleted = false} restriction via a native SQL query.
+     *
+     * <p>Implemented by {@link SoftDeleteRepositoryImpl}.</p>
      */
-    default void restore(ID id) {
-        findById(id).ifPresent(entity -> {
-            entity.restore();
-            save(entity);
-        });
-    }
+    List<T> findAllDeleted();
+
+    /**
+     * Restores a soft-deleted entity by ID, looking it up via a native query since the
+     * automatic {@code @SQLRestriction} would otherwise hide it from {@code findById}.
+     *
+     * <p>Implemented by {@link SoftDeleteRepositoryImpl}.</p>
+     */
+    void restore(ID id);
 }
 

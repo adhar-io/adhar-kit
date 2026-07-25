@@ -1,10 +1,23 @@
 package com.adhar.kit.messaging;
 
 import com.adhar.kit.messaging.api.MessagingService;
+import com.adhar.kit.messaging.core.DeadLetterPublisher;
+import com.adhar.kit.messaging.core.MessageHandler;
+import com.adhar.kit.messaging.core.MessageListener;
+import com.adhar.kit.messaging.core.MessagePublisher;
+import com.adhar.kit.messaging.core.RetryingMessageHandler;
+import com.adhar.kit.messaging.core.SimpleMessageContext;
+import com.adhar.kit.messaging.dedup.DeduplicatingMessageHandler;
+import com.adhar.kit.messaging.dedup.InMemoryProcessedMessageStore;
+import com.adhar.kit.messaging.dedup.ProcessedMessageStore;
+import com.adhar.kit.messaging.metrics.MessagingMetrics;
+import com.adhar.kit.messaging.properties.AdharMessagingProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -231,12 +244,102 @@ public class MessagingFacade implements MessagingService {
     private final AtomicInteger subscriptionCounter = new AtomicInteger(0);
 
     /**
-     * Private constructor to enforce singleton pattern.
+     * Maps a facade-level subscription ID to the consumer ID returned by the underlying
+     * {@link MessageListener}, so {@link #unsubscribe(String)} can be delegated correctly.
+     * Empty when no {@link MessageListener} is wired (stub mode).
+     */
+    private final Map<String, String> delegateConsumerIds = new ConcurrentHashMap<>();
+
+    /**
+     * The broker-backed publisher this facade delegates to, or {@code null} if none was
+     * wired (in which case {@link #publish} falls back to a logging stub).
+     */
+    private final MessagePublisher messagePublisher;
+
+    /**
+     * The broker-backed listener this facade delegates to, or {@code null} if none was
+     * wired (in which case {@link #subscribe} stores the handler but never invokes it).
+     */
+    private final MessageListener messageListener;
+
+    /**
+     * Messaging configuration, including the retry/DLQ/dedup settings applied to the
+     * consume pipeline built in {@link #buildPipeline(String, Consumer)}.
+     */
+    private final AdharMessagingProperties properties;
+
+    /**
+     * Optional metrics recorder; {@code null} when micrometer is not on the classpath or
+     * no {@code MeterRegistry} bean is available.
+     */
+    private final MessagingMetrics metrics;
+
+    /**
+     * Deduplication store shared by every subscription on this facade instance, built
+     * only when {@code adhar.messaging.common.dedup.enabled=true}.
+     */
+    private final ProcessedMessageStore dedupStore;
+
+    /**
+     * Dead-letter publisher shared by every subscription on this facade instance, built
+     * only when {@code adhar.messaging.common.dlq.enabled=true} and a
+     * {@link MessagePublisher} is available to publish to the DLQ destination.
+     */
+    private final DeadLetterPublisher deadLetterPublisher;
+
+    /**
+     * Private no-arg constructor used by the legacy {@link #getInstance()} singleton
+     * accessor. It builds a fully-stubbed facade (no broker wiring), matching the
+     * historical behaviour of this class before broker wiring was introduced.
      *
-     * <p>Use {@link #getInstance()} to obtain the messaging facade instance.</p>
+     * <p>Application code that runs under Spring Boot should instead let
+     * {@code MessagingAutoConfiguration} create the {@code MessagingFacade} bean via
+     * {@link #MessagingFacade(MessagePublisher, MessageListener, AdharMessagingProperties, MessagingMetrics)},
+     * which wires the real Kafka/RabbitMQ publisher and listener beans when present.</p>
      */
     private MessagingFacade() {
-        log.info("Initialized MessagingFacade");
+        this(null, null, null, null);
+    }
+
+    /**
+     * Creates a messaging facade backed by the given publisher/listener.
+     *
+     * <p>Any of the four arguments may be {@code null}:</p>
+     * <ul>
+     *   <li>a {@code null} {@code messagePublisher} makes {@link #publish} a logging stub</li>
+     *   <li>a {@code null} {@code messageListener} makes {@link #subscribe} store the handler
+     *       without ever invoking it (a warning is logged)</li>
+     *   <li>a {@code null} {@code properties} falls back to default {@link AdharMessagingProperties}</li>
+     *   <li>a {@code null} {@code metrics} simply disables metrics recording</li>
+     * </ul>
+     *
+     * @param messagePublisher the publisher to delegate {@link #publish} calls to, or {@code null}
+     * @param messageListener  the listener to delegate {@link #subscribe} calls to, or {@code null}
+     * @param properties       messaging configuration (retry/DLQ/dedup), or {@code null} for defaults
+     * @param metrics          optional metrics recorder, or {@code null} to disable metrics
+     */
+    public MessagingFacade(MessagePublisher messagePublisher, MessageListener messageListener,
+                           AdharMessagingProperties properties, MessagingMetrics metrics) {
+        this.messagePublisher = messagePublisher;
+        this.messageListener = messageListener;
+        this.properties = properties != null ? properties : new AdharMessagingProperties();
+        this.metrics = metrics;
+
+        AdharMessagingProperties.CommonProperties common = this.properties.getCommon();
+        this.dedupStore = common.getDedup().isEnabled()
+                ? new InMemoryProcessedMessageStore(Duration.ofMillis(Math.max(1, common.getDedup().getTtlMs())))
+                : null;
+        this.deadLetterPublisher = (common.getDlq().isEnabled() && messagePublisher != null)
+                ? new DeadLetterPublisher(messagePublisher, common.getDlq(), metrics)
+                : null;
+
+        log.info("Initialized MessagingFacade (publisher={}, listener={}, retry.enabled={}, dlq.enabled={}, dedup.enabled={})",
+                describe(messagePublisher), describe(messageListener),
+                common.getRetry().isEnabled(), common.getDlq().isEnabled(), common.getDedup().isEnabled());
+    }
+
+    private static String describe(Object delegate) {
+        return delegate != null ? delegate.getClass().getSimpleName() : "none (stub)";
     }
 
     /**
@@ -329,8 +432,16 @@ public class MessagingFacade implements MessagingService {
     @Override
     public <T> void publish(String topic, T message) {
         log.debug("Publishing message to topic: {}", topic);
-        // Framework-specific implementation will override this
-        log.warn("MessagingFacade publish not fully implemented - using stub");
+        if (messagePublisher == null) {
+            log.warn("MessagingFacade publish not fully implemented - no MessagePublisher bean registered; "
+                    + "message to topic {} was dropped (using stub)", topic);
+            return;
+        }
+        boolean published = messagePublisher.publish(topic, message);
+        recordPublishMetric(topic, published);
+        if (!published) {
+            log.warn("Failed to publish message to topic {}", topic);
+        }
     }
 
     /**
@@ -409,8 +520,27 @@ public class MessagingFacade implements MessagingService {
     @Override
     public <T> void publish(String topic, String key, T message) {
         log.debug("Publishing message with key {} to topic: {}", key, topic);
-        // Framework-specific implementation will override this
-        log.warn("MessagingFacade publish with key not fully implemented - using stub");
+        if (messagePublisher == null) {
+            log.warn("MessagingFacade publish not fully implemented - no MessagePublisher bean registered; "
+                    + "message with key {} to topic {} was dropped (using stub)", key, topic);
+            return;
+        }
+        boolean published = messagePublisher.publish(topic, key, message);
+        recordPublishMetric(topic, published);
+        if (!published) {
+            log.warn("Failed to publish message with key {} to topic {}", key, topic);
+        }
+    }
+
+    private void recordPublishMetric(String topic, boolean published) {
+        if (metrics == null) {
+            return;
+        }
+        if (published) {
+            metrics.recordPublish(topic);
+        } else {
+            metrics.recordPublishFailure(topic);
+        }
     }
 
     /**
@@ -588,9 +718,77 @@ public class MessagingFacade implements MessagingService {
                                  Class<T> messageType, Consumer<T> handler) {
         String subscriptionId = "sub-" + subscriptionCounter.incrementAndGet();
         subscriptions.put(subscriptionId, handler);
-        log.info("Subscribed to topic {} with group {} (subscriptionId: {})",
-                 topic, consumerGroup, subscriptionId);
+
+        if (messageListener == null) {
+            log.warn("MessagingFacade subscribe not fully implemented - no MessageListener bean registered; "
+                    + "handler for topic {} was stored but will never receive messages (using stub)", topic);
+            return subscriptionId;
+        }
+
+        MessageHandler<T> pipeline = buildPipeline(topic, handler);
+        String consumerId = messageListener.subscribeWithHeadersAndAck(topic, consumerGroup, messageType,
+                (payload, headers) -> {
+                    MessageHandler.MessageContext context = new SimpleMessageContext(
+                            topic, topic, consumerGroup, subscriptionId, consumerGroup, resolveMessageId(headers));
+                    return pipeline.handle(payload, headers, context);
+                });
+        delegateConsumerIds.put(subscriptionId, consumerId);
+
+        log.info("Subscribed to topic {} with group {} via {} (subscriptionId: {})",
+                 topic, consumerGroup, messageListener.getClass().getSimpleName(), subscriptionId);
         return subscriptionId;
+    }
+
+    /**
+     * Builds the message-handling pipeline applied to every message delivered to a
+     * facade-level subscription: the user's handler at the core, optionally wrapped with
+     * retry (+ dead-letter routing on exhaustion), optionally wrapped again with
+     * deduplication.
+     * <p>
+     * Deduplication sits outermost so a duplicate delivery is skipped entirely rather
+     * than uselessly retried; retry sits directly around the user handler so only actual
+     * processing failures trigger a retry/backoff/DLQ cycle.
+     *
+     * @param topic   the topic/queue this subscription is consuming from (used for metrics/logging)
+     * @param handler the user-supplied handler to invoke for each (non-duplicate) message
+     * @param <T>     the message payload type
+     * @return the composed handler to invoke for every delivered message
+     */
+    private <T> MessageHandler<T> buildPipeline(String topic, Consumer<T> handler) {
+        MessageHandler<T> pipeline = (payload, headers, context) -> {
+            handler.accept(payload);
+            if (metrics != null) {
+                metrics.recordConsume(topic);
+            }
+            return true;
+        };
+
+        AdharMessagingProperties.CommonProperties common = properties.getCommon();
+
+        if (common.getRetry().isEnabled()) {
+            DeadLetterPublisher dlq = common.getDlq().isEnabled() ? deadLetterPublisher : null;
+            pipeline = new RetryingMessageHandler<>(pipeline, common.getRetry(), Thread::sleep, dlq, metrics);
+        }
+
+        if (common.getDedup().isEnabled() && dedupStore != null) {
+            pipeline = new DeduplicatingMessageHandler<>(pipeline, dedupStore, metrics);
+        }
+
+        return pipeline;
+    }
+
+    private String resolveMessageId(Map<String, Object> headers) {
+        if (headers != null) {
+            Object ceId = headers.get("ce-id");
+            if (ceId != null) {
+                return ceId.toString();
+            }
+            Object messageId = headers.get("messageId");
+            if (messageId != null) {
+                return messageId.toString();
+            }
+        }
+        return UUID.randomUUID().toString();
     }
 
     /**
@@ -669,7 +867,11 @@ public class MessagingFacade implements MessagingService {
     @Override
     public void unsubscribe(String subscriptionId) {
         Consumer<?> removed = subscriptions.remove(subscriptionId);
-        if (removed != null) {
+        String delegateConsumerId = delegateConsumerIds.remove(subscriptionId);
+        if (delegateConsumerId != null && messageListener != null) {
+            messageListener.unsubscribe(delegateConsumerId);
+        }
+        if (removed != null || delegateConsumerId != null) {
             log.info("Unsubscribed: {}", subscriptionId);
         }
     }

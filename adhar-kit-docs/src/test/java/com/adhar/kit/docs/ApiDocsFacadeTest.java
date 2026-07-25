@@ -1,14 +1,18 @@
 package com.adhar.kit.docs;
 
 import com.adhar.kit.docs.api.ApiDocsService;
+import com.adhar.kit.docs.export.OpenApiSpecExporter;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.security.SecurityScheme;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.web.method.HandlerMethod;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -211,6 +215,47 @@ class ApiDocsFacadeTest {
         String json = "{\"openapi\":\"3.0.1\",\"paths\":{}}";
         facade.setOpenApiResource(new FakeOpenApiResource(json));
         assertThat(facade.getOpenApiSpec()).isEqualTo(json);
+    }
+
+    @Test
+    void getEndpointsGracefullyHandlesMalformedJsonFromInjectedBean() {
+        facade.setOpenApiResource(new FakeOpenApiResource("{\"openapi\":\"3.0.1\", not valid json"));
+        assertThat(facade.getEndpoints()).isEmpty();
+    }
+
+    @Test
+    void getEndpointsSkipsNonHttpMethodKeysUnderAPath() {
+        String json = "{\"openapi\":\"3.0.1\","
+                + "\"paths\":{"
+                + "\"/api/orders\":{\"parameters\":[],\"get\":{\"summary\":\"List orders\"}}"
+                + "}}";
+        facade.setOpenApiResource(new FakeOpenApiResource(json));
+
+        List<Map<String, String>> endpoints = facade.getEndpoints();
+        assertThat(endpoints).hasSize(1);
+        assertThat(endpoints.get(0).get("method")).isEqualTo("GET");
+    }
+
+    @Test
+    void exportOpenApiSpecWritesJsonAndYamlToGivenDirectory(@TempDir Path tempDir) {
+        facade.setTitle("Exported API");
+
+        OpenApiSpecExporter.ExportResult result = facade.exportOpenApiSpec(tempDir);
+
+        assertThat(result.jsonPath()).exists();
+        assertThat(result.yamlPath()).exists();
+        assertThat(result.jsonPath().getParent()).isEqualTo(tempDir);
+    }
+
+    @Test
+    void exportOpenApiSpecContentMatchesFacadeSpec() throws Exception {
+        facade.setTitle("Exported API");
+        Path dir = Files.createTempDirectory("adhar-docs-export-test");
+
+        OpenApiSpecExporter.ExportResult result = facade.exportOpenApiSpec(dir);
+
+        assertThat(Files.readString(result.jsonPath())).isEqualTo(facade.getOpenApiSpec());
+        assertThat(Files.readString(result.yamlPath())).isEqualTo(facade.getOpenApiSpecYaml());
     }
 
     @Test

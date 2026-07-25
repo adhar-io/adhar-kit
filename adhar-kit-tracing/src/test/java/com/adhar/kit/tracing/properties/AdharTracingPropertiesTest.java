@@ -77,6 +77,7 @@ class AdharTracingPropertiesTest {
         assertThat(defaultProps.getWeb().getSkipPatterns()).hasSize(3);
         assertThat(defaultProps.getWeb().isIncludeRequestHeaders()).isFalse();
         assertThat(defaultProps.getWeb().isIncludeResponseHeaders()).isFalse();
+        assertThat(defaultProps.getWeb().isMdcEnabled()).isTrue();
 
         // Test Database tracing properties
         assertThat(defaultProps.getDatabase()).isNotNull();

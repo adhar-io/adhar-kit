@@ -8,10 +8,13 @@ import io.swagger.v3.oas.models.media.Content;
 import io.swagger.v3.oas.models.media.MediaType;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.Parameter;
+import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -24,6 +27,11 @@ import java.util.Map;
  *   <li>Add common error responses</li>
  *   <li>Add examples and descriptions</li>
  * </ul>
+ *
+ * <p>Instances created directly via {@code new AdharOpenApiCustomizer()} apply the
+ * common headers and common error responses by default (but not examples), matching
+ * the historical default behaviour of this class. Instances created via {@link #builder()}
+ * only apply the features explicitly requested on the builder:</p>
  *
  * <p><b>Example:</b></p>
  * <pre>{@code
@@ -43,6 +51,24 @@ import java.util.Map;
 @Slf4j
 public class AdharOpenApiCustomizer {
 
+    private final boolean includeHeaders;
+    private final boolean includeResponses;
+    private final boolean includeExamples;
+
+    /**
+     * Creates a customizer that applies common headers and common error responses,
+     * preserving this class's historical default behaviour.
+     */
+    public AdharOpenApiCustomizer() {
+        this(true, true, false);
+    }
+
+    AdharOpenApiCustomizer(boolean includeHeaders, boolean includeResponses, boolean includeExamples) {
+        this.includeHeaders = includeHeaders;
+        this.includeResponses = includeResponses;
+        this.includeExamples = includeExamples;
+    }
+
     /**
      * Customizes OpenAPI specification.
      *
@@ -52,9 +78,7 @@ public class AdharOpenApiCustomizer {
         log.info("Customizing OpenAPI documentation");
 
         if (openApi.getPaths() != null) {
-            openApi.getPaths().forEach((path, pathItem) -> {
-                customizePath(path, pathItem);
-            });
+            openApi.getPaths().forEach(this::customizePath);
         }
     }
 
@@ -78,11 +102,17 @@ public class AdharOpenApiCustomizer {
             return;
         }
 
-        // Add common headers
-        addCommonHeaders(operation);
+        if (includeHeaders) {
+            addCommonHeaders(operation);
+        }
 
-        // Add common responses
-        addCommonResponses(operation);
+        if (includeResponses) {
+            addCommonResponses(operation);
+        }
+
+        if (includeExamples) {
+            addExamples(operation);
+        }
     }
 
     /**
@@ -124,7 +154,8 @@ public class AdharOpenApiCustomizer {
         if (!responses.containsKey("400")) {
             responses.addApiResponse("400", createErrorResponse(
                 "Bad Request",
-                "Invalid request parameters"
+                "Invalid request parameters",
+                400
             ));
         }
 
@@ -132,7 +163,8 @@ public class AdharOpenApiCustomizer {
         if (!responses.containsKey("401")) {
             responses.addApiResponse("401", createErrorResponse(
                 "Unauthorized",
-                "Authentication required"
+                "Authentication required",
+                401
             ));
         }
 
@@ -140,7 +172,17 @@ public class AdharOpenApiCustomizer {
         if (!responses.containsKey("403")) {
             responses.addApiResponse("403", createErrorResponse(
                 "Forbidden",
-                "Access denied"
+                "Access denied",
+                403
+            ));
+        }
+
+        // Add 404 Not Found if not present
+        if (!responses.containsKey("404")) {
+            responses.addApiResponse("404", createErrorResponse(
+                "Not Found",
+                "Resource not found",
+                404
             ));
         }
 
@@ -148,15 +190,91 @@ public class AdharOpenApiCustomizer {
         if (!responses.containsKey("500")) {
             responses.addApiResponse("500", createErrorResponse(
                 "Internal Server Error",
-                "An unexpected error occurred"
+                "An unexpected error occurred",
+                500
             ));
         }
     }
 
     /**
+     * Attaches example request/response payloads to an operation's request body and
+     * response content, based on the schema already associated with each media type.
+     *
+     * <p>Existing examples are never overwritten.</p>
+     */
+    private void addExamples(Operation operation) {
+        RequestBody requestBody = operation.getRequestBody();
+        if (requestBody != null && requestBody.getContent() != null) {
+            requestBody.getContent().forEach((mediaTypeKey, mediaType) -> addExampleToMediaType(mediaType));
+        }
+
+        ApiResponses responses = operation.getResponses();
+        if (responses != null) {
+            responses.values().forEach(response -> {
+                if (response.getContent() != null) {
+                    response.getContent().forEach((mediaTypeKey, mediaType) -> addExampleToMediaType(mediaType));
+                }
+            });
+        }
+    }
+
+    private void addExampleToMediaType(MediaType mediaType) {
+        if (mediaType.getExample() != null || mediaType.getExamples() != null) {
+            return;
+        }
+        Object example = buildExampleForSchema(mediaType.getSchema());
+        if (example != null) {
+            mediaType.setExample(example);
+        }
+    }
+
+    /**
+     * Builds a representative example value for the given schema. Object schemas with
+     * declared properties produce a map keyed by property name; scalar schemas produce a
+     * single representative value.
+     */
+    @SuppressWarnings("unchecked")
+    private Object buildExampleForSchema(Schema<?> schema) {
+        if (schema == null) {
+            return null;
+        }
+        Map<String, Schema> properties = schema.getProperties();
+        if (properties != null && !properties.isEmpty()) {
+            Map<String, Object> example = new LinkedHashMap<>();
+            properties.forEach((name, propertySchema) -> example.put(name, buildScalarExample(propertySchema)));
+            return example;
+        }
+        return buildScalarExample(schema);
+    }
+
+    private Object buildScalarExample(Schema<?> schema) {
+        if (schema == null) {
+            return "value";
+        }
+        String type = schema.getType();
+        String format = schema.getFormat();
+        if (type == null) {
+            return "value";
+        }
+        return switch (type) {
+            case "integer" -> 0;
+            case "number" -> 0.0;
+            case "boolean" -> true;
+            case "array" -> List.of();
+            case "string" -> switch (format == null ? "" : format) {
+                case "date-time" -> "2024-01-01T00:00:00Z";
+                case "date" -> "2024-01-01";
+                case "uuid" -> "550e8400-e29b-41d4-a716-446655440000";
+                default -> "string";
+            };
+            default -> "value";
+        };
+    }
+
+    /**
      * Creates error response.
      */
-    private ApiResponse createErrorResponse(String summary, String description) {
+    private ApiResponse createErrorResponse(String summary, String description, int status) {
         ApiResponse response = new ApiResponse()
             .description(description);
 
@@ -174,6 +292,18 @@ public class AdharOpenApiCustomizer {
             .addProperty("correlationId", new Schema<>().type("string"));
 
         mediaType.schema(schema);
+
+        if (includeExamples) {
+            Map<String, Object> example = new LinkedHashMap<>();
+            example.put("timestamp", "2024-01-01T00:00:00Z");
+            example.put("status", status);
+            example.put("error", summary);
+            example.put("message", description);
+            example.put("path", "/api/resource");
+            example.put("correlationId", "550e8400-e29b-41d4-a716-446655440000");
+            mediaType.setExample(example);
+        }
+
         content.addMediaType("application/json", mediaType);
         response.content(content);
 
@@ -191,24 +321,52 @@ public class AdharOpenApiCustomizer {
 
     /**
      * Builder for OpenAPI customizer.
+     *
+     * <p>Unlike a plain {@code new AdharOpenApiCustomizer()}, a builder-produced
+     * customizer only applies the features explicitly opted into via
+     * {@link #addCommonHeaders()}, {@link #addCommonResponses()}, and
+     * {@link #addExamples()}.</p>
      */
     public static class Builder {
-        private final AdharOpenApiCustomizer customizer = new AdharOpenApiCustomizer();
+        private boolean includeHeaders;
+        private boolean includeResponses;
+        private boolean includeExamples;
 
+        /**
+         * Enables adding the {@code X-Correlation-ID} and {@code X-Request-ID} request
+         * headers to every operation.
+         *
+         * @return this builder
+         */
         public Builder addCommonHeaders() {
+            this.includeHeaders = true;
             return this;
         }
 
+        /**
+         * Enables adding standard 400/401/403/404/500 error responses (with the shared
+         * error schema) to every operation that doesn't already declare them.
+         *
+         * @return this builder
+         */
         public Builder addCommonResponses() {
+            this.includeResponses = true;
             return this;
         }
 
+        /**
+         * Enables attaching representative example payloads to request bodies and
+         * response content that don't already declare an example.
+         *
+         * @return this builder
+         */
         public Builder addExamples() {
+            this.includeExamples = true;
             return this;
         }
 
         public AdharOpenApiCustomizer build() {
-            return customizer;
+            return new AdharOpenApiCustomizer(includeHeaders, includeResponses, includeExamples);
         }
     }
 
@@ -216,4 +374,3 @@ public class AdharOpenApiCustomizer {
         return new Builder();
     }
 }
-

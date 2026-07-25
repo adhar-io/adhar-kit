@@ -126,4 +126,42 @@ class ProfilingActuatorEndpointTest {
         assertThat(response.get("status")).isEqualTo("Profiling statistics reset successfully");
         assertThat(registry.getReport().totalProfiledCalls()).isZero();
     }
+
+    @Test
+    @DisplayName("getSection('percentiles') exposes per-method avg/min/max/p95/p99")
+    @SuppressWarnings("unchecked")
+    void getSectionPercentiles() {
+        record("a", "svc", 10L, true);
+        record("a", "svc", 20L, true);
+        record("a", "svc", 30L, true);
+
+        Object result = endpoint.getSection("percentiles", null);
+
+        assertThat(result).isInstanceOf(Map.class);
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertThat(map).containsKey("percentiles");
+        Map<String, ProfilingReport.MethodStats> percentiles =
+                (Map<String, ProfilingReport.MethodStats>) map.get("percentiles");
+        assertThat(percentiles).containsKey("svc.a");
+        ProfilingReport.MethodStats stats = percentiles.get("svc.a");
+        assertThat(stats.averageMs()).isEqualTo(20.0);
+        assertThat(stats.p95Ms()).isGreaterThan(0);
+        assertThat(stats.p99Ms()).isGreaterThan(0);
+    }
+
+    @Test
+    @DisplayName("getSection('windows') exposes the current report plus bounded window history")
+    @SuppressWarnings("unchecked")
+    void getSectionWindows() {
+        record("a", "svc", 10L, true);
+
+        Object result = endpoint.getSection("windows", null);
+
+        assertThat(result).isInstanceOf(Map.class);
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertThat(map).containsKeys("current", "history");
+        assertThat(map.get("current")).isInstanceOf(ProfilingReport.class);
+        assertThat(map.get("history")).isInstanceOf(java.util.List.class);
+        assertThat(((ProfilingReport) map.get("current")).totalProfiledCalls()).isEqualTo(1);
+    }
 }

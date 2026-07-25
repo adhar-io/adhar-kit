@@ -1,29 +1,35 @@
 package com.adhar.kit.ai.aspect;
 
-import com.adhar.kit.ai.AiFacade;
 import com.adhar.kit.ai.annotation.AiChat;
+import com.adhar.kit.ai.model.AiChatRequest;
+import com.adhar.kit.ai.model.AiChatResponse;
+import com.adhar.kit.ai.service.AiService;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.beans.factory.ObjectProvider;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for {@link AiChatAspect}. The internal {@link AiFacade} singleton is
- * replaced with a mock via reflection so chat interactions never hit a real model.
+ * Unit tests for {@link AiChatAspect}. The aspect is bridged to the Spring-managed
+ * {@link AiService} (looked up via an {@link ObjectProvider}, mirroring how the
+ * real {@code AiAutoConfiguration} wires it), so tests mock that provider/service
+ * pair instead of the legacy {@code AiFacade} singleton.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -34,7 +40,9 @@ class AiChatAspectTest {
     @Mock
     private MethodSignature signature;
     @Mock
-    private AiFacade facade;
+    private ObjectProvider<AiService> aiServiceProvider;
+    @Mock
+    private AiService aiService;
 
     private AiChatAspect aspect;
 
@@ -52,18 +60,11 @@ class AiChatAspectTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        aspect = new AiChatAspect();
-        injectFacade(aspect, facade);
+        aspect = new AiChatAspect(aiServiceProvider);
         Method method = Sample.class.getMethod("greet", String.class);
         when(joinPoint.getSignature()).thenReturn(signature);
         when(signature.getMethod()).thenReturn(method);
         when(signature.getParameterNames()).thenReturn(new String[]{"name"});
-    }
-
-    private void injectFacade(AiChatAspect target, AiFacade value) throws Exception {
-        Field field = AiChatAspect.class.getDeclaredField("aiFacade");
-        field.setAccessible(true);
-        field.set(target, value);
     }
 
     private AiChat annotation(String prompt, String systemPrompt, boolean async) {
@@ -71,50 +72,69 @@ class AiChatAspectTest {
         when(aiChat.prompt()).thenReturn(prompt);
         when(aiChat.systemPrompt()).thenReturn(systemPrompt);
         when(aiChat.async()).thenReturn(async);
+        when(aiChat.model()).thenReturn("");
+        when(aiChat.temperature()).thenReturn(0.7);
+        when(aiChat.maxTokens()).thenReturn(1000);
+        when(aiChat.stopSequences()).thenReturn(new String[]{});
         return aiChat;
     }
 
+    private AiChatResponse responseWithContent(String content) {
+        return AiChatResponse.builder().content(content).build();
+    }
+
     @Test
-    void proceedsWithOriginalMethodWhenFacadeUnavailable() throws Throwable {
-        when(facade.isAvailable()).thenReturn(false);
+    void proceedsWithOriginalMethodWhenAiServiceUnavailable() throws Throwable {
+        when(aiServiceProvider.getIfAvailable()).thenReturn(null);
         when(joinPoint.proceed()).thenReturn("original");
 
         Object result = aspect.processChatAnnotation(joinPoint, annotation("Hi {name}", "", false));
 
         assertThat(result).isEqualTo("original");
         verify(joinPoint).proceed();
+        verifyNoInteractions(aiService);
     }
 
     @Test
     void synchronousChatWithoutSystemPromptSubstitutesParameters() throws Throwable {
-        when(facade.isAvailable()).thenReturn(true);
+        when(aiServiceProvider.getIfAvailable()).thenReturn(aiService);
         when(joinPoint.getArgs()).thenReturn(new Object[]{"Alice"});
-        when(facade.chat("Hello Alice")).thenReturn("Hi Alice!");
+        when(aiService.chat(any(AiChatRequest.class))).thenReturn(responseWithContent("Hi Alice!"));
 
         Object result = aspect.processChatAnnotation(joinPoint, annotation("Hello {name}", "", false));
 
         assertThat(result).isEqualTo("Hi Alice!");
-        verify(facade).chat("Hello Alice");
+
+        ArgumentCaptor<AiChatRequest> captor = ArgumentCaptor.forClass(AiChatRequest.class);
+        verify(aiService).chat(captor.capture());
+        assertThat(captor.getValue().getMessage()).isEqualTo("Hello Alice");
+        assertThat(captor.getValue().getHistory()).isNull();
     }
 
     @Test
-    void synchronousChatWithSystemPrompt() throws Throwable {
-        when(facade.isAvailable()).thenReturn(true);
+    void synchronousChatWithSystemPromptSendsHistoryMessage() throws Throwable {
+        when(aiServiceProvider.getIfAvailable()).thenReturn(aiService);
         when(joinPoint.getArgs()).thenReturn(new Object[]{"Bob"});
-        when(facade.chat("You are helpful", "Greet Bob")).thenReturn("Hi Bob!");
+        when(aiService.chat(any(AiChatRequest.class))).thenReturn(responseWithContent("Hi Bob!"));
 
         Object result = aspect.processChatAnnotation(
                 joinPoint, annotation("Greet {name}", "You are helpful", false));
 
         assertThat(result).isEqualTo("Hi Bob!");
-        verify(facade).chat("You are helpful", "Greet Bob");
+
+        ArgumentCaptor<AiChatRequest> captor = ArgumentCaptor.forClass(AiChatRequest.class);
+        verify(aiService).chat(captor.capture());
+        assertThat(captor.getValue().getMessage()).isEqualTo("Greet Bob");
+        assertThat(captor.getValue().getHistory()).hasSize(1);
+        assertThat(captor.getValue().getHistory().get(0).getRole()).isEqualTo(AiChatRequest.MessageRole.SYSTEM);
+        assertThat(captor.getValue().getHistory().get(0).getContent()).isEqualTo("You are helpful");
     }
 
     @Test
     void asynchronousChatReturnsFuture() throws Throwable {
-        when(facade.isAvailable()).thenReturn(true);
+        when(aiServiceProvider.getIfAvailable()).thenReturn(aiService);
         when(joinPoint.getArgs()).thenReturn(new Object[]{"Carol"});
-        when(facade.chat("Hello Carol")).thenReturn("async-hi");
+        when(aiService.chat(any(AiChatRequest.class))).thenReturn(responseWithContent("async-hi"));
 
         Object result = aspect.processChatAnnotation(joinPoint, annotation("Hello {name}", "", true));
 
@@ -124,23 +144,48 @@ class AiChatAspectTest {
 
     @Test
     void resolvesNestedPropertiesViaGetter() throws Throwable {
-        when(facade.isAvailable()).thenReturn(true);
+        when(aiServiceProvider.getIfAvailable()).thenReturn(aiService);
         when(signature.getParameterNames()).thenReturn(new String[]{"product"});
         when(joinPoint.getArgs()).thenReturn(new Object[]{new Product()});
-        when(facade.chat("Name is Widget active true")).thenReturn("ok");
+        when(aiService.chat(any(AiChatRequest.class))).thenReturn(responseWithContent("ok"));
 
         Object result = aspect.processChatAnnotation(
                 joinPoint, annotation("Name is {product.name} active {product.active}", "", false));
 
         assertThat(result).isEqualTo("ok");
-        verify(facade).chat("Name is Widget active true");
+
+        ArgumentCaptor<AiChatRequest> captor = ArgumentCaptor.forClass(AiChatRequest.class);
+        verify(aiService).chat(captor.capture());
+        assertThat(captor.getValue().getMessage()).isEqualTo("Name is Widget active true");
+    }
+
+    @Test
+    void appliesModelAndParameterOverridesFromAnnotation() throws Throwable {
+        when(aiServiceProvider.getIfAvailable()).thenReturn(aiService);
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"Dan"});
+        AiChat aiChat = annotation("Hello {name}", "", false);
+        when(aiChat.model()).thenReturn("gpt-4");
+        when(aiChat.temperature()).thenReturn(0.2);
+        when(aiChat.maxTokens()).thenReturn(256);
+        when(aiChat.stopSequences()).thenReturn(new String[]{"END"});
+        when(aiService.chat(any(AiChatRequest.class))).thenReturn(responseWithContent("ok"));
+
+        aspect.processChatAnnotation(joinPoint, aiChat);
+
+        ArgumentCaptor<AiChatRequest> captor = ArgumentCaptor.forClass(AiChatRequest.class);
+        verify(aiService).chat(captor.capture());
+        AiChatRequest request = captor.getValue();
+        assertThat(request.getModel()).isEqualTo("gpt-4");
+        assertThat(request.getParameters().getTemperature()).isEqualTo(0.2);
+        assertThat(request.getParameters().getMaxTokens()).isEqualTo(256);
+        assertThat(request.getParameters().getStopSequences()).containsExactly("END");
     }
 
     @Test
     void wrapsFailuresInRuntimeException() throws Throwable {
-        when(facade.isAvailable()).thenReturn(true);
+        when(aiServiceProvider.getIfAvailable()).thenReturn(aiService);
         when(joinPoint.getArgs()).thenReturn(new Object[]{"Dave"});
-        when(facade.chat(anyString())).thenThrow(new RuntimeException("model down"));
+        when(aiService.chat(any(AiChatRequest.class))).thenThrow(new RuntimeException("model down"));
 
         assertThatThrownBy(() -> aspect.processChatAnnotation(joinPoint, annotation("Hi {name}", "", false)))
                 .isInstanceOf(RuntimeException.class)

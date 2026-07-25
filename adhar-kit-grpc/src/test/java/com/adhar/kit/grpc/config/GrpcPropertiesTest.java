@@ -103,5 +103,25 @@ class GrpcPropertiesTest {
         assertTrue(observability.isEnableLogging());
         assertEquals("BASIC", observability.getLogLevel());
     }
+
+    @Test
+    void testDefaultAuthConfiguration() {
+        GrpcProperties properties = new GrpcProperties();
+
+        assertFalse(properties.getAuth().isEnabled());
+        assertNull(properties.getAuth().getSharedSecret());
+        assertTrue(properties.isEnableServiceRegistrar());
+        assertTrue(properties.isEnableClientInjection());
+    }
+
+    @Test
+    void testDefaultRetryBackoffConfiguration() {
+        GrpcProperties.ChannelConfig channel = new GrpcProperties().getClient().getDefaults();
+
+        assertEquals(1000, channel.getInitialBackoffMillis());
+        assertEquals(10000, channel.getMaxBackoffMillis());
+        assertEquals(2.0, channel.getBackoffMultiplier());
+        assertTrue(channel.getRetryableStatusCodes().contains("UNAVAILABLE"));
+    }
 }
 

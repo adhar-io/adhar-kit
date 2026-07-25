@@ -1,8 +1,11 @@
 package com.adhar.kit.rewrite.facade;
 
 import com.adhar.kit.rewrite.catalog.RecipeCatalog.RecipeSet;
+import com.adhar.kit.rewrite.catalog.RecipeCatalogValidator.ValidationReport;
+import com.adhar.kit.rewrite.engine.InProcessRewriteRunner.SourceInput;
 import com.adhar.kit.rewrite.facade.RewriteFacade.FileChange;
 import com.adhar.kit.rewrite.facade.RewriteFacade.RewriteResult;
+import com.adhar.kit.rewrite.report.RewriteImpactReport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -186,5 +189,89 @@ class RewriteFacadeTest {
     void isRecipeAvailable_recipeClassMissing_returnsFalse() {
         // quarkus-3 references org.openrewrite.quarkus.* which is not on the test classpath.
         assertThat(facade.isRecipeAvailable("quarkus-3")).isFalse();
+    }
+
+    // -------------------------------------------------------------------------
+    // runInProcess
+    // -------------------------------------------------------------------------
+
+    private static final String CONVENIENCE_SHORTCUT_SOURCE = """
+            class Demo {
+                void run(AdharKitFacade adhar) {
+                    adhar.getMetrics().increment("requests");
+                }
+            }
+            """;
+
+    @Test
+    void runInProcess_byKey_actuallyRewritesSourceAndReturnsRealDiff() {
+        RewriteImpactReport report = facade.runInProcess(
+                "adhar-convenience-api",
+                List.of(new SourceInput("Demo.java", CONVENIENCE_SHORTCUT_SOURCE))
+        );
+
+        assertThat(report.changedFileCount()).isEqualTo(1);
+        assertThat(report.fileDiffs()).hasSize(1);
+        assertThat(report.fileDiffs().get(0).diff()).contains("adhar.count(\"requests\")");
+    }
+
+    @Test
+    void runInProcess_byList_actuallyRewritesSourceAndReturnsRealDiff() {
+        RewriteImpactReport report = facade.runInProcess(
+                List.of("com.adhar.kit.rewrite.recipe.adhar.UseConvenienceShortcuts"),
+                List.of(new SourceInput("Demo.java", CONVENIENCE_SHORTCUT_SOURCE))
+        );
+
+        assertThat(report.changedFileCount()).isEqualTo(1);
+    }
+
+    @Test
+    void runInProcess_withNoMatchingSource_reportsNoChanges() {
+        RewriteImpactReport report = facade.runInProcess(
+                "adhar-convenience-api",
+                List.of(new SourceInput("Demo.java", "class Demo { void run() { } }"))
+        );
+
+        assertThat(report.changedFileCount()).isZero();
+    }
+
+    @Test
+    void runInProcess_unknownKey_throws() {
+        assertThatThrownBy(() -> facade.runInProcess("nope", List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Unknown recipe set key");
+    }
+
+    @Test
+    void runInProcess_recipeRequiringConstructorArgs_throwsIllegalStateException() {
+        // org.openrewrite.java.ChangeMethodName is on the classpath but has no no-arg
+        // constructor (it requires methodPattern/newMethodName options), so it cannot be
+        // instantiated for a direct in-process run.
+        assertThatThrownBy(() -> facade.runInProcess(
+                List.of("org.openrewrite.java.ChangeMethodName"),
+                List.of(new SourceInput("Demo.java", "class Demo {}"))
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Cannot instantiate recipe");
+    }
+
+    @Test
+    void runInProcess_unknownRecipeClass_throwsIllegalStateException() {
+        assertThatThrownBy(() -> facade.runInProcess(
+                List.of("com.adhar.kit.rewrite.recipe.adhar.TotallyBogusRecipe"),
+                List.of(new SourceInput("Demo.java", "class Demo {}"))
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Cannot instantiate recipe");
+    }
+
+    // -------------------------------------------------------------------------
+    // validateCatalog
+    // -------------------------------------------------------------------------
+
+    @Test
+    void validateCatalog_realCatalog_flagsRecipesNotOnClasspath() {
+        ValidationReport report = facade.validateCatalog();
+
+        assertThat(report.isValid()).isFalse();
+        assertThat(report.unresolvedRecipesByKey()).containsKey("quarkus-3");
     }
 }

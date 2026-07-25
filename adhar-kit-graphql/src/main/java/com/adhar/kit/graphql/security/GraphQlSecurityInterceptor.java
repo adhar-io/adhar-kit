@@ -1,6 +1,15 @@
 package com.adhar.kit.graphql.security;
 
 import com.adhar.kit.graphql.config.GraphQlProperties;
+import graphql.language.Definition;
+import graphql.language.Document;
+import graphql.language.Field;
+import graphql.language.FragmentDefinition;
+import graphql.language.InlineFragment;
+import graphql.language.OperationDefinition;
+import graphql.language.Selection;
+import graphql.language.SelectionSet;
+import graphql.parser.Parser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.graphql.server.WebGraphQlInterceptor;
 import org.springframework.graphql.server.WebGraphQlRequest;
@@ -73,8 +82,14 @@ public class GraphQlSecurityInterceptor implements WebGraphQlInterceptor {
     /**
      * Checks whether the given GraphQL document contains an introspection query.
      *
-     * <p>Introspection queries are identified by the presence of {@code __schema}
-     * or {@code __type} fields in the document text.</p>
+     * <p>The document is parsed into an AST and structurally inspected for {@code __schema}
+     * or {@code __type} <em>field selections</em> (at any depth, including inside inline
+     * fragments and named fragment definitions). This avoids the false positives a naive
+     * substring search produces &mdash; e.g. a query with an unrelated string argument or
+     * field literally containing the text {@code __schema} would not be flagged.</p>
+     *
+     * <p>If the document fails to parse, this falls back to a conservative substring
+     * check so that a malformed-but-suspicious document is not silently let through.</p>
      *
      * @param document the GraphQL query document
      * @return true if the document appears to be an introspection query
@@ -83,6 +98,45 @@ public class GraphQlSecurityInterceptor implements WebGraphQlInterceptor {
         if (document == null || document.isBlank()) {
             return false;
         }
-        return document.contains(INTROSPECTION_FIELD) || document.contains(INTROSPECTION_TYPE_FIELD);
+        try {
+            Document parsed = new Parser().parseDocument(document);
+            return containsIntrospectionField(parsed);
+        } catch (Exception e) {
+            log.debug("Falling back to substring-based introspection detection ({})", e.getMessage());
+            return document.contains(INTROSPECTION_FIELD) || document.contains(INTROSPECTION_TYPE_FIELD);
+        }
+    }
+
+    private boolean containsIntrospectionField(Document document) {
+        for (Definition<?> definition : document.getDefinitions()) {
+            SelectionSet selectionSet = null;
+            if (definition instanceof OperationDefinition operationDefinition) {
+                selectionSet = operationDefinition.getSelectionSet();
+            } else if (definition instanceof FragmentDefinition fragmentDefinition) {
+                selectionSet = fragmentDefinition.getSelectionSet();
+            }
+            if (selectionSet != null && selectionSetHasIntrospectionField(selectionSet)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean selectionSetHasIntrospectionField(SelectionSet selectionSet) {
+        for (Selection<?> selection : selectionSet.getSelections()) {
+            if (selection instanceof Field field) {
+                if (INTROSPECTION_FIELD.equals(field.getName()) || INTROSPECTION_TYPE_FIELD.equals(field.getName())) {
+                    return true;
+                }
+                if (field.getSelectionSet() != null && selectionSetHasIntrospectionField(field.getSelectionSet())) {
+                    return true;
+                }
+            } else if (selection instanceof InlineFragment inlineFragment
+                    && inlineFragment.getSelectionSet() != null
+                    && selectionSetHasIntrospectionField(inlineFragment.getSelectionSet())) {
+                return true;
+            }
+        }
+        return false;
     }
 }

@@ -1,5 +1,6 @@
 package com.adhar.kit.commons.config;
 
+import com.adhar.kit.commons.i18n.ErrorCatalog;
 import com.adhar.kit.commons.idempotency.IdempotencyAspect;
 import com.adhar.kit.commons.idempotency.IdempotencyStore;
 import com.adhar.kit.commons.idempotency.InMemoryIdempotencyStore;
@@ -42,6 +43,31 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class AdharCommonsAutoConfiguration {
 
     /**
+     * Creates the localized {@link ErrorCatalog} backed by the bundled
+     * {@code adhar-errors} classpath message bundles. When the application
+     * exposes its own {@link org.springframework.context.MessageSource} bean it
+     * is used as fallback parent, so applications can add messages for custom
+     * error codes without redefining the catalog. Define your own
+     * {@code ErrorCatalog} bean to replace it entirely, or disable with
+     * {@code adhar.commons.error-catalog.enabled=false}.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.commons.error-catalog", name = "enabled",
+        havingValue = "true", matchIfMissing = true)
+    public ErrorCatalog adharErrorCatalog(
+            ObjectProvider<org.springframework.context.MessageSource> messageSources) {
+        ErrorCatalog catalog = ErrorCatalog.withDefaults();
+        org.springframework.context.MessageSource parent = messageSources.getIfUnique();
+        if (parent != null
+                && catalog.getMessageSource()
+                    instanceof org.springframework.context.support.ResourceBundleMessageSource bundleSource) {
+            bundleSource.setParentMessageSource(parent);
+        }
+        return catalog;
+    }
+
+    /**
      * Registers the Spring MVC global exception handler when Spring Web and the
      * Servlet API are present.
      */
@@ -53,11 +79,16 @@ public class AdharCommonsAutoConfiguration {
 
         /**
          * Creates the global exception handler; define your own bean to replace it.
+         * When an {@link ErrorCatalog} is available it is wired in so error
+         * responses are localized to the request locale.
          */
         @Bean
         @ConditionalOnMissingBean
-        public SpringGlobalExceptionHandler springGlobalExceptionHandler() {
-            return new SpringGlobalExceptionHandler();
+        public SpringGlobalExceptionHandler springGlobalExceptionHandler(
+                ObjectProvider<ErrorCatalog> errorCatalog) {
+            SpringGlobalExceptionHandler handler = new SpringGlobalExceptionHandler();
+            errorCatalog.ifAvailable(handler::setErrorCatalog);
+            return handler;
         }
     }
 

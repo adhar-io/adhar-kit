@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 
 /**
@@ -25,8 +26,8 @@ public class PerfProfilerAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public ProfilingRegistry profilingRegistry() {
-        return new ProfilingRegistry();
+    public ProfilingRegistry profilingRegistry(PerfProfilerProperties properties) {
+        return new ProfilingRegistry(properties.getWindowDuration(), properties.getHistoryWindows());
     }
 
     @Bean
@@ -37,8 +38,11 @@ public class PerfProfilerAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public ProfilingAspect profilingAspect(MeterRegistry meterRegistry, ProfilingRegistry profilingRegistry) {
-        return new ProfilingAspect(meterRegistry, profilingRegistry);
+    public ProfilingAspect profilingAspect(MeterRegistry meterRegistry,
+                                           ProfilingRegistry profilingRegistry,
+                                           ApplicationEventPublisher eventPublisher,
+                                           PerfProfilerProperties properties) {
+        return new ProfilingAspect(meterRegistry, profilingRegistry, eventPublisher, properties);
     }
 
     @Bean

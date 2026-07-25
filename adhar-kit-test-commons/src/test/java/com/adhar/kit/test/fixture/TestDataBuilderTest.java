@@ -264,6 +264,79 @@ class TestDataBuilderTest {
         assertTrue(result.active);
     }
 
+    @Test
+    @DisplayName("Should generate random alphanumeric string of requested length")
+    void testRandomAlphanumeric() {
+        String value = TestDataBuilder.randomAlphanumeric(12);
+
+        assertNotNull(value);
+        assertEquals(12, value.length());
+        assertTrue(value.matches("^[A-Za-z0-9]+$"), "Should only contain alphanumeric characters");
+    }
+
+    @Test
+    @DisplayName("Should generate empty alphanumeric string for zero length")
+    void testRandomAlphanumericZeroLength() {
+        assertEquals("", TestDataBuilder.randomAlphanumeric(0));
+    }
+
+    @Test
+    @DisplayName("Should throw for negative alphanumeric length")
+    void testRandomAlphanumericNegativeLength() {
+        assertThrows(IllegalArgumentException.class, () -> TestDataBuilder.randomAlphanumeric(-1));
+    }
+
+    @Test
+    @DisplayName("Should generate different alphanumeric strings across calls")
+    void testRandomAlphanumericVaries() {
+        String first = TestDataBuilder.randomAlphanumeric(20);
+        String second = TestDataBuilder.randomAlphanumeric(20);
+
+        assertNotEquals(first, second);
+    }
+
+    @Test
+    @DisplayName("Should pick a random element from a list")
+    void testRandomElement() {
+        List<String> options = List.of("a", "b", "c");
+
+        String picked = TestDataBuilder.randomElement(options);
+
+        assertTrue(options.contains(picked));
+    }
+
+    @Test
+    @DisplayName("Should return the only element for a single-element list")
+    void testRandomElementSingle() {
+        assertEquals("only", TestDataBuilder.randomElement(List.of("only")));
+    }
+
+    @Test
+    @DisplayName("Should throw for null or empty options list")
+    void testRandomElementInvalid() {
+        assertThrows(IllegalArgumentException.class, () -> TestDataBuilder.randomElement(null));
+        assertThrows(IllegalArgumentException.class, () -> TestDataBuilder.randomElement(List.of()));
+    }
+
+    @Test
+    @DisplayName("Should build a timestamp in the past")
+    void testPastTimestamp() {
+        LocalDateTime before = LocalDateTime.now().minusMinutes(10);
+
+        LocalDateTime past = TestDataBuilder.pastTimestamp(5);
+
+        assertTrue(past.isAfter(before));
+        assertTrue(past.isBefore(LocalDateTime.now()));
+    }
+
+    @Test
+    @DisplayName("Should build a timestamp in the future")
+    void testFutureTimestamp() {
+        LocalDateTime future = TestDataBuilder.futureTimestamp(5);
+
+        assertTrue(future.isAfter(LocalDateTime.now()));
+    }
+
     // Test helper class
     private static class TestPerson {
         String name;

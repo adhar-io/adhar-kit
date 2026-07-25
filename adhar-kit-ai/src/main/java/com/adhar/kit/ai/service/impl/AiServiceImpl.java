@@ -1,17 +1,24 @@
 package com.adhar.kit.ai.service.impl;
 
+import com.adhar.kit.ai.component.AiMetricsCollector;
+import com.adhar.kit.ai.component.AiRateLimiter;
 import com.adhar.kit.ai.config.AiProperties;
 import com.adhar.kit.ai.model.AiChatRequest;
 import com.adhar.kit.ai.model.AiChatResponse;
+import com.adhar.kit.ai.security.AiSecurityValidator;
 import com.adhar.kit.ai.service.AiService;
 import com.adhar.kit.commons.exception.ServiceException;
 import com.adhar.kit.commons.exception.ValidationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -21,13 +28,31 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * Production-ready AI service implementation with enterprise features.
- * Implements caching, rate limiting, monitoring, and error handling.
+ *
+ * <p>Every chat request goes through three guardrail/observability stages in
+ * addition to the actual Spring AI {@link ChatModel} call:</p>
+ * <ol>
+ *   <li><b>Rate limiting</b> - {@link AiRateLimiter#checkRateLimit(String)} is
+ *       invoked (keyed by user id, falling back to tenant id, then
+ *       {@code "anonymous"}) before any model call is made; it throws a
+ *       {@link ServiceException} when the caller has exceeded its quota.</li>
+ *   <li><b>Security validation</b> - {@link AiSecurityValidator#validateRequest}
+ *       screens the outgoing prompt for unsafe/PII/sensitive content
+ *       (throwing {@link ValidationException} when blocked), and
+ *       {@link AiSecurityValidator#sanitizeContent(String)} redacts any PII that
+ *       slips through in the model's response before it is returned to the caller.</li>
+ *   <li><b>Metrics</b> - token usage and processing time reported by Spring AI
+ *       are recorded via {@link AiMetricsCollector#recordChatRequest} and, when a
+ *       per-model cost entry is configured, {@link AiMetricsCollector#recordCost}.</li>
+ * </ol>
  */
 @Slf4j
 @Service
@@ -38,34 +63,17 @@ public class AiServiceImpl implements AiService {
     private final EmbeddingModel embeddingModel;
     private final VectorStore vectorStore;
     private final AiProperties aiProperties;
+    private final AiRateLimiter rateLimiter;
+    private final AiSecurityValidator securityValidator;
+    private final AiMetricsCollector metricsCollector;
 
     @Override
     @Cacheable(value = "ai-chat", key = "#request.message + '-' + #request.model",
                condition = "#request.sessionId == null")
     public AiChatResponse chat(AiChatRequest request) {
         validateRequest(request);
-
-        try {
-            log.info("Processing AI chat request - Model: {}, Provider: {}",
-                    request.getModel(), request.getProvider());
-
-            long startTime = System.currentTimeMillis();
-
-            // Create prompt from request
-            Prompt prompt = createPrompt(request);
-
-            // Call AI service
-            ChatResponse response = chatModel.call(prompt);
-
-            long processingTime = System.currentTimeMillis() - startTime;
-
-            // Build response
-            return buildChatResponse(request, response, processingTime);
-
-        } catch (Exception e) {
-            log.error("Error processing AI chat request: {}", e.getMessage(), e);
-            throw new ServiceException("AI_CHAT_ERROR", "Failed to process chat request", e);
-        }
+        enforceGuardrails(request);
+        return executeChat(request);
     }
 
     @Override
@@ -80,24 +88,21 @@ public class AiServiceImpl implements AiService {
     @Override
     public Flux<AiChatResponse> chatStream(AiChatRequest request) {
         validateRequest(request);
+        enforceGuardrails(request);
 
-        return Flux.create(sink -> {
-            try {
-                String requestId = UUID.randomUUID().toString();
-                Prompt prompt = createPrompt(request);
+        String requestId = UUID.randomUUID().toString();
+        String model = resolveModel(request);
+        String provider = request.getProvider() != null ? request.getProvider() : "openai";
+        Prompt prompt = createPrompt(request);
+        long startTime = System.currentTimeMillis();
 
-                // Streaming implementation would go here
-                // For now, return single response
-                AiChatResponse response = chat(request);
-                response.setRequestId(requestId);
-
-                sink.next(response);
-                sink.complete();
-
-            } catch (Exception e) {
-                sink.error(new ServiceException("AI_STREAM_ERROR", "Streaming failed", e));
-            }
-        });
+        return chatModel.stream(prompt)
+                .map(chunk -> buildStreamChunk(chunk, requestId, model, provider))
+                .doOnComplete(() -> {
+                    long processingTime = System.currentTimeMillis() - startTime;
+                    metricsCollector.recordChatRequest(provider, model, Duration.ofMillis(processingTime), 0);
+                })
+                .onErrorMap(this::mapStreamError);
     }
 
     @Override
@@ -149,6 +154,12 @@ public class AiServiceImpl implements AiService {
 
     @Override
     public AiChatResponse ragChat(AiChatRequest request, String knowledgeBase) {
+        // Validation/guardrails run against the original user request and outside
+        // the try block below, so a rate-limit/security rejection propagates with
+        // its own clear message instead of being masked as "RAG processing failed".
+        validateRequest(request);
+        enforceGuardrails(request);
+
         try {
             log.info("Processing RAG chat request - KnowledgeBase: {}", knowledgeBase);
 
@@ -158,16 +169,22 @@ public class AiServiceImpl implements AiService {
             // 2. Enhance prompt with context
             String enhancedPrompt = buildRagPrompt(request.getMessage(), relevantDocs);
 
-            // 3. Create enhanced request
+            // 3. Create enhanced request (guardrails/rate-limiting already
+            // enforced above against the original user request; the RAG-augmented
+            // prompt is derived server-side from trusted document content, so it
+            // is routed straight to executeChat() rather than re-entering chat()).
             AiChatRequest ragRequest = AiChatRequest.builder()
                     .message(enhancedPrompt)
                     .model(request.getModel())
                     .provider(request.getProvider())
                     .parameters(request.getParameters())
+                    .userId(request.getUserId())
+                    .tenantId(request.getTenantId())
+                    .sessionId(request.getSessionId())
                     .build();
 
             // 4. Process enhanced request
-            AiChatResponse response = chat(ragRequest);
+            AiChatResponse response = executeChat(ragRequest);
 
             // Initialize providerSpecific map if null
             if (response.getMetadata().getProviderSpecific() == null) {
@@ -176,6 +193,11 @@ public class AiServiceImpl implements AiService {
 
             response.getMetadata().getProviderSpecific().put("knowledgeBase", knowledgeBase);
             response.getMetadata().getProviderSpecific().put("documentsUsed", relevantDocs.size());
+
+            metricsCollector.recordRagRequest(knowledgeBase, Duration.ofMillis(
+                    response.getUsage() != null && response.getUsage().getProcessingTimeMs() != null
+                            ? response.getUsage().getProcessingTimeMs() : 0L),
+                    relevantDocs.size());
 
             return response;
 
@@ -262,24 +284,155 @@ public class AiServiceImpl implements AiService {
         }
     }
 
+    /**
+     * Runs rate limiting and inbound security validation for a request. Kept
+     * separate from {@link #executeChat(AiChatRequest)} so callers that already
+     * enforce guardrails against an original user request (e.g. {@link #ragChat})
+     * can skip re-checking a derived/enriched request.
+     */
+    private void enforceGuardrails(AiChatRequest request) {
+        String identifier = resolveIdentifier(request);
+        rateLimiter.checkRateLimit(identifier);
+        securityValidator.validateRequest(request.getMessage(), request.getUserId(), request.getTenantId());
+    }
+
+    private String resolveIdentifier(AiChatRequest request) {
+        if (request.getUserId() != null && !request.getUserId().isBlank()) {
+            return request.getUserId();
+        }
+        if (request.getTenantId() != null && !request.getTenantId().isBlank()) {
+            return request.getTenantId();
+        }
+        return "anonymous";
+    }
+
+    /**
+     * Core chat execution: builds the prompt, calls the Spring AI {@link ChatModel},
+     * records token usage/cost metrics, sanitizes the outbound response for PII, and
+     * translates any failure into a {@link ServiceException}. Guardrails
+     * (rate limiting / inbound content validation) are the caller's responsibility -
+     * see {@link #chat(AiChatRequest)} and {@link #ragChat(AiChatRequest, String)}.
+     */
+    private AiChatResponse executeChat(AiChatRequest request) {
+        try {
+            log.info("Processing AI chat request - Model: {}, Provider: {}",
+                    request.getModel(), request.getProvider());
+
+            long startTime = System.currentTimeMillis();
+
+            Prompt prompt = createPrompt(request);
+            ChatResponse response = chatModel.call(prompt);
+
+            long processingTime = System.currentTimeMillis() - startTime;
+
+            AiChatResponse chatResponse = buildChatResponse(request, response, processingTime);
+            chatResponse.setContent(securityValidator.sanitizeContent(chatResponse.getContent()));
+
+            recordMetrics(chatResponse);
+
+            return chatResponse;
+
+        } catch (Exception e) {
+            log.error("Error processing AI chat request: {}", e.getMessage(), e);
+            metricsCollector.recordError("AI_CHAT_ERROR", request.getProvider(), "chat");
+            throw new ServiceException("AI_CHAT_ERROR", "Failed to process chat request", e);
+        }
+    }
+
+    private void recordMetrics(AiChatResponse response) {
+        AiChatResponse.UsageMetrics usage = response.getUsage();
+        long tokens = usage != null && usage.getTotalTokens() != null ? usage.getTotalTokens() : 0L;
+        long processingTime = usage != null && usage.getProcessingTimeMs() != null ? usage.getProcessingTimeMs() : 0L;
+
+        metricsCollector.recordChatRequest(response.getProvider(), response.getModel(),
+                Duration.ofMillis(processingTime), tokens);
+
+        if (usage != null && usage.getCost() != null) {
+            metricsCollector.recordCost(usage.getCost(), (int) tokens, response.getProvider(), response.getModel());
+        }
+    }
+
+    private RuntimeException mapStreamError(Throwable e) {
+        if (e instanceof ServiceException || e instanceof ValidationException) {
+            return (RuntimeException) e;
+        }
+        metricsCollector.recordError("AI_STREAM_ERROR", "unknown", "chatStream");
+        return new ServiceException("AI_STREAM_ERROR", "Streaming failed", e);
+    }
+
+    private String resolveModel(AiChatRequest request) {
+        return request.getModel() != null ? request.getModel() : aiProperties.getOpenAi().getModel();
+    }
+
+    private AiChatResponse buildStreamChunk(ChatResponse response, String requestId, String model, String provider) {
+        String content = "";
+        if (response.getResult() != null && response.getResult().getOutput() != null
+                && response.getResult().getOutput().getText() != null) {
+            content = response.getResult().getOutput().getText();
+        }
+
+        return AiChatResponse.builder()
+                .content(content)
+                .model(model)
+                .provider(provider)
+                .requestId(requestId)
+                .metadata(AiChatResponse.ResponseMetadata.builder()
+                        .cached(false)
+                        .version("1.0")
+                        .traceId(UUID.randomUUID().toString())
+                        .build())
+                .timestamp(LocalDateTime.now())
+                .build();
+    }
+
     private Prompt createPrompt(AiChatRequest request) {
-        Message message = new UserMessage(request.getMessage());
-        return new Prompt(List.of(message));
+        List<Message> messages = new ArrayList<>();
+
+        if (request.getHistory() != null) {
+            for (AiChatRequest.ChatMessage historyMessage : request.getHistory()) {
+                messages.add(toSpringMessage(historyMessage));
+            }
+        }
+
+        messages.add(new UserMessage(request.getMessage()));
+
+        return new Prompt(messages);
+    }
+
+    private Message toSpringMessage(AiChatRequest.ChatMessage message) {
+        return switch (message.getRole()) {
+            case SYSTEM -> new SystemMessage(message.getContent());
+            case ASSISTANT -> new AssistantMessage(message.getContent());
+            case USER, FUNCTION -> new UserMessage(message.getContent());
+        };
     }
 
     private AiChatResponse buildChatResponse(AiChatRequest request, ChatResponse response,
                                            long processingTime) {
         String content = response.getResults().get(0).getOutput().getText();
+        String model = resolveModel(request);
+
+        AiChatResponse.UsageMetrics.UsageMetricsBuilder usageBuilder = AiChatResponse.UsageMetrics.builder()
+                .processingTimeMs(processingTime);
+
+        ChatResponseMetadata responseMetadata = response.getMetadata();
+        Usage usage = responseMetadata != null ? responseMetadata.getUsage() : null;
+        if (usage != null) {
+            Integer promptTokens = usage.getPromptTokens();
+            Integer completionTokens = usage.getCompletionTokens();
+            usageBuilder.promptTokens(promptTokens)
+                    .completionTokens(completionTokens)
+                    .totalTokens(usage.getTotalTokens())
+                    .cost(estimateCost(model, promptTokens, completionTokens));
+        }
 
         return AiChatResponse.builder()
                 .content(content)
-                .model(request.getModel() != null ? request.getModel() : aiProperties.getOpenAi().getModel())
+                .model(model)
                 .provider(request.getProvider() != null ? request.getProvider() : "openai")
                 .sessionId(request.getSessionId())
                 .requestId(UUID.randomUUID().toString())
-                .usage(AiChatResponse.UsageMetrics.builder()
-                        .processingTimeMs(processingTime)
-                        .build())
+                .usage(usageBuilder.build())
                 .metadata(AiChatResponse.ResponseMetadata.builder()
                         .cached(false)
                         .version("1.0")
@@ -288,6 +441,22 @@ public class AiServiceImpl implements AiService {
                 .finishReason(AiChatResponse.FinishReason.STOP)
                 .timestamp(LocalDateTime.now())
                 .build();
+    }
+
+    /**
+     * Estimates the USD cost of a request from the configured per-model cost
+     * table ({@code adhar.ai.costs.models.<model-id>}), falling back to
+     * {@code adhar.ai.costs.default-cost} for unknown models.
+     */
+    private double estimateCost(String model, Integer promptTokens, Integer completionTokens) {
+        AiProperties.Costs costs = aiProperties.getCosts();
+        AiProperties.Costs.ModelCost modelCost = costs.getModels().getOrDefault(model, costs.getDefaultCost());
+
+        double promptCost = (promptTokens != null ? promptTokens : 0) / 1000.0 * modelCost.getPromptCostPer1k();
+        double completionCost = (completionTokens != null ? completionTokens : 0) / 1000.0
+                * modelCost.getCompletionCostPer1k();
+
+        return promptCost + completionCost;
     }
 
     private String buildRagPrompt(String originalQuery, List<SimilarityResult> documents) {

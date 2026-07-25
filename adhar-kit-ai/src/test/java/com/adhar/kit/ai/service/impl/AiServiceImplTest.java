@@ -1,32 +1,50 @@
 package com.adhar.kit.ai.service.impl;
 
+import com.adhar.kit.ai.component.AiMetricsCollector;
+import com.adhar.kit.ai.component.AiRateLimiter;
 import com.adhar.kit.ai.config.AiProperties;
 import com.adhar.kit.ai.model.AiChatRequest;
 import com.adhar.kit.ai.model.AiChatResponse;
+import com.adhar.kit.ai.security.AiSecurityValidator;
 import com.adhar.kit.ai.service.AiService;
+import com.adhar.kit.commons.exception.ServiceException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
+import org.springframework.ai.chat.metadata.DefaultUsage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.VectorStore;
+import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.mockito.Mockito.lenient;
 
 /**
  * Comprehensive test suite for AI Service implementation.
- * Tests all enterprise features including caching, validation, and error handling.
+ * Tests all enterprise features including caching, validation, guardrails,
+ * token/cost tracking, streaming and error handling.
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class AiServiceImplTest {
 
     @Mock
@@ -41,6 +59,15 @@ class AiServiceImplTest {
     @Mock
     private AiProperties aiProperties;
 
+    @Mock
+    private AiRateLimiter rateLimiter;
+
+    @Mock
+    private AiSecurityValidator securityValidator;
+
+    @Mock
+    private AiMetricsCollector metricsCollector;
+
     private AiServiceImpl aiService;
 
     @BeforeEach
@@ -48,8 +75,16 @@ class AiServiceImplTest {
         // Setup default properties with lenient to avoid UnnecessaryStubbing errors
         lenient().when(aiProperties.getSecurity()).thenReturn(createSecurityProperties());
         lenient().when(aiProperties.getOpenAi()).thenReturn(createOpenAiProperties());
+        lenient().when(aiProperties.getCosts()).thenReturn(new AiProperties.Costs());
 
-        aiService = new AiServiceImpl(chatModel, embeddingModel, vectorStore, aiProperties);
+        // Guardrails default to "allow" and content passthrough so existing
+        // behavioural assertions (content/model/etc.) aren't affected unless a
+        // test explicitly configures a rejection.
+        lenient().when(securityValidator.sanitizeContent(anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        aiService = new AiServiceImpl(chatModel, embeddingModel, vectorStore, aiProperties,
+                rateLimiter, securityValidator, metricsCollector);
     }
 
     @Test
@@ -85,6 +120,7 @@ class AiServiceImplTest {
         assertThatThrownBy(() -> aiService.chat(request))
                 .isInstanceOf(com.adhar.kit.commons.exception.ValidationException.class)
                 .hasMessageContaining("Message cannot be empty");
+        verifyNoInteractions(rateLimiter);
     }
 
     @Test
@@ -162,6 +198,7 @@ class AiServiceImplTest {
         assertThat(response.getMetadata().getProviderSpecific()).containsKey("knowledgeBase");
         verify(vectorStore).similaritySearch(any(org.springframework.ai.vectorstore.SearchRequest.class));
         verify(chatModel).call(any(org.springframework.ai.chat.prompt.Prompt.class));
+        verify(metricsCollector).recordRagRequest(eq("ml-docs"), any(Duration.class), eq(1));
     }
 
     @Test
@@ -237,21 +274,30 @@ class AiServiceImplTest {
     }
 
     @Test
-    void testChatStreamSuccess() {
+    void testChatStreamEmitsMultipleChunks() {
         AiChatRequest request = AiChatRequest.builder()
                 .message("stream hello")
                 .model("gpt-3.5-turbo")
                 .build();
-        ChatResponse mockResponse = mock(ChatResponse.class);
-        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(mockResponse);
-        when(mockResponse.getResults()).thenReturn(List.of(createMockResult("stream response")));
+
+        ChatResponse chunk1 = mock(ChatResponse.class);
+        ChatResponse chunk2 = mock(ChatResponse.class);
+        ChatResponse chunk3 = mock(ChatResponse.class);
+        when(chunk1.getResult()).thenReturn(createMockResult("Hello"));
+        when(chunk2.getResult()).thenReturn(createMockResult(" world"));
+        when(chunk3.getResult()).thenReturn(createMockResult("!"));
+
+        when(chatModel.stream(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenReturn(Flux.just(chunk1, chunk2, chunk3));
 
         List<AiChatResponse> responses = aiService.chatStream(request).collectList().block();
 
         assertThat(responses).isNotNull();
-        assertThat(responses).hasSize(1);
-        assertThat(responses.getFirst().getContent()).isEqualTo("stream response");
-        assertThat(responses.getFirst().getRequestId()).isNotBlank();
+        assertThat(responses).hasSize(3);
+        assertThat(responses.stream().map(AiChatResponse::getContent).toList())
+                .containsExactly("Hello", " world", "!");
+        assertThat(responses).allSatisfy(r -> assertThat(r.getRequestId()).isNotBlank());
+        verify(rateLimiter).checkRateLimit(anyString());
     }
 
     @Test
@@ -260,6 +306,17 @@ class AiServiceImplTest {
 
         assertThatThrownBy(() -> aiService.chatStream(request))
                 .isInstanceOf(com.adhar.kit.commons.exception.ValidationException.class);
+    }
+
+    @Test
+    void testChatStreamWrapsUnexpectedErrors() {
+        AiChatRequest request = AiChatRequest.builder().message("boom please").build();
+        when(chatModel.stream(any(org.springframework.ai.chat.prompt.Prompt.class)))
+                .thenReturn(Flux.error(new RuntimeException("stream provider down")));
+
+        assertThatThrownBy(() -> aiService.chatStream(request).collectList().block())
+                .isInstanceOf(ServiceException.class)
+                .hasMessageContaining("Streaming failed");
     }
 
     @Test
@@ -274,6 +331,7 @@ class AiServiceImplTest {
         assertThatThrownBy(() -> aiService.chat(request))
                 .isInstanceOf(com.adhar.kit.commons.exception.ServiceException.class)
                 .hasMessageContaining("Failed to process chat request");
+        verify(metricsCollector).recordError(anyString(), any(), anyString());
     }
 
     @Test
@@ -341,6 +399,131 @@ class AiServiceImplTest {
                 .thenThrow(new RuntimeException("health failure"));
 
         assertThat(aiService.isHealthy()).isFalse();
+    }
+
+    // ==================== Guardrails ====================
+
+    @Test
+    void testChatEnforcesRateLimitBeforeCallingModel() {
+        AiChatRequest request = AiChatRequest.builder().message("hi").userId("user-1").build();
+        doThrow(new ServiceException("RATE_LIMIT_EXCEEDED", "Rate limit exceeded"))
+                .when(rateLimiter).checkRateLimit("user-1");
+
+        assertThatThrownBy(() -> aiService.chat(request))
+                .isInstanceOf(ServiceException.class)
+                .hasMessageContaining("Rate limit exceeded");
+
+        verifyNoInteractions(chatModel);
+    }
+
+    @Test
+    void testChatUsesUserIdAsRateLimitIdentifier() {
+        AiChatRequest request = AiChatRequest.builder().message("hi").userId("user-42").tenantId("tenant-1").build();
+        ChatResponse mockResponse = mock(ChatResponse.class);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(mockResponse);
+        when(mockResponse.getResults()).thenReturn(List.of(createMockResult("ok")));
+
+        aiService.chat(request);
+
+        verify(rateLimiter).checkRateLimit("user-42");
+    }
+
+    @Test
+    void testChatFallsBackToTenantIdWhenNoUserId() {
+        AiChatRequest request = AiChatRequest.builder().message("hi").tenantId("tenant-9").build();
+        ChatResponse mockResponse = mock(ChatResponse.class);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(mockResponse);
+        when(mockResponse.getResults()).thenReturn(List.of(createMockResult("ok")));
+
+        aiService.chat(request);
+
+        verify(rateLimiter).checkRateLimit("tenant-9");
+    }
+
+    @Test
+    void testChatFallsBackToAnonymousIdentifier() {
+        AiChatRequest request = AiChatRequest.builder().message("hi").build();
+        ChatResponse mockResponse = mock(ChatResponse.class);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(mockResponse);
+        when(mockResponse.getResults()).thenReturn(List.of(createMockResult("ok")));
+
+        aiService.chat(request);
+
+        verify(rateLimiter).checkRateLimit("anonymous");
+    }
+
+    @Test
+    void testChatBlockedBySecurityValidatorPropagatesValidationException() {
+        AiChatRequest request = AiChatRequest.builder().message("my password is hunter2").build();
+        doThrow(new com.adhar.kit.commons.exception.ValidationException("SENSITIVE_CONTENT", "blocked"))
+                .when(securityValidator).validateRequest(anyString(), any(), any());
+
+        assertThatThrownBy(() -> aiService.chat(request))
+                .isInstanceOf(com.adhar.kit.commons.exception.ValidationException.class);
+
+        verifyNoInteractions(chatModel);
+    }
+
+    @Test
+    void testChatSanitizesResponseContent() {
+        AiChatRequest request = AiChatRequest.builder().message("hi").build();
+        ChatResponse mockResponse = mock(ChatResponse.class);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(mockResponse);
+        when(mockResponse.getResults()).thenReturn(List.of(createMockResult("contact me at a@b.com")));
+        when(securityValidator.sanitizeContent("contact me at a@b.com")).thenReturn("contact me at [EMAIL_REDACTED]");
+
+        AiChatResponse response = aiService.chat(request);
+
+        assertThat(response.getContent()).isEqualTo("contact me at [EMAIL_REDACTED]");
+        verify(securityValidator).sanitizeContent("contact me at a@b.com");
+    }
+
+    // ==================== Token / cost tracking ====================
+
+    @Test
+    void testChatRecordsTokenUsageAndCost() {
+        AiChatRequest request = AiChatRequest.builder().message("hi").model("gpt-4").build();
+
+        AiProperties.Costs costs = new AiProperties.Costs();
+        costs.getModels().put("gpt-4", new AiProperties.Costs.ModelCost(0.03, 0.06));
+        when(aiProperties.getCosts()).thenReturn(costs);
+
+        ChatResponse mockResponse = mock(ChatResponse.class);
+        when(mockResponse.getResults()).thenReturn(List.of(createMockResult("answer")));
+        ChatResponseMetadata metadata = ChatResponseMetadata.builder()
+                .usage(new DefaultUsage(100, 50))
+                .build();
+        when(mockResponse.getMetadata()).thenReturn(metadata);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(mockResponse);
+
+        AiChatResponse response = aiService.chat(request);
+
+        assertThat(response.getUsage().getPromptTokens()).isEqualTo(100);
+        assertThat(response.getUsage().getCompletionTokens()).isEqualTo(50);
+        assertThat(response.getUsage().getTotalTokens()).isEqualTo(150);
+        // (100/1000 * 0.03) + (50/1000 * 0.06) = 0.003 + 0.003 = 0.006
+        assertThat(response.getUsage().getCost()).isEqualTo(0.006, within(0.0001));
+
+        ArgumentCaptor<Long> tokensCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(metricsCollector).recordChatRequest(eq("openai"), eq("gpt-4"), any(Duration.class), tokensCaptor.capture());
+        assertThat(tokensCaptor.getValue()).isEqualTo(150L);
+        verify(metricsCollector).recordCost(eq(0.006), eq(150), eq("openai"), eq("gpt-4"));
+    }
+
+    @Test
+    void testChatWithoutUsageMetadataSkipsCostRecording() {
+        AiChatRequest request = AiChatRequest.builder().message("hi").model("gpt-3.5-turbo").build();
+        ChatResponse mockResponse = mock(ChatResponse.class);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(mockResponse);
+        when(mockResponse.getResults()).thenReturn(List.of(createMockResult("ok")));
+        // getMetadata() not stubbed -> null, matching a bare-bones mock ChatResponse.
+
+        AiChatResponse response = aiService.chat(request);
+
+        assertThat(response.getUsage().getPromptTokens()).isNull();
+        assertThat(response.getUsage().getCost()).isNull();
+        verify(metricsCollector, never()).recordCost(anyDouble(), anyInt(), anyString(), anyString());
+        verify(metricsCollector).recordChatRequest(anyString(), anyString(), any(Duration.class), eq(0L));
     }
 
     private AiProperties.Security createSecurityProperties() {

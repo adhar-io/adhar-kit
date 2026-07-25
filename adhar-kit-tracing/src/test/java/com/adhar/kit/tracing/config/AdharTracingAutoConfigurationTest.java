@@ -1,14 +1,20 @@
 package com.adhar.kit.tracing.config;
 
+import com.adhar.kit.tracing.async.TraceContextTaskDecorator;
 import com.adhar.kit.tracing.aspect.TracingAspect;
 import com.adhar.kit.tracing.properties.AdharTracingProperties;
 import com.adhar.kit.tracing.util.AdharTracing;
+import com.adhar.kit.tracing.web.TraceContextMdcFilter;
 import io.micrometer.tracing.Tracer;
 import io.opentelemetry.api.OpenTelemetry;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -307,6 +313,94 @@ class AdharTracingAutoConfigurationTest {
                     assertThat(properties.getTags()).containsEntry("environment", "test");
                     assertThat(properties.getTags()).containsEntry("version", "1.0.0");
                     assertThat(properties.getTags()).containsEntry("team", "platform");
+                });
+    }
+
+    @Test
+    void testTaskDecoratorBeanIsRegistered() {
+        contextRunner
+                .withPropertyValues("adhar.tracing.enabled=true")
+                .run(context -> assertThat(context).hasSingleBean(TraceContextTaskDecorator.class));
+    }
+
+    @Test
+    void testMdcFilterIsRegisteredByDefault() {
+        contextRunner
+                .withPropertyValues("adhar.tracing.enabled=true")
+                .run(context -> {
+                    assertThat(context).getBeanNames(FilterRegistrationBean.class).isNotEmpty();
+                    assertThat(context).hasBean("traceContextMdcFilterRegistration");
+                });
+    }
+
+    @Test
+    void testMdcFilterCanBeDisabledViaProperty() {
+        contextRunner
+                .withPropertyValues(
+                        "adhar.tracing.enabled=true",
+                        "adhar.tracing.web.mdc-enabled=false"
+                )
+                .run(context -> assertThat(context).doesNotHaveBean("traceContextMdcFilterRegistration"));
+    }
+
+    @Test
+    void testMdcFilterNotRegisteredWithoutServletFilterClass() {
+        contextRunner
+                .withClassLoader(new FilteredClassLoader("jakarta.servlet.Filter"))
+                .withPropertyValues("adhar.tracing.enabled=true")
+                .run(context -> {
+                    // The rest of the auto-configuration must still load fine.
+                    assertThat(context).hasSingleBean(Tracer.class);
+                    assertThat(context).hasSingleBean(AdharTracing.class);
+                    assertThat(context).doesNotHaveBean("traceContextMdcFilterRegistration");
+                });
+    }
+
+    @Test
+    void testRealBaggagePropagatesEndToEndThroughWiredTracer() {
+        contextRunner
+                .withPropertyValues(
+                        "adhar.tracing.enabled=true",
+                        "adhar.tracing.baggage.enabled=true"
+                )
+                .run(context -> {
+                    Tracer tracer = context.getBean(Tracer.class);
+                    AdharTracing adharTracing = context.getBean(AdharTracing.class);
+
+                    // Baggage requires an active trace context in the underlying OTel bridge.
+                    var span = tracer.nextSpan().name("test").start();
+                    try (var scope = tracer.withSpan(span)) {
+                        adharTracing.setBaggage("tenant.id", "acme");
+
+                        assertThat(adharTracing.getBaggage("tenant.id")).isEqualTo("acme");
+
+                        Map<String, String> headers = new HashMap<>();
+                        adharTracing.injectBaggageIntoHeaders(headers);
+                        assertThat(headers).containsEntry("baggage", "tenant.id=acme");
+                    } finally {
+                        span.end();
+                    }
+                });
+    }
+
+    @Test
+    void testBaggageDisabledYieldsNoOpBaggageManager() {
+        contextRunner
+                .withPropertyValues(
+                        "adhar.tracing.enabled=true",
+                        "adhar.tracing.baggage.enabled=false"
+                )
+                .run(context -> {
+                    Tracer tracer = context.getBean(Tracer.class);
+                    AdharTracing adharTracing = context.getBean(AdharTracing.class);
+
+                    var span = tracer.nextSpan().name("test").start();
+                    try (var scope = tracer.withSpan(span)) {
+                        adharTracing.setBaggage("tenant.id", "acme");
+                        assertThat(adharTracing.getBaggage("tenant.id")).isNull();
+                    } finally {
+                        span.end();
+                    }
                 });
     }
 }

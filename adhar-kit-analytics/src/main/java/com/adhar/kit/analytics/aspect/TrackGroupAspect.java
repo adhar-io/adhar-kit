@@ -30,6 +30,15 @@ public class TrackGroupAspect {
         this.analytics = AnalyticsFacade.getInstance();
     }
 
+    /**
+     * Package-private constructor for injecting a controllable
+     * {@link AnalyticsFacade} (e.g. a Mockito mock) in tests, without going
+     * through the process-wide singleton.
+     */
+    TrackGroupAspect(AnalyticsFacade analytics) {
+        this.analytics = analytics;
+    }
+
     @Around("@annotation(trackGroup)")
     public Object processTrackGroup(ProceedingJoinPoint joinPoint, TrackGroup trackGroup) throws Throwable {
         if (!analytics.isAvailable()) {

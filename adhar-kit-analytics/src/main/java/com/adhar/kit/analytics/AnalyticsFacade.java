@@ -1,13 +1,27 @@
 package com.adhar.kit.analytics;
 
+import com.adhar.kit.analytics.batching.BatchingEventSender;
+import com.adhar.kit.analytics.client.CaptureEvent;
+import com.adhar.kit.analytics.client.DecideResult;
+import com.adhar.kit.analytics.client.OkHttpPostHogClient;
+import com.adhar.kit.analytics.client.PostHogClient;
+import com.adhar.kit.analytics.config.AnalyticsProperties;
+import com.adhar.kit.analytics.consent.ConsentGateway;
+import com.adhar.kit.analytics.consent.InMemoryConsentStore;
+import com.adhar.kit.analytics.flag.FeatureFlagCache;
+import com.adhar.kit.analytics.pii.PiiScrubber;
 import com.adhar.kit.commons.event.AdharCloudEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import okhttp3.*;
+import okhttp3.OkHttpClient;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.io.IOException;
+import java.time.Clock;
+import java.time.Duration;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * Universal Analytics Facade providing PostHog integration.
@@ -24,6 +38,17 @@ import java.io.IOException;
  *   <li><b>Retention Tracking</b> - Measure user retention</li>
  * </ul>
  *
+ * <p><b>Batching</b>: events are buffered in a bounded, in-memory queue and
+ * flushed to PostHog's {@code /batch/} endpoint either when
+ * {@code adhar.analytics.post-hog.batch-size} is reached or every
+ * {@code adhar.analytics.post-hog.flush-interval} seconds, whichever comes
+ * first. Set {@code adhar.analytics.post-hog.batching-enabled=false} to fall
+ * back to sending every event synchronously via {@code /capture/}.</p>
+ *
+ * <p><b>Consent &amp; PII</b>: every send path is gated by a {@link ConsentGateway}
+ * (per-distinct-id opt-out) and scrubbed by a {@link PiiScrubber} (configured
+ * redaction keys plus obvious PII patterns) before anything reaches PostHog.</p>
+ *
  * <p><b>Example - Basic Event Tracking:</b></p>
  * <pre>{@code
  * AnalyticsFacade analytics = AnalyticsFacade.getInstance();
@@ -35,55 +60,21 @@ import java.io.IOException;
  * ));
  * }</pre>
  *
- * <p><b>Example - User Identification:</b></p>
- * <pre>{@code
- * // Identify user with properties
- * analytics.identify("user123", Map.of(
- *     "email", "user@example.com",
- *     "name", "John Doe",
- *     "plan", "premium"
- * ));
- * }</pre>
- *
- * <p><b>Example - Feature Flags:</b></p>
- * <pre>{@code
- * // Check if feature is enabled for user
- * boolean newDesign = analytics.isFeatureEnabled("user123", "new-dashboard");
- * if (newDesign) {
- *     // Show new dashboard
- * }
- * }</pre>
- *
- * <p><b>Example - Group Analytics:</b></p>
- * <pre>{@code
- * // Track company-level events
- * analytics.group("user123", "company456", Map.of(
- *     "name", "Acme Corp",
- *     "plan", "enterprise",
- *     "employees", 500
- * ));
- * }</pre>
- *
  * @author Adhar Platform Team
  * @since 1.0.0
  */
 @Slf4j
 public class AnalyticsFacade {
 
+    private static final int DEFAULT_BATCH_SIZE = 100;
+    private static final int DEFAULT_FLUSH_INTERVAL_SECONDS = 10;
+    private static final int DEFAULT_QUEUE_CAPACITY = 10_000;
+    private static final long DEFAULT_FLAG_TTL_SECONDS = 60;
+
     /**
      * Singleton instance (thread-safe lazy initialization).
      */
     private static volatile AnalyticsFacade instance;
-
-    /**
-     * HTTP client for PostHog API calls.
-     */
-    private OkHttpClient httpClient;
-
-    /**
-     * JSON object mapper.
-     */
-    private ObjectMapper objectMapper;
 
     /**
      * PostHog API configuration.
@@ -92,19 +83,36 @@ public class AnalyticsFacade {
     private String apiUrl;
 
     /**
+     * PostHog HTTP abstraction (correct, typed /capture, /batch, /decide routing).
+     */
+    private volatile PostHogClient postHogClient;
+
+    /**
+     * Async batching sender; {@code null} when the synchronous fallback is in effect.
+     */
+    private volatile BatchingEventSender batchingSender;
+
+    private volatile boolean batchingEnabled;
+
+    /**
+     * Per-distinct-id opt-out gate, consulted before every send.
+     */
+    private volatile ConsentGateway consentGateway;
+
+    /**
+     * Redacts configured/obvious PII from event properties before send.
+     */
+    private volatile PiiScrubber piiScrubber;
+
+    /**
+     * TTL-based feature flag decision cache.
+     */
+    private volatile FeatureFlagCache featureFlagCache;
+
+    /**
      * Indicates if analytics is available and configured.
      */
     private volatile boolean available = false;
-
-    /**
-     * Feature flags cache (user -> flag -> enabled).
-     */
-    private final Map<String, Map<String, Boolean>> featureFlagsCache = new ConcurrentHashMap<>();
-
-    /**
-     * Feature flag variants cache (user -> flag -> variant value).
-     */
-    private final Map<String, Map<String, Object>> featureFlagVariantsCache = new ConcurrentHashMap<>();
 
     /**
      * Private constructor for singleton pattern.
@@ -112,6 +120,33 @@ public class AnalyticsFacade {
     private AnalyticsFacade() {
         log.info("Initializing Analytics Facade v1.0.0 (PostHog)");
         initializePostHog();
+    }
+
+    /**
+     * Package-private constructor for tests/DI: builds a fully-configured,
+     * standalone instance (not the shared singleton) around an injected
+     * {@link PostHogClient}, so batching/consent/PII/TTL behavior can be unit
+     * tested without a real network call or singleton state bleed across tests.
+     */
+    AnalyticsFacade(PostHogClient postHogClient,
+                     boolean batchingEnabled,
+                     int batchSize,
+                     Duration flushInterval,
+                     int queueCapacity,
+                     AnalyticsProperties.OverflowPolicy overflowPolicy,
+                     Duration featureFlagTtl,
+                     Clock clock,
+                     ConsentGateway consentGateway,
+                     PiiScrubber piiScrubber) {
+        this.postHogClient = postHogClient;
+        this.consentGateway = consentGateway != null ? consentGateway : new ConsentGateway(new InMemoryConsentStore());
+        this.piiScrubber = piiScrubber != null ? piiScrubber : new PiiScrubber(Set.of(), true);
+        this.featureFlagCache = new FeatureFlagCache(featureFlagTtl, clock);
+        this.batchingEnabled = batchingEnabled;
+        this.batchingSender = batchingEnabled
+                ? new BatchingEventSender(postHogClient, batchSize, flushInterval, queueCapacity, overflowPolicy)
+                : null;
+        this.available = true;
     }
 
     /**
@@ -131,6 +166,56 @@ public class AnalyticsFacade {
         return instance;
     }
 
+    /**
+     * Applies Spring Boot configuration ({@link AnalyticsProperties}) to the
+     * singleton, overriding the environment-variable-based defaults picked up
+     * at construction time. Invoked once by {@code AnalyticsAutoConfiguration}.
+     * Any previously buffered events are flushed before the batching sender is
+     * rebuilt with the new settings.
+     *
+     * @param properties the bound Spring configuration properties
+     */
+    public synchronized void configure(AnalyticsProperties properties) {
+        if (properties == null) {
+            return;
+        }
+        AnalyticsProperties.PostHog postHogProps = properties.getPostHog();
+
+        String configuredKey = postHogProps.getApiKey();
+        if (configuredKey != null && !configuredKey.isBlank()) {
+            this.apiKey = configuredKey;
+            String configuredHost = postHogProps.getHost();
+            if (configuredHost != null && !configuredHost.isBlank()) {
+                this.apiUrl = configuredHost;
+            }
+            PostHogClient newClient = new OkHttpPostHogClient(
+                    new OkHttpClient.Builder().build(), new ObjectMapper(), apiKey, apiUrl);
+            if (this.postHogClient != null) {
+                this.postHogClient.close();
+            }
+            this.postHogClient = newClient;
+            this.available = true;
+        }
+
+        if (this.batchingSender != null) {
+            this.batchingSender.shutdown();
+        }
+        this.batchingEnabled = postHogProps.isBatchingEnabled();
+        this.batchingSender = (this.batchingEnabled && this.postHogClient != null)
+                ? new BatchingEventSender(
+                        this.postHogClient,
+                        postHogProps.getBatchSize(),
+                        Duration.ofSeconds(postHogProps.getFlushInterval()),
+                        postHogProps.getQueueCapacity(),
+                        postHogProps.getOverflowPolicy())
+                : null;
+
+        this.featureFlagCache = new FeatureFlagCache(
+                Duration.ofSeconds(postHogProps.getFeatureFlagCacheTtlSeconds()), Clock.systemUTC());
+        this.consentGateway = new ConsentGateway(new InMemoryConsentStore(properties.getConsent().getOptedOutIds()));
+        this.piiScrubber = new PiiScrubber(properties.getPii().getRedactedKeys(), properties.getPii().isPatternDetectionEnabled());
+    }
+
     // ==================== Event Tracking ====================
 
     /**
@@ -138,15 +223,6 @@ public class AnalyticsFacade {
      *
      * <p>Events are the foundation of analytics. Use them to track any action
      * a user takes in your application.</p>
-     *
-     * <p><b>Example:</b></p>
-     * <pre>{@code
-     * analytics.track("user123", "Product Purchased", Map.of(
-     *     "product_id", "prod_456",
-     *     "price", 99.99,
-     *     "currency", "USD"
-     * ));
-     * }</pre>
      *
      * @param userId user identifier
      * @param event event name (e.g., "Button Clicked", "Page Viewed")
@@ -157,14 +233,17 @@ public class AnalyticsFacade {
             log.warn("Analytics not available, skipping event: {}", event);
             return;
         }
+        if (userId == null || event == null) {
+            log.debug("Skipping track(): distinct id or event name is null");
+            return;
+        }
+        if (!consentGateway.isAllowed(userId)) {
+            return;
+        }
 
         try {
-            // Send event to PostHog API
-            sendEvent("capture", Map.of(
-                "distinct_id", userId,
-                "event", event,
-                "properties", properties != null ? properties : Map.of()
-            ));
+            Map<String, Object> scrubbed = piiScrubber.scrub(properties);
+            send(CaptureEvent.of(event, userId, scrubbed));
         } catch (Exception e) {
             log.error("Failed to track event: " + event, e);
         }
@@ -182,14 +261,6 @@ public class AnalyticsFacade {
 
     /**
      * Tracks a page view.
-     *
-     * <p><b>Example:</b></p>
-     * <pre>{@code
-     * analytics.trackPageView("user123", "/dashboard", Map.of(
-     *     "referrer", "https://google.com",
-     *     "title", "Dashboard"
-     * ));
-     * }</pre>
      *
      * @param userId user identifier
      * @param page page URL or path
@@ -215,19 +286,6 @@ public class AnalyticsFacade {
 
     /**
      * Tracks an analytics event and returns it wrapped in a CloudEvent envelope.
-     *
-     * <p>This method performs the same tracking as {@link #track(String, String, Map)} but
-     * additionally wraps the event data in an {@link AdharCloudEvent} with
-     * source {@code "adhar-kit/analytics"} and type {@code "com.adhar.analytics.tracked"}.</p>
-     *
-     * <p><b>Example:</b></p>
-     * <pre>{@code
-     * AdharCloudEvent<?> cloudEvent = analytics.trackAsCloudEvent("user123", "Purchase", Map.of(
-     *     "product_id", "prod_456",
-     *     "price", 99.99
-     * ));
-     * // cloudEvent can be forwarded to messaging, event bus, etc.
-     * }</pre>
      *
      * @param userId     user identifier
      * @param event      event name (e.g., "Button Clicked", "Purchase")
@@ -262,18 +320,10 @@ public class AnalyticsFacade {
     /**
      * Identifies a user with properties.
      *
-     * <p>Call this when you know who the user is (e.g., after login).
-     * This links their anonymous activity to their identified profile.</p>
-     *
-     * <p><b>Example:</b></p>
-     * <pre>{@code
-     * analytics.identify("user123", Map.of(
-     *     "$email", "user@example.com",
-     *     "$name", "John Doe",
-     *     "plan", "premium",
-     *     "signup_date", "2024-01-15"
-     * ));
-     * }</pre>
+     * <p>Builds a PostHog {@code $identify} event (the real PostHog protocol
+     * for identify - there is no separate {@code /identify} REST endpoint)
+     * with the given properties under {@code $set}, and routes it through the
+     * same capture/batch pipeline as regular events.</p>
      *
      * @param userId user identifier
      * @param properties user properties (use $-prefixed keys for special properties)
@@ -283,10 +333,19 @@ public class AnalyticsFacade {
             log.warn("Analytics not available, skipping identify");
             return;
         }
+        if (userId == null) {
+            return;
+        }
+        if (!consentGateway.isAllowed(userId)) {
+            return;
+        }
 
         try {
             log.debug("Identifying user: {}", userId);
-            sendEvent("identify", Map.of("distinct_id", userId, "properties", properties != null ? properties : Map.of()));
+            Map<String, Object> scrubbed = piiScrubber.scrub(properties);
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("$set", scrubbed);
+            send(CaptureEvent.of("$identify", userId, payload));
         } catch (Exception e) {
             log.error("Failed to identify user: " + userId, e);
         }
@@ -304,13 +363,8 @@ public class AnalyticsFacade {
     /**
      * Aliases one user ID to another.
      *
-     * <p>Use this to connect an anonymous user to their identified profile.</p>
-     *
-     * <p><b>Example:</b></p>
-     * <pre>{@code
-     * // After user logs in
-     * analytics.alias("anonymous123", "user123");
-     * }</pre>
+     * <p>Builds a PostHog {@code $create_alias} event - the real PostHog
+     * protocol for aliasing - and routes it through capture/batch.</p>
      *
      * @param distinctId the current user ID
      * @param alias the ID to alias to
@@ -320,10 +374,18 @@ public class AnalyticsFacade {
             log.warn("Analytics not available, skipping alias");
             return;
         }
+        if (distinctId == null || alias == null) {
+            return;
+        }
+        if (!consentGateway.isAllowed(distinctId)) {
+            return;
+        }
 
         try {
             log.debug("Aliasing {} to {}", distinctId, alias);
-            sendEvent("alias", Map.of("distinct_id", distinctId, "alias", alias));
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("alias", alias);
+            send(CaptureEvent.of("$create_alias", distinctId, payload));
         } catch (Exception e) {
             log.error("Failed to alias user", e);
         }
@@ -334,34 +396,34 @@ public class AnalyticsFacade {
     /**
      * Associates a user with a group (company, organization, etc.).
      *
-     * <p>Groups allow you to track analytics at an organization level.</p>
-     *
-     * <p><b>Example:</b></p>
-     * <pre>{@code
-     * analytics.group("user123", "company456", Map.of(
-     *     "$group_type", "company",
-     *     "name", "Acme Corp",
-     *     "plan", "enterprise",
-     *     "employees", 500,
-     *     "industry", "technology"
-     * ));
-     * }</pre>
+     * <p>Builds a PostHog {@code $groupidentify} event - the real PostHog
+     * protocol for group analytics - and routes it through capture/batch.</p>
      *
      * @param userId user identifier
      * @param groupId group identifier
-     * @param properties group properties
+     * @param properties group properties (an explicit {@code $group_type} entry
+     *                    is honored; otherwise defaults to {@code "company"})
      */
     public void group(String userId, String groupId, Map<String, Object> properties) {
         if (!available) {
             log.warn("Analytics not available, skipping group");
             return;
         }
+        if (userId == null || groupId == null) {
+            return;
+        }
+        if (!consentGateway.isAllowed(userId)) {
+            return;
+        }
 
         try {
             log.debug("Adding user {} to group {}", userId, groupId);
-            Map<String, Object> props = new HashMap<>(properties);
-            props.put("$group_key", groupId);
-            sendEvent("group", Map.of("type", "company", "id", groupId, "properties", props != null ? props : Map.of()));
+            Map<String, Object> scrubbed = new HashMap<>(piiScrubber.scrub(properties));
+            Object groupType = scrubbed.remove("$group_type");
+            Map<String, Object> payload = new HashMap<>(scrubbed);
+            payload.put("$group_type", groupType != null ? groupType : "company");
+            payload.put("$group_key", groupId);
+            send(CaptureEvent.of("$groupidentify", userId, payload));
         } catch (Exception e) {
             log.error("Failed to add user to group", e);
         }
@@ -372,14 +434,11 @@ public class AnalyticsFacade {
     /**
      * Checks if a feature flag is enabled for a user.
      *
-     * <p><b>Example:</b></p>
-     * <pre>{@code
-     * if (analytics.isFeatureEnabled("user123", "new-dashboard")) {
-     *     // Show new dashboard
-     * } else {
-     *     // Show old dashboard
-     * }
-     * }</pre>
+     * <p>Results are cached per user/flag with a configurable TTL
+     * ({@code adhar.analytics.post-hog.feature-flag-cache-ttl-seconds},
+     * default 60s) so repeated checks don't call PostHog's {@code /decide}
+     * endpoint on every request, while still refreshing periodically instead
+     * of serving a decision forever.</p>
      *
      * @param userId user identifier
      * @param featureKey feature flag key
@@ -392,22 +451,21 @@ public class AnalyticsFacade {
         }
 
         try {
-            // Check cache first
-            Map<String, Boolean> userFlags = featureFlagsCache.get(userId);
-            if (userFlags != null && userFlags.containsKey(featureKey)) {
-                return userFlags.get(featureKey);
+            Optional<FeatureFlagCache.CachedFlag> cached = featureFlagCache.get(userId, featureKey);
+            if (cached.isPresent()) {
+                return cached.get().enabled();
             }
 
-            // Fetch from PostHog /decide endpoint
-            boolean enabled = fetchFeatureFlagFromApi(userId, featureKey);
+            DecideResult result = fetchAndCacheDecision(userId);
+            if (!result.featureFlags().containsKey(featureKey)) {
+                // Explicitly cache "disabled" so we don't re-call /decide for this
+                // key on every request until the TTL expires.
+                featureFlagCache.put(userId, featureKey, null, false);
+                return false;
+            }
 
-            // Cache result
-            featureFlagsCache.computeIfAbsent(userId, k -> new ConcurrentHashMap<>())
-                .put(featureKey, enabled);
-
-            log.debug("Feature '{}' is {} for user {}", featureKey,
-                enabled ? "enabled" : "disabled", userId);
-
+            boolean enabled = featureFlagCache.get(userId, featureKey).map(FeatureFlagCache.CachedFlag::enabled).orElse(false);
+            log.debug("Feature '{}' is {} for user {}", featureKey, enabled ? "enabled" : "disabled", userId);
             return enabled;
         } catch (Exception e) {
             log.error("Failed to check feature flag: " + featureKey, e);
@@ -416,73 +474,7 @@ public class AnalyticsFacade {
     }
 
     /**
-     * Fetches feature flag value from PostHog /decide API.
-     *
-     * @param userId user identifier
-     * @param featureKey feature flag key
-     * @return true if feature is enabled
-     */
-    @SuppressWarnings("unchecked")
-    private boolean fetchFeatureFlagFromApi(String userId, String featureKey) {
-        try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("api_key", apiKey);
-            payload.put("distinct_id", userId);
-
-            String json = objectMapper.writeValueAsString(payload);
-            RequestBody body = RequestBody.create(json, MediaType.parse("application/json"));
-
-            Request request = new Request.Builder()
-                .url(apiUrl + "/decide/?v=3")
-                .post(body)
-                .build();
-
-            try (Response response = httpClient.newCall(request).execute()) {
-                if (!response.isSuccessful() || response.body() == null) {
-                    log.warn("PostHog /decide API call failed: {}", response.code());
-                    return false;
-                }
-
-                String responseBody = response.body().string();
-                Map<String, Object> result = objectMapper.readValue(responseBody, Map.class);
-
-                // Check featureFlags map
-                Map<String, Object> featureFlags = (Map<String, Object>) result.get("featureFlags");
-                if (featureFlags != null && featureFlags.containsKey(featureKey)) {
-                    Object value = featureFlags.get(featureKey);
-
-                    // Cache the variant value
-                    featureFlagVariantsCache.computeIfAbsent(userId, k -> new ConcurrentHashMap<>())
-                        .put(featureKey, value);
-
-                    // Return boolean based on value type
-                    if (value instanceof Boolean) {
-                        return (Boolean) value;
-                    } else if (value instanceof String) {
-                        return !value.toString().isEmpty() && !"false".equalsIgnoreCase(value.toString());
-                    } else {
-                        return value != null;
-                    }
-                }
-
-                return false;
-            }
-        } catch (IOException e) {
-            log.error("Failed to fetch feature flag from PostHog", e);
-            return false;
-        }
-    }
-
-    /**
      * Gets the feature flag value (variant) for a user.
-     *
-     * <p>For multivariate flags that return different values.</p>
-     *
-     * <p><b>Example:</b></p>
-     * <pre>{@code
-     * String variant = analytics.getFeatureFlag("user123", "button-color");
-     * // Returns: "blue", "green", "red", etc.
-     * }</pre>
      *
      * @param userId user identifier
      * @param featureKey feature flag key
@@ -494,24 +486,19 @@ public class AnalyticsFacade {
         }
 
         try {
-            // Check variants cache first
-            Map<String, Object> userVariants = featureFlagVariantsCache.get(userId);
-            if (userVariants != null && userVariants.containsKey(featureKey)) {
-                Object value = userVariants.get(featureKey);
+            Optional<FeatureFlagCache.CachedFlag> cached = featureFlagCache.get(userId, featureKey);
+            if (cached.isPresent()) {
+                Object value = cached.get().value();
                 return value != null ? value.toString() : null;
             }
 
-            // Fetch from API (this will also populate the cache)
+            // Populates the cache as a side effect.
             isFeatureEnabled(userId, featureKey);
 
-            // Now check cache again
-            userVariants = featureFlagVariantsCache.get(userId);
-            if (userVariants != null && userVariants.containsKey(featureKey)) {
-                Object value = userVariants.get(featureKey);
-                return value != null ? value.toString() : null;
-            }
-
-            return null;
+            return featureFlagCache.get(userId, featureKey)
+                    .map(FeatureFlagCache.CachedFlag::value)
+                    .map(Object::toString)
+                    .orElse(null);
         } catch (Exception e) {
             log.error("Failed to get feature flag value: " + featureKey, e);
             return null;
@@ -519,22 +506,16 @@ public class AnalyticsFacade {
     }
 
     /**
-     * Reloads all feature flags from PostHog.
-     *
-     * <p>Use this to refresh feature flags without restarting the application.</p>
+     * Reloads all feature flags from PostHog by clearing the TTL cache; the
+     * next access for any user/flag will re-fetch from {@code /decide}.
      */
     public void reloadFeatureFlags() {
         if (!available) {
             return;
         }
-
         try {
             log.info("Reloading feature flags from PostHog");
-
-            // Clear all caches
-            featureFlagsCache.clear();
-            featureFlagVariantsCache.clear();
-
+            featureFlagCache.clear();
             log.info("Feature flags cache cleared - flags will be fetched on next access");
         } catch (Exception e) {
             log.error("Failed to reload feature flags", e);
@@ -544,87 +525,52 @@ public class AnalyticsFacade {
     /**
      * Preloads feature flags for a specific user.
      *
-     * <p>This method fetches all feature flags for a user from PostHog and caches them.
-     * Useful for reducing API calls when you know you'll check multiple flags for the same user.</p>
-     *
      * @param userId user identifier
      */
-    @SuppressWarnings("unchecked")
     public void preloadFeatureFlags(String userId) {
         if (!available) {
             return;
         }
-
         try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("api_key", apiKey);
-            payload.put("distinct_id", userId);
-
-            String json = objectMapper.writeValueAsString(payload);
-            RequestBody body = RequestBody.create(json, MediaType.parse("application/json"));
-
-            Request request = new Request.Builder()
-                .url(apiUrl + "/decide/?v=3")
-                .post(body)
-                .build();
-
-            try (Response response = httpClient.newCall(request).execute()) {
-                if (!response.isSuccessful() || response.body() == null) {
-                    log.warn("PostHog /decide API call failed during preload: {}", response.code());
-                    return;
-                }
-
-                String responseBody = response.body().string();
-                Map<String, Object> result = objectMapper.readValue(responseBody, Map.class);
-
-                Map<String, Object> featureFlags = (Map<String, Object>) result.get("featureFlags");
-                if (featureFlags != null) {
-                    Map<String, Boolean> userFlags = featureFlagsCache.computeIfAbsent(userId, k -> new ConcurrentHashMap<>());
-                    Map<String, Object> userVariants = featureFlagVariantsCache.computeIfAbsent(userId, k -> new ConcurrentHashMap<>());
-
-                    for (Map.Entry<String, Object> entry : featureFlags.entrySet()) {
-                        String flagKey = entry.getKey();
-                        Object value = entry.getValue();
-
-                        // Store variant value
-                        userVariants.put(flagKey, value);
-
-                        // Determine boolean value
-                        boolean enabled;
-                        if (value instanceof Boolean) {
-                            enabled = (Boolean) value;
-                        } else if (value instanceof String) {
-                            enabled = !value.toString().isEmpty() && !"false".equalsIgnoreCase(value.toString());
-                        } else {
-                            enabled = value != null;
-                        }
-                        userFlags.put(flagKey, enabled);
-                    }
-
-                    log.debug("Preloaded {} feature flags for user {}", featureFlags.size(), userId);
-                }
-            }
+            DecideResult result = fetchAndCacheDecision(userId);
+            log.debug("Preloaded {} feature flags for user {}", result.featureFlags().size(), userId);
         } catch (Exception e) {
             log.error("Failed to preload feature flags for user: " + userId, e);
         }
     }
 
+    private DecideResult fetchAndCacheDecision(String userId) {
+        DecideResult result = postHogClient.decide(userId);
+        for (Map.Entry<String, Object> entry : result.featureFlags().entrySet()) {
+            Object value = entry.getValue();
+            featureFlagCache.put(userId, entry.getKey(), value, interpretEnabled(value));
+        }
+        return result;
+    }
+
+    private static boolean interpretEnabled(Object value) {
+        if (value instanceof Boolean bool) {
+            return bool;
+        } else if (value instanceof String str) {
+            return !str.isEmpty() && !"false".equalsIgnoreCase(str);
+        }
+        return value != null;
+    }
+
     // ==================== Utility Methods ====================
 
     /**
-     * Flushes all pending events to PostHog.
-     *
-     * <p>PostHog batches events for performance. Call this to force immediate send.</p>
+     * Flushes all pending batched events to PostHog immediately.
      */
     public void flush() {
         if (!available) {
             return;
         }
-
         try {
             log.debug("Flushing analytics events");
-            // Events are sent immediately via HTTP, no need to flush
-            log.debug("Flush requested - events already sent");
+            if (batchingEnabled && batchingSender != null) {
+                batchingSender.flush();
+            }
         } catch (Exception e) {
             log.error("Failed to flush events", e);
         }
@@ -633,18 +579,20 @@ public class AnalyticsFacade {
     /**
      * Shuts down the analytics client.
      *
-     * <p>Call this on application shutdown to ensure all events are sent.</p>
+     * <p>Stops the scheduled batch flush and performs a final, synchronous
+     * flush so buffered events are not lost.</p>
      */
     public void shutdown() {
         if (!available) {
             return;
         }
-
         try {
             log.info("Shutting down analytics");
-            if (httpClient != null) {
-                httpClient.dispatcher().executorService().shutdown();
-                httpClient.connectionPool().evictAll();
+            if (batchingSender != null) {
+                batchingSender.shutdown();
+            }
+            if (postHogClient != null) {
+                postHogClient.close();
             }
             available = false;
         } catch (Exception e) {
@@ -670,11 +618,41 @@ public class AnalyticsFacade {
         Map<String, Object> health = new HashMap<>();
         health.put("available", available);
         health.put("provider", "posthog");
-        health.put("featureFlagsCacheSize", featureFlagsCache.size());
+        health.put("featureFlagsCacheSize", featureFlagCache != null ? featureFlagCache.userCount() : 0);
+        health.put("pendingEvents", batchingSender != null ? batchingSender.pendingCount() : 0);
+        health.put("droppedEvents", batchingSender != null ? batchingSender.droppedCount() : 0);
         return health;
     }
 
+    /**
+     * Gets the PII scrubber used by this facade, so callers (e.g. aspects
+     * building event properties from method parameters) can redact sensitive
+     * data before it is even assembled into a properties map.
+     */
+    public PiiScrubber getPiiScrubber() {
+        return piiScrubber;
+    }
+
+    /**
+     * Gets the consent gateway used by this facade.
+     */
+    public ConsentGateway getConsentGateway() {
+        return consentGateway;
+    }
+
     // ==================== Private Methods ====================
+
+    /**
+     * Sends a single event either through the async batch queue or, if
+     * batching is disabled, synchronously via {@code /capture/}.
+     */
+    private void send(CaptureEvent event) {
+        if (batchingEnabled && batchingSender != null) {
+            batchingSender.enqueue(event);
+        } else {
+            postHogClient.capture(event);
+        }
+    }
 
     /**
      * Initializes PostHog client.
@@ -684,8 +662,20 @@ public class AnalyticsFacade {
      *   <li>POSTHOG_API_KEY or posthog.api.key</li>
      *   <li>POSTHOG_HOST or posthog.host (default: https://app.posthog.com)</li>
      * </ul>
+     *
+     * <p>This env-var-based configuration is used when the facade is
+     * constructed outside of a Spring context. When Spring is present,
+     * {@code AnalyticsAutoConfiguration} calls {@link #configure(AnalyticsProperties)}
+     * to apply {@code adhar.analytics.*} properties, which take precedence.</p>
      */
     private void initializePostHog() {
+        this.consentGateway = new ConsentGateway(new InMemoryConsentStore());
+        this.piiScrubber = new PiiScrubber(Set.of(
+                "password", "passwd", "secret", "token", "apikey", "api_key",
+                "ssn", "creditcard", "credit_card"), true);
+        this.featureFlagCache = new FeatureFlagCache(Duration.ofSeconds(DEFAULT_FLAG_TTL_SECONDS), Clock.systemUTC());
+        this.batchingEnabled = true;
+
         try {
             this.apiKey = getConfig("POSTHOG_API_KEY", "posthog.api.key");
             this.apiUrl = getConfig("POSTHOG_HOST", "posthog.host", "https://app.posthog.com");
@@ -696,40 +686,17 @@ public class AnalyticsFacade {
                 return;
             }
 
-            this.httpClient = new OkHttpClient.Builder()
-                .build();
-
-            this.objectMapper = new ObjectMapper();
+            this.postHogClient = new OkHttpPostHogClient(
+                    new OkHttpClient.Builder().build(), new ObjectMapper(), apiKey, apiUrl);
+            this.batchingSender = new BatchingEventSender(
+                    postHogClient, DEFAULT_BATCH_SIZE, Duration.ofSeconds(DEFAULT_FLUSH_INTERVAL_SECONDS),
+                    DEFAULT_QUEUE_CAPACITY, AnalyticsProperties.OverflowPolicy.DROP_OLDEST);
 
             available = true;
             log.info("PostHog initialized successfully. Host: {}", apiUrl);
 
         } catch (Exception e) {
             log.error("Failed to initialize PostHog", e);
-        }
-    }
-
-    /**
-     * Sends event to PostHog API.
-     */
-    private void sendEvent(String endpoint, Map<String, Object> payload) {
-        try {
-            String json = objectMapper.writeValueAsString(payload);
-            RequestBody body = RequestBody.create(json, MediaType.parse("application/json"));
-
-            Request request = new Request.Builder()
-                .url(apiUrl + "/capture/")
-                .post(body)
-                .addHeader("Authorization", "Bearer " + apiKey)
-                .build();
-
-            try (Response response = httpClient.newCall(request).execute()) {
-                if (!response.isSuccessful()) {
-                    log.warn("PostHog API call failed: {}", response.code());
-                }
-            }
-        } catch (IOException e) {
-            log.error("Failed to send event to PostHog", e);
         }
     }
 
@@ -752,4 +719,3 @@ public class AnalyticsFacade {
         return (value == null || value.isEmpty()) ? defaultValue : value;
     }
 }
-

@@ -90,4 +90,40 @@ class AdharExceptionHandlerTest {
         assertEquals("Null value encountered", r.getMessage());
         assertEquals("npe msg", r.getDetails());
     }
+
+    @Test
+    void resolvesLocalizedMessageWhenCatalogIsSet() {
+        TestHandler localized = new TestHandler();
+        localized.setErrorCatalog(com.adhar.kit.commons.i18n.ErrorCatalog.withDefaults());
+
+        org.springframework.context.i18n.LocaleContextHolder.setLocale(java.util.Locale.FRENCH);
+        try {
+            ErrorResponse r = localized.validation(new ValidationException("invalid"));
+            assertEquals("La validation a échoué", r.getMessage());
+
+            ErrorResponse generic = localized.generic(new Exception("details"));
+            assertEquals("Une erreur inattendue est survenue", generic.getMessage());
+        } finally {
+            org.springframework.context.i18n.LocaleContextHolder.resetLocaleContext();
+        }
+    }
+
+    @Test
+    void fallsBackToExceptionMessageWhenCatalogHasNoEntry() {
+        TestHandler localized = new TestHandler();
+        localized.setErrorCatalog(com.adhar.kit.commons.i18n.ErrorCatalog.withDefaults());
+
+        ErrorResponse r = localized.adhar(new AdharException("UNKNOWN_CODE", "original message"));
+        assertEquals("original message", r.getMessage());
+    }
+
+    @Test
+    void catalogAccessorExposesConfiguredCatalog() {
+        TestHandler localized = new TestHandler();
+        assertNull(localized.getErrorCatalog());
+        com.adhar.kit.commons.i18n.ErrorCatalog catalog =
+            com.adhar.kit.commons.i18n.ErrorCatalog.withDefaults();
+        localized.setErrorCatalog(catalog);
+        assertSame(catalog, localized.getErrorCatalog());
+    }
 }

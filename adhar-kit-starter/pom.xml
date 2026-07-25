@@ -189,6 +189,11 @@
             <artifactId>spring-boot-configuration-processor</artifactId>
             <optional>true</optional>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+            <optional>true</optional>
+        </dependency>
 
         <!-- Quarkus (optional - active when Quarkus is on the classpath) -->
         <dependency>
@@ -229,6 +234,17 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
+
+        <!-- Test-only: adhar-kit-graphql declares spring-graphql as optional, so it is not
+             transitive here. AdharFacadeConvenienceTest mocks the concrete GraphQlFacade, which
+             forces Mockito/Byte Buddy to load its full type hierarchy (the module's
+             DataLoaderRegistrar implements org.springframework.graphql.execution.DataLoaderRegistrar).
+             Bring spring-graphql onto the test classpath so that hierarchy resolves. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-graphql</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 
@@ -261,14 +277,9 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
             </plugin>
-            <!-- Skip JaCoCo coverage check for this facade module -->
-            <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
-                <configuration>
-                    <skip>true</skip>
-                </configuration>
-            </plugin>
+            <!-- JaCoCo coverage gate inherited from adhar-kit-parent's pluginManagement:
+                 80% instruction coverage, excluding *AutoConfiguration/*Properties classes
+                 and the quarkus/micronaut/helidon/vertx framework-adapter packages. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>

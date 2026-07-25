@@ -141,6 +141,73 @@ class GraphQlSecurityInterceptorTest {
     }
 
     @Test
+    @DisplayName("does not flag a field/argument that merely contains '__schema' as text")
+    void doesNotFalselyFlagTextContainingIntrospectionSubstring() {
+        GraphQlProperties props = new GraphQlProperties();
+        props.setIntrospectionEnabled(false);
+        GraphQlSecurityInterceptor interceptor = new GraphQlSecurityInterceptor(props);
+
+        // "mySchemaField" and a string literal containing "__schema" are not introspection
+        // field selections; a naive substring check would incorrectly block this.
+        Mono<WebGraphQlResponse> result = interceptor.intercept(
+                request("query { user(filter: \"__schema\") { mySchemaField } }"), passThroughChain());
+
+        assertThat(result.block()).isSameAs(mockResponse);
+    }
+
+    @Test
+    @DisplayName("blocks introspection field referenced only through a named fragment")
+    void blocksIntrospectionViaNamedFragment() {
+        GraphQlProperties props = new GraphQlProperties();
+        props.setIntrospectionEnabled(false);
+        GraphQlSecurityInterceptor interceptor = new GraphQlSecurityInterceptor(props);
+
+        String document = "query { user { ...Frag } } fragment Frag on User { __typename __schema { types { name } } }";
+        Mono<WebGraphQlResponse> result = interceptor.intercept(request(document), passThroughChain());
+
+        assertThatThrownBy(result::block).isInstanceOf(SecurityException.class);
+    }
+
+    @Test
+    @DisplayName("blocks introspection field nested inside an inline fragment")
+    void blocksIntrospectionViaInlineFragment() {
+        GraphQlProperties props = new GraphQlProperties();
+        props.setIntrospectionEnabled(false);
+        GraphQlSecurityInterceptor interceptor = new GraphQlSecurityInterceptor(props);
+
+        String document = "query { user { ... on User { __type(name: \"X\") { name } } } }";
+        Mono<WebGraphQlResponse> result = interceptor.intercept(request(document), passThroughChain());
+
+        assertThatThrownBy(result::block).isInstanceOf(SecurityException.class);
+    }
+
+    @Test
+    @DisplayName("falls back to substring detection for an unparseable document")
+    void fallsBackToSubstringForUnparseableDocument() {
+        GraphQlProperties props = new GraphQlProperties();
+        props.setIntrospectionEnabled(false);
+        GraphQlSecurityInterceptor interceptor = new GraphQlSecurityInterceptor(props);
+
+        Mono<WebGraphQlResponse> result =
+                interceptor.intercept(request("{{{ not valid graphql __schema"), passThroughChain());
+
+        assertThatThrownBy(result::block).isInstanceOf(SecurityException.class);
+    }
+
+    @Test
+    @DisplayName("allows an unparseable document with no introspection substring through")
+    void allowsUnparseableDocumentWithoutIntrospectionSubstring() {
+        GraphQlProperties props = new GraphQlProperties();
+        props.setIntrospectionEnabled(false);
+        GraphQlSecurityInterceptor interceptor = new GraphQlSecurityInterceptor(props);
+
+        Mono<WebGraphQlResponse> result =
+                interceptor.intercept(request("{{{ not valid graphql at all"), passThroughChain());
+
+        assertThat(result.block()).isSameAs(mockResponse);
+    }
+
+    @Test
     @DisplayName("allows authenticated request when authentication required")
     void allowsAuthenticated() {
         GraphQlProperties props = new GraphQlProperties();

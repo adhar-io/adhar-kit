@@ -66,24 +66,48 @@ public class OutboxEvent {
     @Builder.Default
     private OutboxStatus status = OutboxStatus.PENDING;
 
+    /** Number of publish attempts made so far (0 before the first attempt). */
+    @Column(nullable = false)
+    @Builder.Default
+    private int attempts = 0;
+
+    /**
+     * Earliest time at which this event is eligible to be (re)published. Set to "now" for a
+     * brand-new event, and pushed forward with exponential backoff after each failed attempt.
+     */
+    @Column(nullable = false)
+    private Instant nextAttemptAt;
+
+    /** Message of the most recent publish failure, if any (truncated to fit the column). */
+    @Column(length = 2000)
+    private String lastError;
+
     public enum OutboxStatus {
+        /** Never attempted, or scheduled for retry and not yet due. */
         PENDING,
+        /** Successfully published. */
         PROCESSED,
-        FAILED
+        /** A publish attempt failed but attempts remain; eligible for retry once due. */
+        FAILED,
+        /** Exhausted {@code max-attempts}; will not be retried automatically (dead-letter). */
+        DEAD
     }
 
     /**
-     * Factory method to create a new pending outbox event.
+     * Factory method to create a new pending outbox event, immediately eligible for publishing.
      */
     public static OutboxEvent create(String aggregateType, String aggregateId,
                                      String eventType, String payload) {
+        Instant now = Instant.now();
         return OutboxEvent.builder()
                 .aggregateType(aggregateType)
                 .aggregateId(aggregateId)
                 .eventType(eventType)
                 .payload(payload)
-                .createdAt(Instant.now())
+                .createdAt(now)
                 .status(OutboxStatus.PENDING)
+                .attempts(0)
+                .nextAttemptAt(now)
                 .build();
     }
 }

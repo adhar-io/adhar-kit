@@ -132,6 +132,13 @@ public final class RecipeCatalog {
                 )
         ));
 
+        register("adhar-version-migration", new RecipeSet(
+                "Migrate Adhar Kit Version",
+                "Migrates a consumer project between Adhar Kit versions: bumps com.adhar.kit dependency versions and optionally renames the legacy com.adhar.adharkit.* packages",
+                Category.ADHAR_KIT,
+                List.of("com.adhar.kit.rewrite.recipe.adhar.MigrateAdharKitVersion")
+        ));
+
         register("adhar-cloudevents", new RecipeSet(
                 "Adopt CloudEvents Specification",
                 "Migrates custom event classes to use AdharCloudEvent envelope for CloudEvents 1.0 compliance",

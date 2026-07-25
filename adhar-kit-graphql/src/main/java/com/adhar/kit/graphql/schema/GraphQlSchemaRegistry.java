@@ -1,5 +1,7 @@
 package com.adhar.kit.graphql.schema;
 
+import graphql.schema.idl.SchemaParser;
+import graphql.schema.idl.TypeDefinitionRegistry;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
@@ -11,7 +13,10 @@ import java.util.stream.Stream;
  * Registry for dynamically building GraphQL schemas from SDL type definitions.
  *
  * <p>Provides a thread-safe registry where types, queries, and mutations can be
- * registered independently and later merged into a single SDL schema string.</p>
+ * registered independently and later merged into a single SDL schema string. Every
+ * registration is syntax-validated with graphql-java's {@link SchemaParser} so that
+ * malformed SDL is rejected immediately with a clear error, rather than surfacing later
+ * as an obscure schema-build failure.</p>
  *
  * <p><b>Usage Example:</b></p>
  * <pre>{@code
@@ -20,6 +25,7 @@ import java.util.stream.Stream;
  * registry.registerQuery("user", "user(id: ID!): User");
  * registry.registerMutation("createUser", "createUser(name: String!, email: String!): User");
  * String schema = registry.getSchema();
+ * TypeDefinitionRegistry parsed = registry.getTypeDefinitionRegistry();
  * }</pre>
  *
  * @author Adhar Platform Team
@@ -37,11 +43,12 @@ public class GraphQlSchemaRegistry {
      *
      * @param typeName the name of the type (used as the registry key)
      * @param sdl      the SDL definition of the type (e.g., {@code "type User { id: ID! }"})
-     * @throws IllegalArgumentException if typeName or sdl is null or blank
+     * @throws IllegalArgumentException if typeName or sdl is null, blank, or not syntactically valid SDL
      */
     public void registerType(String typeName, String sdl) {
         validateNotBlank(typeName, "typeName");
         validateNotBlank(sdl, "sdl");
+        validateSdlSyntax(sdl, "Invalid SDL for type '" + typeName + "'");
         log.debug("Registering GraphQL type: {}", typeName);
         types.put(typeName, sdl);
     }
@@ -51,11 +58,12 @@ public class GraphQlSchemaRegistry {
      *
      * @param name the query field name (used as the registry key)
      * @param sdl  the SDL field definition (e.g., {@code "user(id: ID!): User"})
-     * @throws IllegalArgumentException if name or sdl is null or blank
+     * @throws IllegalArgumentException if name or sdl is null, blank, or not a syntactically valid field definition
      */
     public void registerQuery(String name, String sdl) {
         validateNotBlank(name, "name");
         validateNotBlank(sdl, "sdl");
+        validateFieldSyntax("Query", name, sdl);
         log.debug("Registering GraphQL query: {}", name);
         queries.put(name, sdl);
     }
@@ -65,13 +73,57 @@ public class GraphQlSchemaRegistry {
      *
      * @param name the mutation field name (used as the registry key)
      * @param sdl  the SDL field definition (e.g., {@code "createUser(name: String!): User"})
-     * @throws IllegalArgumentException if name or sdl is null or blank
+     * @throws IllegalArgumentException if name or sdl is null, blank, or not a syntactically valid field definition
      */
     public void registerMutation(String name, String sdl) {
         validateNotBlank(name, "name");
         validateNotBlank(sdl, "sdl");
+        validateFieldSyntax("Mutation", name, sdl);
         log.debug("Registering GraphQL mutation: {}", name);
         mutations.put(name, sdl);
+    }
+
+    /**
+     * Merges all types, queries, and mutations from another registry into this one.
+     *
+     * <p>Entries are re-validated as they are copied over (via {@link #registerType},
+     * {@link #registerQuery}, {@link #registerMutation}), and overwrite any existing
+     * entry registered under the same name in this registry.</p>
+     *
+     * @param other the registry to merge in; a null value is a no-op
+     */
+    public void merge(GraphQlSchemaRegistry other) {
+        if (other == null) {
+            return;
+        }
+        other.types.forEach(this::registerType);
+        other.queries.forEach(this::registerQuery);
+        other.mutations.forEach(this::registerMutation);
+        log.debug("Merged schema registry: +{} types, +{} queries, +{} mutations",
+                other.types.size(), other.queries.size(), other.mutations.size());
+    }
+
+    /**
+     * Parses the merged SDL schema (see {@link #getSchema()}) into a graphql-java
+     * {@link TypeDefinitionRegistry}.
+     *
+     * <p>This performs full document parsing (as opposed to the syntax-only,
+     * per-fragment validation done at registration time), exposing the merged
+     * registry so it can be fed into {@code SchemaGenerator.makeExecutableSchema}.</p>
+     *
+     * @return the parsed, merged type definition registry
+     * @throws IllegalStateException if the merged schema fails to parse
+     */
+    public TypeDefinitionRegistry getTypeDefinitionRegistry() {
+        String schema = getSchema();
+        if (schema.isBlank()) {
+            return new TypeDefinitionRegistry();
+        }
+        try {
+            return new SchemaParser().parse(schema);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to parse merged GraphQL schema: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -164,6 +216,37 @@ public class GraphQlSchemaRegistry {
         queries.clear();
         mutations.clear();
         log.debug("Schema registry cleared");
+    }
+
+    /**
+     * Validates that the given SDL fragment is a syntactically well-formed standalone
+     * type/scalar/enum/etc. definition by attempting to parse it in isolation.
+     */
+    private void validateSdlSyntax(String sdl, String errorPrefix) {
+        try {
+            new SchemaParser().parse(sdl);
+        } catch (Exception e) {
+            throw new IllegalArgumentException(errorPrefix + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Validates that the given SDL fragment is a syntactically well-formed field
+     * definition by wrapping it in a throwaway container type and parsing that.
+     *
+     * <p>Bare field definitions (e.g. {@code "user(id: ID!): User"}) are not valid
+     * top-level SDL documents on their own, so they must be wrapped before being
+     * handed to {@link SchemaParser}.</p>
+     */
+    private void validateFieldSyntax(String containerTypeName, String fieldName, String sdl) {
+        String wrapped = "type " + containerTypeName + " { " + sdl + " }";
+        try {
+            new SchemaParser().parse(wrapped);
+        } catch (Exception e) {
+            throw new IllegalArgumentException(
+                    "Invalid SDL for " + containerTypeName.toLowerCase() + " field '" + fieldName + "': "
+                            + e.getMessage(), e);
+        }
     }
 
     private void validateNotBlank(String value, String paramName) {

@@ -1,6 +1,7 @@
 package com.adhar.kit.eventsourcing.store;
 
 import com.adhar.kit.eventsourcing.core.DomainEvent;
+import com.adhar.kit.eventsourcing.upcast.UpcasterChain;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -12,7 +13,10 @@ import java.util.concurrent.ConcurrentMap;
  * In-memory {@link EventStore} implementation intended for development and testing.
  *
  * <p>Events are stored in a {@link ConcurrentHashMap} keyed by aggregate ID.
- * Optimistic concurrency is enforced by checking the expected version before appending.</p>
+ * Optimistic concurrency is enforced by checking the expected version before appending.
+ * Events read back via {@link #getEvents}, {@link #getEventsAfterVersion} and
+ * {@link #getAllEvents} are passed through an {@link UpcasterChain} so older payload
+ * versions are transparently migrated.</p>
  *
  * @author Adhar Platform Team
  * @since 1.0.0
@@ -20,6 +24,16 @@ import java.util.concurrent.ConcurrentMap;
 public class InMemoryEventStore implements EventStore {
 
     private final ConcurrentMap<String, List<DomainEvent>> store = new ConcurrentHashMap<>();
+    private final List<DomainEvent> insertionOrder = Collections.synchronizedList(new ArrayList<>());
+    private final UpcasterChain upcasterChain;
+
+    public InMemoryEventStore() {
+        this(UpcasterChain.empty());
+    }
+
+    public InMemoryEventStore(UpcasterChain upcasterChain) {
+        this.upcasterChain = upcasterChain;
+    }
 
     @Override
     public void saveEvents(String aggregateId, List<DomainEvent> events, int expectedVersion) {
@@ -32,12 +46,13 @@ public class InMemoryEventStore implements EventStore {
             }
             eventStream.addAll(events);
         }
+        insertionOrder.addAll(events);
     }
 
     @Override
     public List<DomainEvent> getEvents(String aggregateId) {
         var events = store.get(aggregateId);
-        return events == null ? List.of() : List.copyOf(events);
+        return events == null ? List.of() : upcasterChain.applyAll(List.copyOf(events));
     }
 
     @Override
@@ -45,5 +60,10 @@ public class InMemoryEventStore implements EventStore {
         return getEvents(aggregateId).stream()
                 .filter(e -> e.version() > version)
                 .toList();
+    }
+
+    @Override
+    public List<DomainEvent> getAllEvents() {
+        return upcasterChain.applyAll(List.copyOf(insertionOrder));
     }
 }

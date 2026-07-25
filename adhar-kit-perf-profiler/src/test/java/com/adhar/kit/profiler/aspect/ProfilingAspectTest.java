@@ -1,6 +1,9 @@
 package com.adhar.kit.profiler.aspect;
 
 import com.adhar.kit.profiler.annotation.Profiled;
+import com.adhar.kit.profiler.config.PerfProfilerProperties;
+import com.adhar.kit.profiler.event.SlowCallEvent;
+import com.adhar.kit.profiler.event.SlowCallThresholdBreachedEvent;
 import com.adhar.kit.profiler.model.ProfilingReport;
 import com.adhar.kit.profiler.registry.ProfilingRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -11,16 +14,22 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.lang.annotation.Annotation;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -178,6 +187,150 @@ class ProfilingAspectTest {
         assertThat(result).isEqualTo("classLevel");
         assertThat(profilingRegistry.getReport().totalProfiledCalls()).isEqualTo(1);
         assertThat(meterRegistry.find("adhar.profiler.SampleService.doWork").timer()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("sampleRate=0 skips timing/recording entirely but still runs the underlying method")
+    void sampleRateZeroSkipsRecording() throws Throwable {
+        PerfProfilerProperties props = new PerfProfilerProperties();
+        props.setSampleRate(0.0);
+        ProfilingAspect unsampled = new ProfilingAspect(meterRegistry, profilingRegistry, null, props);
+
+        when(joinPoint.proceed()).thenReturn("result");
+        Object result = unsampled.profileMethod(joinPoint, profiled("", true, 500, false));
+
+        assertThat(result).isEqualTo("result");
+        assertThat(profilingRegistry.getReport().totalProfiledCalls()).isZero();
+        assertThat(meterRegistry.find("adhar.profiler.SampleService.doWork").timer()).isNull();
+    }
+
+    @Test
+    @DisplayName("sampleRate=1.0 (default) always times and records every call")
+    void sampleRateOneAlwaysRecords() throws Throwable {
+        PerfProfilerProperties props = new PerfProfilerProperties();
+        props.setSampleRate(1.0);
+        ProfilingAspect sampled = new ProfilingAspect(meterRegistry, profilingRegistry, null, props);
+
+        when(joinPoint.proceed()).thenReturn("result");
+        for (int i = 0; i < 5; i++) {
+            sampled.profileMethod(joinPoint, profiled("", true, 500, false));
+        }
+
+        assertThat(profilingRegistry.getReport().totalProfiledCalls()).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("maxTrackedMethods caps distinct methods recorded into the registry")
+    void maxTrackedMethodsCapsDistinctMethods() throws Throwable {
+        PerfProfilerProperties props = new PerfProfilerProperties();
+        props.setMaxTrackedMethods(2);
+        ProfilingAspect capped = new ProfilingAspect(meterRegistry, profilingRegistry, null, props);
+
+        for (String methodName : List.of("m1", "m2", "m3", "m4")) {
+            ProceedingJoinPoint jp = mock(ProceedingJoinPoint.class);
+            MethodSignature sig = mock(MethodSignature.class);
+            when(jp.getSignature()).thenReturn(sig);
+            when(sig.getName()).thenReturn(methodName);
+            doReturn(SampleService.class).when(sig).getDeclaringType();
+            when(jp.proceed()).thenReturn("ok");
+
+            capped.profileMethod(jp, profiled("", true, 500, false));
+        }
+
+        ProfilingReport report = profilingRegistry.getReport(Integer.MAX_VALUE);
+        assertThat(report.methodCallCounts()).hasSize(2);
+        assertThat(report.totalProfiledCalls()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("a per-call slow execution publishes a SlowCallEvent in addition to logging")
+    void slowCallPublishesSlowCallEvent() throws Throwable {
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        ProfilingAspect evented = new ProfilingAspect(
+                meterRegistry, profilingRegistry, publisher, new PerfProfilerProperties());
+
+        when(joinPoint.proceed()).thenAnswer(invocation -> {
+            Thread.sleep(15);
+            return "slow";
+        });
+        Profiled annotation = profiled("", true, 1, false);
+
+        evented.profileMethod(joinPoint, annotation);
+
+        ArgumentCaptor<SlowCallEvent> captor = ArgumentCaptor.forClass(SlowCallEvent.class);
+        verify(publisher, atLeastOnce()).publishEvent(captor.capture());
+        SlowCallEvent event = captor.getValue();
+        assertThat(event.getClassName()).isEqualTo("SampleService");
+        assertThat(event.getMethodName()).isEqualTo("doWork");
+        assertThat(event.getThresholdMs()).isEqualTo(1);
+        assertThat(event.getDurationMs()).isGreaterThan(1);
+        assertThat(event.getMethodKey()).isEqualTo("SampleService.doWork");
+    }
+
+    @Test
+    @DisplayName("a fast call under threshold does not publish a SlowCallEvent")
+    void fastCallDoesNotPublishSlowCallEvent() throws Throwable {
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        ProfilingAspect evented = new ProfilingAspect(
+                meterRegistry, profilingRegistry, publisher, new PerfProfilerProperties());
+
+        when(joinPoint.proceed()).thenReturn("fast");
+        Profiled annotation = profiled("", true, 500_000, false);
+
+        evented.profileMethod(joinPoint, annotation);
+
+        verify(publisher, never()).publishEvent(org.mockito.ArgumentMatchers.any(SlowCallEvent.class));
+    }
+
+    @Test
+    @DisplayName("a sustained aggregate p99 breach publishes a debounced SlowCallThresholdBreachedEvent")
+    void aggregateP99BreachPublishesThresholdEvent() throws Throwable {
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        PerfProfilerProperties props = new PerfProfilerProperties();
+        props.setP99AlertThresholdMs(5);
+        ProfilingAspect evented = new ProfilingAspect(meterRegistry, profilingRegistry, publisher, props);
+
+        for (int i = 0; i < 20; i++) {
+            ProceedingJoinPoint jp = mock(ProceedingJoinPoint.class);
+            MethodSignature sig = mock(MethodSignature.class);
+            when(jp.getSignature()).thenReturn(sig);
+            when(sig.getName()).thenReturn("doWork");
+            doReturn(SampleService.class).when(sig).getDeclaringType();
+            boolean slow = i >= 18;
+            when(jp.proceed()).thenAnswer(invocation -> {
+                if (slow) {
+                    Thread.sleep(20);
+                }
+                return "v";
+            });
+            // logSlow=false and a very high per-call threshold to isolate the aggregate-threshold path.
+            evented.profileMethod(jp, profiled("", false, 1_000_000, false));
+        }
+
+        ArgumentCaptor<SlowCallThresholdBreachedEvent> captor =
+                ArgumentCaptor.forClass(SlowCallThresholdBreachedEvent.class);
+        verify(publisher, atLeastOnce()).publishEvent(captor.capture());
+        SlowCallThresholdBreachedEvent event = captor.getValue();
+        assertThat(event.getMethodKey()).isEqualTo("SampleService.doWork");
+        assertThat(event.getThresholdMs()).isEqualTo(5);
+        assertThat(event.getP99Ms()).isGreaterThan(5);
+    }
+
+    @Test
+    @DisplayName("p99 alert threshold of zero disables aggregate breach events")
+    void zeroP99ThresholdDisablesAggregateEvents() throws Throwable {
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        PerfProfilerProperties props = new PerfProfilerProperties();
+        props.setP99AlertThresholdMs(0);
+        ProfilingAspect evented = new ProfilingAspect(meterRegistry, profilingRegistry, publisher, props);
+
+        when(joinPoint.proceed()).thenAnswer(invocation -> {
+            Thread.sleep(10);
+            return "v";
+        });
+        evented.profileMethod(joinPoint, profiled("", false, 1_000_000, false));
+
+        verify(publisher, never()).publishEvent(org.mockito.ArgumentMatchers.any(SlowCallThresholdBreachedEvent.class));
     }
 
     /** Dummy declaring type used to drive getSimpleName(). */

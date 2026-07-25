@@ -9,11 +9,14 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -27,6 +30,7 @@ class GenerateMojoTest {
         GenerateMojo mojo = new GenerateMojo();
         TestSupport.setField(mojo, "project", project);
         TestSupport.setField(mojo, "outputDirectory", outputDir);
+        TestSupport.setField(mojo, "testOutputDirectory", new File(outputDir, "test-out"));
         TestSupport.setField(mojo, "type", type);
         TestSupport.setField(mojo, "name", name);
         TestSupport.setField(mojo, "basePackage", "com.example");
@@ -70,18 +74,44 @@ class GenerateMojoTest {
     }
 
     @Test
-    void generatesEntityTypeWithoutError(@TempDir Path out) throws Exception {
+    void generatesEntityType(@TempDir Path out) throws Exception {
         GenerateMojo mojo = newMojo(mock(MavenProject.class), out.toFile(), "entity", "Thing");
-        mojo.execute(); // entity generation is a logging stub
+        mojo.execute();
+
+        File entityFile = new File(out.toFile(), "com/example/entity/Thing.java");
+        assertThat(entityFile).exists();
+        String content = Files.readString(entityFile.toPath());
+        assertThat(content).contains("@Entity");
+        assertThat(content).contains("@Id");
     }
 
     @Test
     void generatesAllComponents(@TempDir Path out) throws Exception {
-        GenerateMojo mojo = newMojo(mock(MavenProject.class), out.toFile(), "all", "Widget");
+        MavenProject project = mock(MavenProject.class);
+        GenerateMojo mojo = newMojo(project, out.toFile(), "all", "Widget");
         mojo.execute();
+        assertThat(new File(out.toFile(), "com/example/entity/Widget.java")).exists();
         assertThat(new File(out.toFile(), "com/example/service/WidgetService.java")).exists();
         assertThat(new File(out.toFile(), "com/example/controller/WidgetController.java")).exists();
+        assertThat(new File(out.toFile(), "com/example/repository/WidgetRepository.java")).exists();
         assertThat(new File(out.toFile(), "com/example/dto/WidgetCreateDto.java")).exists();
+
+        File testOutDir = new File(out.toFile(), "test-out");
+        assertThat(new File(testOutDir, "com/example/service/WidgetServiceIntegrationTest.java")).exists();
+        assertThat(new File(testOutDir, "com/example/controller/WidgetControllerIntegrationTest.java")).exists();
+        verify(project).addTestCompileSourceRoot(testOutDir.getAbsolutePath());
+    }
+
+    @Test
+    void generatesAllComponentsWithoutTestsWhenDisabled(@TempDir Path out) throws Exception {
+        MavenProject project = mock(MavenProject.class);
+        GenerateMojo mojo = newMojo(project, out.toFile(), "all", "Gadget");
+        TestSupport.setField(mojo, "generateTests", false);
+        mojo.execute();
+
+        File testOutDir = new File(out.toFile(), "test-out");
+        assertThat(new File(testOutDir, "com/example/service/GadgetServiceIntegrationTest.java")).doesNotExist();
+        verify(project, never()).addTestCompileSourceRoot(anyString());
     }
 
     @Test

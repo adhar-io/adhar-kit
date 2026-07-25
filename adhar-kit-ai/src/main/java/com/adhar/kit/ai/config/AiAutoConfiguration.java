@@ -5,6 +5,7 @@ import com.adhar.kit.ai.aspect.*;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -73,6 +74,11 @@ public class AiAutoConfiguration {
 
     /**
      * Creates AiChatAspect for @AiChat annotation processing.
+     *
+     * <p>The {@link com.adhar.kit.ai.service.AiService} bean (backed by the real
+     * Spring AI {@code ChatModel}) is looked up lazily via {@link ObjectProvider}
+     * since it is only registered once a chat model provider is configured; see
+     * {@link AiChatAspect} for the full bridging rationale.</p>
      */
     @Bean
     @ConditionalOnProperty(
@@ -81,9 +87,9 @@ public class AiAutoConfiguration {
         havingValue = "true",
         matchIfMissing = true
     )
-    public AiChatAspect aiChatAspect() {
+    public AiChatAspect aiChatAspect(ObjectProvider<com.adhar.kit.ai.service.AiService> aiServiceProvider) {
         log.info("Enabling @AiChat annotation support");
-        return new AiChatAspect();
+        return new AiChatAspect(aiServiceProvider);
     }
 
     /**

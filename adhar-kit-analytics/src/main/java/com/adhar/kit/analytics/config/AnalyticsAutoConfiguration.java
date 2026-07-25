@@ -38,12 +38,22 @@ public class AnalyticsAutoConfiguration {
 
     /**
      * Creates AnalyticsFacade bean.
+     *
+     * <p>The facade itself is a singleton created lazily from environment
+     * variables ({@code AnalyticsFacade.getInstance()}); this bean method
+     * additionally applies the bound {@link AnalyticsProperties} (batch size,
+     * flush interval, feature-flag TTL, consent opt-out list, PII redaction
+     * keys) so Spring Boot configuration actually takes effect instead of
+     * being dead config. {@code destroyMethod = "shutdown"} ensures buffered
+     * events are flushed when the application context closes.</p>
      */
-    @Bean
+    @Bean(destroyMethod = "shutdown")
     @ConditionalOnMissingBean
-    public AnalyticsFacade analyticsFacade() {
+    public AnalyticsFacade analyticsFacade(AnalyticsProperties properties) {
         log.info("Initializing Analytics Facade (PostHog)");
-        return AnalyticsFacade.getInstance();
+        AnalyticsFacade facade = AnalyticsFacade.getInstance();
+        facade.configure(properties);
+        return facade;
     }
 
     /**

@@ -72,6 +72,21 @@ public class NotificationProperties {
     private HistoryProperties history = new HistoryProperties();
 
     /**
+     * Per-recipient/channel rate limiting configuration.
+     */
+    private RateLimitProperties rateLimit = new RateLimitProperties();
+
+    /**
+     * Idempotency (duplicate suppression) configuration.
+     */
+    private IdempotencyProperties idempotency = new IdempotencyProperties();
+
+    /**
+     * Digest/batching configuration.
+     */
+    private DigestProperties digest = new DigestProperties();
+
+    /**
      * Email notification properties.
      */
     @Data
@@ -129,6 +144,10 @@ public class NotificationProperties {
 
     /**
      * SMS notification properties.
+     * <p>
+     * When {@code url} is configured, SMS notifications are delivered to a generic
+     * REST gateway via HTTP. When left unset, the SMS channel falls back to logging.
+     * </p>
      */
     @Data
     public static class SmsProperties {
@@ -137,6 +156,42 @@ public class NotificationProperties {
          * Whether the SMS channel is enabled.
          */
         private boolean enabled = false;
+
+        /**
+         * SMS gateway endpoint URL. When unset, SMS sends fall back to logging.
+         */
+        private String url;
+
+        /**
+         * HTTP method used when calling the SMS gateway.
+         */
+        private String method = "POST";
+
+        /**
+         * Name of the authentication header sent to the SMS gateway.
+         */
+        private String authHeaderName = "Authorization";
+
+        /**
+         * Value of the authentication header (e.g. "Bearer &lt;token&gt;"). Optional.
+         */
+        private String authHeaderValue;
+
+        /**
+         * Content type of the gateway request payload.
+         */
+        private String contentType = "application/json";
+
+        /**
+         * Payload template with {@code ${recipient}}, {@code ${subject}}, {@code ${body}},
+         * {@code ${id}} and {@code ${metadata.<key>}} placeholders.
+         */
+        private String payloadTemplate = "{\"to\":\"${recipient}\",\"message\":\"${body}\"}";
+
+        /**
+         * Timeout in milliseconds for SMS gateway HTTP calls.
+         */
+        private int timeoutMs = 5000;
     }
 
     /**
@@ -154,6 +209,11 @@ public class NotificationProperties {
          * Base backoff delay in milliseconds between retries (exponential backoff applied).
          */
         private long backoffMs = 1000;
+
+        /**
+         * Upper bound in milliseconds for the exponential backoff delay.
+         */
+        private long maxBackoffMs = 30000;
     }
 
     /**
@@ -166,5 +226,71 @@ public class NotificationProperties {
          * Maximum number of notification history entries to retain.
          */
         private int maxSize = 1000;
+    }
+
+    /**
+     * Per-recipient/channel sliding-window rate limiting configuration.
+     */
+    @Data
+    public static class RateLimitProperties {
+
+        /**
+         * Whether rate limiting is enabled.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Maximum number of notifications per recipient/channel within the window.
+         */
+        private int maxPerWindow = 60;
+
+        /**
+         * Sliding window length in milliseconds.
+         */
+        private long windowMs = 60000;
+    }
+
+    /**
+     * Idempotency-key duplicate suppression configuration.
+     */
+    @Data
+    public static class IdempotencyProperties {
+
+        /**
+         * Whether idempotency-key duplicate suppression is enabled.
+         */
+        private boolean enabled = true;
+
+        /**
+         * Time-to-live in milliseconds for remembered idempotency keys.
+         */
+        private long ttlMs = 86400000;
+    }
+
+    /**
+     * Digest/batching configuration for aggregating notifications per recipient.
+     */
+    @Data
+    public static class DigestProperties {
+
+        /**
+         * Whether the digest service is enabled.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Aggregation window in milliseconds before a digest is flushed.
+         */
+        private long windowMs = 60000;
+
+        /**
+         * Maximum number of notifications aggregated before an immediate flush.
+         */
+        private int maxBatchSize = 50;
+
+        /**
+         * Subject template for digest notifications ({@code ${count}} placeholder supported).
+         */
+        private String subjectTemplate = "You have ${count} new notifications";
     }
 }

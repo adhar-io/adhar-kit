@@ -594,23 +594,35 @@ adhar:
         order-service:
           target: "localhost:9090"
           enable-retry: true
-          max-retry-attempts: 3
-          default-timeout: 60000
+          max-retry-attempts: 3          # clamped to >= 2 (grpc-java requirement)
+          initial-backoff-millis: 1000
+          max-backoff-millis: 10000
+          backoff-multiplier: 2.0
+          default-timeout: 60000         # applied as a deadline when the caller sets none
         
         inventory-service:
           target: "localhost:9091"
           enable-retry: true
           load-balancing-policy: "round_robin"
     
-    # Security
+    # Security (also used for client-side TLS/mTLS - see "Security" section below)
     security:
       enabled: false
       enable-tls: false
       enable-mtls: false
+
+    # Authentication (AuthServerInterceptor)
+    auth:
+      enabled: false
+      shared-secret: ""     # required when enabled, validated via StaticTokenAuthenticator
+
+    # Spring wiring toggles
+    enable-service-registrar: true   # auto-register @GrpcService beans
+    enable-client-injection: true    # auto-inject @GrpcClient ManagedChannel fields
     
     # Observability
     observability:
-      enable-metrics: true
+      enable-metrics: true    # requires io.micrometer:micrometer-core + a MeterRegistry bean
       enable-tracing: true
       enable-logging: true
       log-level: "BASIC"
@@ -622,7 +634,10 @@ adhar:
 
 ### @GrpcService
 
-Marks a class as a gRPC service implementation.
+Marks a class as a gRPC service implementation. In a Spring context, any bean
+annotated `@GrpcService` that implements `io.grpc.BindableService` is
+automatically discovered and registered with the `AdharGrpcServer` bean by
+`GrpcServiceRegistrar` (toggle: `adhar.grpc.enable-service-registrar`, default `true`).
 
 ```java
 @GrpcService
@@ -632,21 +647,33 @@ public class OrderServiceImpl extends OrderServiceGrpc.OrderServiceImplBase {
 ```
 
 **Features:**
-- Auto-registration with server
-- Automatic interceptor application
+- Auto-registration with server (`spring.GrpcServiceRegistrar`)
+- Automatic interceptor application (logging, exception handling, and optionally auth/metrics)
 - Custom interceptor support
 
 ### @GrpcClient
 
-Injects a gRPC client stub (for dependency injection frameworks).
+Injects a gRPC client channel (for dependency injection frameworks). In a
+Spring context, `GrpcClientBeanPostProcessor` injects the named
+`ManagedChannel` into any field annotated `@GrpcClient("channel-name")`
+(toggle: `adhar.grpc.enable-client-injection`, default `true`). Currently only
+`ManagedChannel`-typed fields are supported; build your stub from the
+injected channel.
 
 ```java
 @Service
 public class OrderProcessingService {
-    
+
     @GrpcClient("order-service")
+    private ManagedChannel orderChannel;
+
     private OrderServiceGrpc.OrderServiceBlockingStub orderClient;
-    
+
+    @PostConstruct
+    void init() {
+        orderClient = OrderServiceGrpc.newBlockingStub(orderChannel);
+    }
+
     public void processOrder(String orderId) {
         GetOrderRequest request = GetOrderRequest.newBuilder()
             .setOrderId(orderId)
@@ -773,21 +800,76 @@ ServerBuilder.forPort(9090)
 - `NotFoundException` → `NOT_FOUND`
 - Others → `INTERNAL`
 
-### Retry Interceptor
+### Retry (built-in gRPC retry, not an interceptor)
 
-Automatically retries failed calls with exponential backoff.
+`AdharGrpcClientFactory` no longer ships a hand-rolled `RetryInterceptor` (it slept
+on failure but never actually retried). Retries are now implemented using
+grpc-java's own transparent retry mechanism, enabled per channel via
+`enableRetry()` + a `retryPolicy` service config built from the channel's
+`ChannelConfig` (`max-retry-attempts`, `initial-backoff-millis`,
+`max-backoff-millis`, `backoff-multiplier`, `retryable-status-codes`). This
+correctly buffers/replays requests and respects server pushback, which a
+custom interceptor cannot safely do on its own.
 
 ```java
-ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", 9090)
-    .intercept(new RetryInterceptor(3, 1000)) // 3 attempts, 1s initial backoff
-    .build();
+GrpcProperties.ChannelConfig channel = new GrpcProperties.ChannelConfig();
+channel.setTarget("localhost:9090");
+channel.setEnableRetry(true);
+channel.setMaxRetryAttempts(4);
+channel.setInitialBackoffMillis(500);
+channel.setMaxBackoffMillis(5000);
+channel.setBackoffMultiplier(2.0);
 ```
 
-**Retryable Statuses:**
+**Retryable Statuses (default):**
 - `UNAVAILABLE`
 - `DEADLINE_EXCEEDED`
 - `RESOURCE_EXHAUSTED`
 - `ABORTED`
+
+### Deadline Client Interceptor
+
+Applies the channel's `default-timeout` as a deadline to any call that doesn't
+already have one (via `withDeadlineAfter`). Explicit deadlines set by the
+caller (e.g. `stub.withDeadlineAfter(...)`) are never overridden.
+
+```java
+ManagedChannelBuilder.forAddress("localhost", 9090)
+    .intercept(new DeadlineClientInterceptor(5000)) // 5s default deadline
+    .build();
+```
+
+### Metrics Interceptors (Micrometer, optional)
+
+`MetricsServerInterceptor` and `MetricsClientInterceptor` record, per method:
+a call counter tagged by `status`, a latency timer tagged by `status`, and
+(server-side only) an in-flight calls gauge. They require `io.micrometer:micrometer-core`
+on the classpath and are auto-wired by `GrpcAutoConfiguration` whenever a
+`MeterRegistry` bean exists and `adhar.grpc.observability.enable-metrics=true`.
+
+```java
+server.withMeterRegistry(meterRegistry);
+clientFactory.withMeterRegistry(meterRegistry);
+```
+
+### Auth Server Interceptor
+
+`AuthServerInterceptor` validates each call against a pluggable
+`GrpcAuthenticator` SPI before it reaches the service, storing the
+authenticated principal in the gRPC `Context` and failing with
+`UNAUTHENTICATED` otherwise. Two implementations ship out of the box:
+`PermitAllGrpcAuthenticator` (default) and `StaticTokenAuthenticator`
+(shared-secret Bearer token / API key). Enable with:
+
+```yaml
+adhar:
+  grpc:
+    auth:
+      enabled: true
+      shared-secret: "s3cr3t"
+```
+
+Clients send either `Authorization: Bearer s3cr3t` or `x-api-key: s3cr3t`.
 
 ---
 
@@ -1017,6 +1099,14 @@ public void getAllOrders(Request request, StreamObserver<Order> responseObserver
 
 ## 🔐 Security (TLS/mTLS)
 
+TLS is implemented with grpc-java's `TlsServerCredentials` / `TlsChannelCredentials`
+(not a plaintext toggle) via `Grpc.newServerBuilderForPort` /
+`Grpc.newChannelBuilderForAddress`. Configured certificate/key file paths are
+validated to exist *before* any TLS setup is attempted, throwing a clear
+`GrpcServiceConfigurationException` (e.g. `"Certificate/key file not found: ..."`)
+instead of a confusing handshake failure. Both `classpath:` and plain
+filesystem paths are supported.
+
 ### Server with TLS
 
 ```yaml
@@ -1027,6 +1117,21 @@ adhar:
       enable-tls: true
       cert-chain: "classpath:certs/server.crt"
       private-key: "classpath:certs/server.key"
+```
+
+### Server with mTLS (require client certificates)
+
+```yaml
+adhar:
+  grpc:
+    security:
+      enabled: true
+      enable-tls: true
+      enable-mtls: true
+      cert-chain: "classpath:certs/server.crt"
+      private-key: "classpath:certs/server.key"
+      trust-cert-collection: "classpath:certs/ca.crt"
+      client-auth: "REQUIRE" # NONE, OPTIONAL, or REQUIRE
 ```
 
 ### Client with TLS
@@ -1040,6 +1145,10 @@ adhar:
           target: "secure.example.com:9090"
           enable-tls: true
 ```
+
+Client-side TLS uses the same `adhar.grpc.security` block for the trust store
+(`trust-cert-collection`) and, when `security.enable-mtls=true`, the client's
+own `cert-chain` / `private-key` for mutual TLS.
 
 ---
 
