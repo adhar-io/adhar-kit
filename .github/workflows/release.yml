@@ -41,10 +41,10 @@ jobs:
 
       - name: Set Release Version
         run: |
-          mvn versions:set -DnewVersion=${{ github.event.inputs.releaseVersion }} --no-transfer-progress
-          mvn versions:commit
+          mvn versions:set -DnewVersion=${{ github.event.inputs.releaseVersion }} \
+            -DprocessAllModules=true -DgenerateBackupPoms=false --no-transfer-progress
           git add -A
-          git commit -m "release: v${{ github.event.inputs.releaseVersion }}"
+          git diff --cached --quiet || git commit -m "release: v${{ github.event.inputs.releaseVersion }}"
 
       - name: Build and Test
         run: mvn verify -Djacoco.skip=true --no-transfer-progress
@@ -63,10 +63,10 @@ jobs:
 
       - name: Set Next Development Version
         run: |
-          mvn versions:set -DnewVersion=${{ github.event.inputs.nextVersion }} --no-transfer-progress
-          mvn versions:commit
+          mvn versions:set -DnewVersion=${{ github.event.inputs.nextVersion }} \
+            -DprocessAllModules=true -DgenerateBackupPoms=false --no-transfer-progress
           git add -A
-          git commit -m "chore: prepare for next development cycle ${{ github.event.inputs.nextVersion }}"
+          git diff --cached --quiet || git commit -m "chore: prepare for next development cycle ${{ github.event.inputs.nextVersion }}"
           git push
 
       - name: Create GitHub Release

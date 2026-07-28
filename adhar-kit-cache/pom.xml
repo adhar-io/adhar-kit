@@ -5,12 +5,12 @@
     <parent>
         <groupId>com.adhar.kit</groupId>
         <artifactId>adhar-kit-parent</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>0.1.0</version>
         <relativePath>../adhar-kit-parent/pom.xml</relativePath>
     </parent>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-cache</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <name>Adhar Kit Cache</name>
     <description>Enterprise caching with Caffeine - High-performance in-memory caching</description>
 
@@ -58,7 +58,7 @@
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-commons</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
 
         <!-- Caffeine Cache - Core Dependency -->

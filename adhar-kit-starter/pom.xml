@@ -5,7 +5,7 @@
     <parent>
         <groupId>com.adhar.kit</groupId>
         <artifactId>adhar-kit-parent</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>0.1.0</version>
         <relativePath>../adhar-kit-parent/pom.xml</relativePath>
     </parent>
     <artifactId>adhar-kit-starter</artifactId>
@@ -41,136 +41,136 @@
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-commons</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-core</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
 
         <!-- Observability -->
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-logging</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-metrics</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-tracing</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
 
         <!-- Infrastructure -->
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-config</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-persistence</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-cache</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
 
         <!-- Communication -->
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-messaging</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-grpc</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
 
         <!-- Resilience & Security -->
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-resilience</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-security</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
 
         <!-- Cloud Native -->
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-kubernetes</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-dapr</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-health</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
 
         <!-- Features -->
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-ai</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-analytics</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-docs</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
 
         <!-- New Modules -->
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-graphql</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-batch</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-notification</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-event-sourcing</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-perf-profiler</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-rewrite</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
 
         <!-- Spring Boot (optional - active when Spring Boot is on the classpath) -->

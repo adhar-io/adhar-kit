@@ -10,7 +10,7 @@
     </parent>
     <groupId>com.adhar.kit</groupId>
     <artifactId>adhar-kit-parent</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <packaging>pom</packaging>
     <name>Adhar Kit Parent</name>
     <description>Production-ready parent POM for all Adhar Kit modules - Enterprise microservices platform (Java 25 LTS + Spring Boot 4.0)</description>
@@ -75,7 +75,7 @@
         <!-- ===================================================================== -->
         <!-- Adhar Kit Version Management                                          -->
         <!-- ===================================================================== -->
-        <adhar-kit.version>0.1.0-SNAPSHOT</adhar-kit.version>
+        <adhar-kit.version>0.1.0</adhar-kit.version>
 
         <!-- ===================================================================== -->
         <!-- Core Dependencies                                                      -->
@@ -518,7 +518,7 @@
                         <useReleaseProfile>false</useReleaseProfile>
                         <releaseProfiles>release</releaseProfiles>
                         <goals>deploy</goals>
-                        <!-- Tag format: v0.1.0-SNAPSHOT -->
+                        <!-- Tag format: v0.1.0 -->
                         <tagNameFormat>v@{project.version}</tagNameFormat>
                     </configuration>
                 </plugin>

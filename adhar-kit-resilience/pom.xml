@@ -6,13 +6,13 @@
     <parent>
         <groupId>com.adhar.kit</groupId>
         <artifactId>adhar-kit-parent</artifactId>
-        <version>0.1.0-SNAPSHOT</version>
+        <version>0.1.0</version>
         <relativePath>../adhar-kit-parent/pom.xml</relativePath>
     </parent>
     <artifactId>adhar-kit-resilience</artifactId>
     <packaging>jar</packaging>
     <name>adhar-kit-resilience</name>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <description>Adhar Platform - Resilience Starter (Resilience4j Config)</description>
 
     <properties>
@@ -136,13 +136,13 @@
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-commons</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
         </dependency>
         <!-- Metrics bridge (Optional - activated when adhar-kit-metrics is present) -->
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-metrics</artifactId>
-            <version>0.1.0-SNAPSHOT</version>
+            <version>0.1.0</version>
             <optional>true</optional>
         </dependency>
 
