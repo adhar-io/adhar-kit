@@ -43,6 +43,8 @@ public class PersistenceProperties {
     private Metrics metrics = new Metrics();
     private Outbox outbox = new Outbox();
     private Multitenancy multitenancy = new Multitenancy();
+    private Envers envers = new Envers();
+    private Diagnostics diagnostics = new Diagnostics();
 
     public enum MultiTenancyStrategy {
         SCHEMA, DATABASE, DISCRIMINATOR
@@ -96,6 +98,63 @@ public class PersistenceProperties {
          * outbox rows automatically.
          */
         private boolean bridgeEnabled = false;
+
+        /**
+         * Selects which {@link com.adhar.kit.persistence.outbox.OutboxRelay} implementation the
+         * auto-configuration wires up when the consumer has not supplied their own bean.
+         *
+         * <ul>
+         *   <li>{@code application-event} (default) -- republish through Spring's
+         *       {@code ApplicationEventPublisher}
+         *       ({@link com.adhar.kit.persistence.outbox.ApplicationEventOutboxRelay}).</li>
+         *   <li>{@code kafka} -- publish onto Kafka
+         *       ({@link com.adhar.kit.persistence.outbox.KafkaOutboxRelay}); requires
+         *       {@code spring-kafka} and a {@code KafkaTemplate} bean on the classpath.</li>
+         * </ul>
+         */
+        private String relay = "application-event";
+
+        /** Kafka-specific settings for the {@code kafka} relay. */
+        private Kafka kafka = new Kafka();
+
+        /**
+         * Settings for {@link com.adhar.kit.persistence.outbox.KafkaOutboxRelay}.
+         */
+        @Data
+        public static class Kafka {
+            /** Topic that outbox events are published to. */
+            private String topic = "adhar.outbox.events";
+        }
+    }
+
+    /**
+     * Hibernate Envers revision-history settings. Only takes effect when {@code hibernate-envers}
+     * is on the classpath; the auto-configuration then registers a
+     * {@link com.adhar.kit.persistence.envers.RevisionHistoryReader} helper.
+     */
+    @Data
+    public static class Envers {
+        private boolean enabled = true;
+    }
+
+    /**
+     * Development-time persistence diagnostics.
+     */
+    @Data
+    public static class Diagnostics {
+        private NPlusOne nPlusOne = new NPlusOne();
+
+        /**
+         * N+1 query detector settings. Disabled by default; when enabled, a Hibernate
+         * {@code StatementInspector} counts identical statements executed on the same thread and
+         * logs a warning once a single statement is repeated more than {@code threshold} times.
+         */
+        @Data
+        public static class NPlusOne {
+            private boolean enabled = false;
+            /** Repetitions of an identical statement (on one thread) that trigger a warning. */
+            private int threshold = 10;
+        }
     }
 
     /**

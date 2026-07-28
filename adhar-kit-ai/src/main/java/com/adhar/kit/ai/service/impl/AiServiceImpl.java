@@ -5,8 +5,12 @@ import com.adhar.kit.ai.component.AiRateLimiter;
 import com.adhar.kit.ai.config.AiProperties;
 import com.adhar.kit.ai.model.AiChatRequest;
 import com.adhar.kit.ai.model.AiChatResponse;
+import com.adhar.kit.ai.prompt.PromptTemplateRegistry;
 import com.adhar.kit.ai.security.AiSecurityValidator;
 import com.adhar.kit.ai.service.AiService;
+import com.adhar.kit.ai.tool.AiTool;
+import com.adhar.kit.ai.tool.ToolCallResult;
+import com.adhar.kit.ai.tool.ToolCallingService;
 import com.adhar.kit.commons.exception.ServiceException;
 import com.adhar.kit.commons.exception.ValidationException;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +36,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -66,6 +71,8 @@ public class AiServiceImpl implements AiService {
     private final AiRateLimiter rateLimiter;
     private final AiSecurityValidator securityValidator;
     private final AiMetricsCollector metricsCollector;
+    private final PromptTemplateRegistry promptTemplateRegistry;
+    private final ToolCallingService toolCallingService;
 
     @Override
     @Cacheable(value = "ai-chat", key = "#request.message + '-' + #request.model",
@@ -282,6 +289,28 @@ public class AiServiceImpl implements AiService {
             log.warn("Health check failed: {}", e.getMessage());
             return false;
         }
+    }
+
+    @Override
+    public void registerPromptTemplate(String name, String template) {
+        promptTemplateRegistry.register(name, template);
+    }
+
+    @Override
+    public String renderPromptTemplate(String name, Map<String, Object> params) {
+        return promptTemplateRegistry.render(name, params);
+    }
+
+    @Override
+    public AiChatResponse chatWithTemplate(String templateName, Map<String, Object> params) {
+        String prompt = promptTemplateRegistry.render(templateName, params);
+        return chat(AiChatRequest.builder().message(prompt).build());
+    }
+
+    @Override
+    public ToolCallResult chatWithTools(String message, List<AiTool> tools) {
+        int maxIterations = aiProperties.getTools().getMaxIterations();
+        return toolCallingService.chat(message, tools, maxIterations);
     }
 
     /**

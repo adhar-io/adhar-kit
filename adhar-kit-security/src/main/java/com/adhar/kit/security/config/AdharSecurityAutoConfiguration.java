@@ -9,6 +9,9 @@ import com.adhar.kit.security.audit.Slf4jAuditEventSink;
 import com.adhar.kit.security.filter.ApiKeyAuthenticationFilter;
 import com.adhar.kit.security.filter.RateLimitingFilter;
 import com.adhar.kit.security.properties.AdharSecurityProperties;
+import com.adhar.kit.security.ratelimit.InMemoryRateLimiterStore;
+import com.adhar.kit.security.ratelimit.RateLimiterStore;
+import com.adhar.kit.security.relay.BearerTokenRelayInterceptor;
 import com.adhar.kit.security.service.ApiKeyService;
 import com.adhar.kit.security.service.InMemoryRefreshTokenStore;
 import com.adhar.kit.security.service.RefreshTokenStore;
@@ -57,7 +60,9 @@ import java.util.Arrays;
 @Slf4j
 @Import({
     OAuth2ResourceServerConfig.class,
-    CorsConfig.class
+    CorsConfig.class,
+    RedisSecurityConfiguration.class,
+    JwksConfiguration.class
 })
 public class AdharSecurityAutoConfiguration {
 
@@ -255,16 +260,45 @@ public class AdharSecurityAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnProperty(prefix = "adhar.security.rate-limit", name = "enabled", havingValue = "true")
-    public FilterRegistrationBean<RateLimitingFilter> rateLimitingFilter() {
-        log.info("Configuring rate limiting filter: {} requests per {} seconds",
+    public FilterRegistrationBean<RateLimitingFilter> rateLimitingFilter(RateLimiterStore rateLimiterStore) {
+        log.info("Configuring rate limiting filter: {} requests per {} seconds (store: {})",
             properties.getRateLimit().getMaxRequests(),
-            properties.getRateLimit().getWindowSeconds());
+            properties.getRateLimit().getWindowSeconds(),
+            rateLimiterStore.getClass().getSimpleName());
 
-        RateLimitingFilter filter = new RateLimitingFilter(properties.getRateLimit());
+        RateLimitingFilter filter = new RateLimitingFilter(properties.getRateLimit(), rateLimiterStore);
         FilterRegistrationBean<RateLimitingFilter> registration = new FilterRegistrationBean<>(filter);
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
         registration.addUrlPatterns("/*");
         return registration;
+    }
+
+    /**
+     * Configures the default in-memory rate-limiter counter store. Replaced by a
+     * distributed store when {@code adhar.security.rate-limit.store=redis}.
+     *
+     * @return the in-memory rate limiter store
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.security.rate-limit", name = "store", havingValue = "memory", matchIfMissing = true)
+    public RateLimiterStore rateLimiterStore() {
+        return new InMemoryRateLimiterStore();
+    }
+
+    /**
+     * Configures the downstream bearer-token relay interceptor. Register it with a
+     * {@code RestClient}/{@code RestTemplate} builder to forward the caller's token.
+     *
+     * @return the relay interceptor
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.security.token-relay", name = "enabled", havingValue = "true")
+    public BearerTokenRelayInterceptor bearerTokenRelayInterceptor() {
+        log.info("Configuring bearer token relay interceptor (header: {})",
+            properties.getTokenRelay().getHeaderName());
+        return new BearerTokenRelayInterceptor(properties.getTokenRelay().getHeaderName());
     }
 
     /**
@@ -291,19 +325,6 @@ public class AdharSecurityAutoConfiguration {
     public SecurityAuditLogger securityAuditLogger(AuditEventSink auditEventSink) {
         log.info("Configuring security audit logger");
         return new SecurityAuditLogger(properties.getAudit(), auditEventSink);
-    }
-
-    /**
-     * Configures the refresh-token store (in-memory by default; replace with a
-     * distributed implementation for multi-node deployments).
-     *
-     * @return the refresh token store
-     */
-    @Bean
-    @ConditionalOnMissingBean
-    @ConditionalOnProperty(prefix = "adhar.security.token-refresh", name = "enabled", havingValue = "true")
-    public RefreshTokenStore refreshTokenStore() {
-        return new InMemoryRefreshTokenStore();
     }
 
     /**
@@ -386,5 +407,27 @@ public class AdharSecurityAutoConfiguration {
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 20);
         registration.addUrlPatterns("/*");
         return registration;
+    }
+
+    /**
+     * Provides the default in-memory {@link RefreshTokenStore}. Only active when token
+     * refresh is enabled and the store is not explicitly set to {@code redis}, so the
+     * distributed store (see {@code RedisSecurityConfiguration}) can take over.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnProperty(prefix = "adhar.security.token-refresh", name = "enabled", havingValue = "true")
+    static class RefreshTokenStoreConfiguration {
+
+        /**
+         * Configures the in-memory refresh-token store (default).
+         *
+         * @return the refresh token store
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnProperty(prefix = "adhar.security.token-refresh", name = "store", havingValue = "memory", matchIfMissing = true)
+        public RefreshTokenStore refreshTokenStore() {
+            return new InMemoryRefreshTokenStore();
+        }
     }
 }

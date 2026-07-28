@@ -84,6 +84,15 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Spring Data Redis (Optional) - distributed refresh-token / rate-limit stores.
+             Optional so the module compiles and runs without Redis on the classpath;
+             the Redis-backed beans are gated by @ConditionalOnClass. -->
+        <dependency>
+            <groupId>org.springframework.data</groupId>
+            <artifactId>spring-data-redis</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Adhar Commons -->
         <dependency>
             <groupId>com.adhar.kit</groupId>

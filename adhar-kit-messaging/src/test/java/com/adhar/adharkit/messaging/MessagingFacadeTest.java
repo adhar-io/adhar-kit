@@ -79,12 +79,13 @@ class MessagingFacadeTest {
     }
 
     @Test
-    void testSendAndReceiveReturnsNullStub() {
+    void testSendAndReceiveWithoutBrokerThrows() {
         MessagingFacade facade = MessagingFacade.getInstance();
 
-        // The default facade does not implement request-reply, so the stub returns null.
-        String reply = facade.sendAndReceive("order-queries", "request", String.class);
-        assertNull(reply);
+        // The default facade has no request-reply client wired, so it must fail loudly
+        // rather than silently returning null.
+        assertThrows(com.adhar.kit.messaging.exception.MessagingException.class,
+                () -> facade.sendAndReceive("order-queries", "request", String.class));
     }
 
     @Test

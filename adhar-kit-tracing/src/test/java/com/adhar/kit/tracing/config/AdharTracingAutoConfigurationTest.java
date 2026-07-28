@@ -2,9 +2,13 @@ package com.adhar.kit.tracing.config;
 
 import com.adhar.kit.tracing.async.TraceContextTaskDecorator;
 import com.adhar.kit.tracing.aspect.TracingAspect;
+import com.adhar.kit.tracing.metrics.SpanMetricsProcessor;
 import com.adhar.kit.tracing.properties.AdharTracingProperties;
 import com.adhar.kit.tracing.util.AdharTracing;
 import com.adhar.kit.tracing.web.TraceContextMdcFilter;
+import com.adhar.kit.tracing.web.TracingServerSpanFilter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.tracing.Tracer;
 import io.opentelemetry.api.OpenTelemetry;
 import org.junit.jupiter.api.Test;
@@ -380,6 +384,107 @@ class AdharTracingAutoConfigurationTest {
                     } finally {
                         span.end();
                     }
+                });
+    }
+
+    @Test
+    void testServerSpanFilterRegisteredByDefault() {
+        contextRunner
+                .withPropertyValues("adhar.tracing.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasBean("tracingServerSpanFilterRegistration");
+                    @SuppressWarnings("unchecked")
+                    FilterRegistrationBean<TracingServerSpanFilter> reg =
+                            (FilterRegistrationBean<TracingServerSpanFilter>) context.getBean("tracingServerSpanFilterRegistration");
+                    // No known instrumentation on the classpath by default -> filter enabled.
+                    assertThat(reg.isEnabled()).isTrue();
+                    assertThat(reg.getFilter()).isInstanceOf(TracingServerSpanFilter.class);
+                });
+    }
+
+    @Test
+    void testServerSpanFilterCanBeDisabledViaProperty() {
+        contextRunner
+                .withPropertyValues(
+                        "adhar.tracing.enabled=true",
+                        "adhar.tracing.web.server-spans-enabled=false"
+                )
+                .run(context -> assertThat(context).doesNotHaveBean("tracingServerSpanFilterRegistration"));
+    }
+
+    @Test
+    void testServerSpanFilterDisabledWhenExistingInstrumentationDetected() {
+        contextRunner
+                .withPropertyValues(
+                        "adhar.tracing.enabled=true",
+                        "adhar.tracing.web.detect-existing-instrumentation=true",
+                        // A class guaranteed to be present, standing in for a framework instrumentation.
+                        "adhar.tracing.web.instrumentation-detection-classes=java.lang.String"
+                )
+                .run(context -> {
+                    assertThat(context).hasBean("tracingServerSpanFilterRegistration");
+                    @SuppressWarnings("unchecked")
+                    FilterRegistrationBean<TracingServerSpanFilter> reg =
+                            (FilterRegistrationBean<TracingServerSpanFilter>) context.getBean("tracingServerSpanFilterRegistration");
+                    assertThat(reg.isEnabled()).isFalse();
+                });
+    }
+
+    @Test
+    void testServerSpanFilterNotRegisteredWithoutServletFilterClass() {
+        contextRunner
+                .withClassLoader(new FilteredClassLoader("jakarta.servlet.Filter"))
+                .withPropertyValues("adhar.tracing.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(Tracer.class);
+                    assertThat(context).doesNotHaveBean("tracingServerSpanFilterRegistration");
+                });
+    }
+
+    @Test
+    void testSpanMetricsProcessorRegisteredWhenMeterRegistryPresent() {
+        contextRunner
+                .withBean(SimpleMeterRegistry.class)
+                .withPropertyValues("adhar.tracing.enabled=true")
+                .run(context -> assertThat(context).hasSingleBean(SpanMetricsProcessor.class));
+    }
+
+    @Test
+    void testSpanMetricsProcessorDisabledViaProperty() {
+        contextRunner
+                .withBean(SimpleMeterRegistry.class)
+                .withPropertyValues(
+                        "adhar.tracing.enabled=true",
+                        "adhar.tracing.metrics.enabled=false"
+                )
+                .run(context -> assertThat(context).doesNotHaveBean(SpanMetricsProcessor.class));
+    }
+
+    @Test
+    void testSpanMetricsProcessorAbsentWithoutMeterRegistry() {
+        contextRunner
+                .withClassLoader(new FilteredClassLoader(MeterRegistry.class))
+                .withPropertyValues("adhar.tracing.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(OpenTelemetry.class);
+                    assertThat(context).doesNotHaveBean(SpanMetricsProcessor.class);
+                });
+    }
+
+    @Test
+    void testTailSamplingModeLoadsContext() {
+        contextRunner
+                .withPropertyValues(
+                        "adhar.tracing.enabled=true",
+                        "adhar.tracing.sampling.mode=tail",
+                        "adhar.tracing.sampling.tail.hold-window-ms=0",
+                        "adhar.tracing.sampling.tail.keep-rate=0.5"
+                )
+                .run(context -> {
+                    assertThat(context).hasSingleBean(OpenTelemetry.class);
+                    AdharTracingProperties properties = context.getBean(AdharTracingProperties.class);
+                    assertThat(properties.getSampling().getMode()).isEqualTo("tail");
+                    assertThat(properties.getSampling().getTail().getKeepRate()).isEqualTo(0.5);
                 });
     }
 

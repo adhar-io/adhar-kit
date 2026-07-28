@@ -41,6 +41,13 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Spring Kafka (Optional) - only required when the Kafka event bus is used -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Jackson -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

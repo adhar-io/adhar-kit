@@ -32,17 +32,35 @@ public class RetryableStepBuilder<I, O> {
 
     private final SimpleStepBuilder<I, O> stepBuilder;
     private int retryLimit = 3;
+    private boolean retryEnabled = true;
     private int skipLimit = 0;
     private final List<Class<? extends Throwable>> retryableExceptions = new ArrayList<>();
     private final List<Class<? extends Throwable>> skippableExceptions = new ArrayList<>();
 
     /**
-     * Creates a new RetryableStepBuilder wrapping the given step builder.
+     * Creates a new RetryableStepBuilder wrapping the given step builder,
+     * using a default retry limit of {@code 3} with retry enabled.
      *
      * @param stepBuilder the simple step builder to configure
      */
     public RetryableStepBuilder(SimpleStepBuilder<I, O> stepBuilder) {
         this.stepBuilder = stepBuilder;
+    }
+
+    /**
+     * Creates a new RetryableStepBuilder wrapping the given step builder with
+     * defaults supplied by the auto-configuration (from {@code adhar.batch}
+     * properties). Explicit calls to {@link #withRetryLimit(int)} still override
+     * these defaults.
+     *
+     * @param stepBuilder      the simple step builder to configure
+     * @param defaultRetryLimit the default retry limit to apply when retry is enabled
+     * @param retryEnabled     whether automatic retry is applied by default
+     */
+    public RetryableStepBuilder(SimpleStepBuilder<I, O> stepBuilder, int defaultRetryLimit, boolean retryEnabled) {
+        this.stepBuilder = stepBuilder;
+        this.retryLimit = defaultRetryLimit;
+        this.retryEnabled = retryEnabled;
     }
 
     /**
@@ -53,6 +71,7 @@ public class RetryableStepBuilder<I, O> {
      */
     public RetryableStepBuilder<I, O> withRetryLimit(int limit) {
         this.retryLimit = limit;
+        this.retryEnabled = true;
         return this;
     }
 
@@ -105,9 +124,11 @@ public class RetryableStepBuilder<I, O> {
     public FaultTolerantStepBuilder<I, O> build() {
         var faultTolerant = stepBuilder.faultTolerant();
 
-        faultTolerant.retryLimit(retryLimit);
-        for (var ex : retryableExceptions) {
-            faultTolerant.retry((Class<? extends Throwable>) ex);
+        if (retryEnabled) {
+            faultTolerant.retryLimit(retryLimit);
+            for (var ex : retryableExceptions) {
+                faultTolerant.retry((Class<? extends Throwable>) ex);
+            }
         }
 
         if (skipLimit > 0 || !skippableExceptions.isEmpty()) {

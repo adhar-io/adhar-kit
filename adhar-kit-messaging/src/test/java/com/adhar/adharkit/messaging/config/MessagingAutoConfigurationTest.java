@@ -5,6 +5,12 @@ import com.adhar.kit.messaging.config.MessagingAutoConfiguration;
 import com.adhar.kit.messaging.core.MessageListener;
 import com.adhar.kit.messaging.core.MessagePublisher;
 import com.adhar.kit.messaging.metrics.MessagingMetrics;
+import com.adhar.kit.messaging.outbox.InMemoryOutboxStore;
+import com.adhar.kit.messaging.outbox.JdbcOutboxStore;
+import com.adhar.kit.messaging.outbox.OutboxPayloadCodec;
+import com.adhar.kit.messaging.outbox.OutboxRelay;
+import com.adhar.kit.messaging.outbox.OutboxStore;
+import com.adhar.kit.messaging.requestreply.RequestReplyClient;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
@@ -13,9 +19,13 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.KafkaTemplate;
+
+import javax.sql.DataSource;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -28,7 +38,8 @@ import static org.mockito.Mockito.mock;
 class MessagingAutoConfigurationTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class));
+            .withConfiguration(AutoConfigurations.of(MessagingAutoConfiguration.class,
+                    com.adhar.kit.messaging.config.OutboxAutoConfiguration.class));
 
     @Test
     void facadeIsCreatedAsAStubWhenNoBrokerBeansArePresent() {
@@ -126,6 +137,80 @@ class MessagingAutoConfigurationTest {
                 .run(context -> assertThat(context).hasSingleBean(MessagingFacade.class));
     }
 
+    // --- Transactional outbox -------------------------------------------------------------
+
+    @Test
+    void outboxBeansAreAbsentByDefault() {
+        contextRunner.run(context -> {
+            assertThat(context).doesNotHaveBean(OutboxStore.class);
+            assertThat(context).doesNotHaveBean(OutboxRelay.class);
+        });
+    }
+
+    @Test
+    void inMemoryOutboxStoreIsRegisteredWhenOutboxEnabledWithoutDataSource() {
+        contextRunner
+                .withPropertyValues("adhar.messaging.outbox.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(OutboxStore.class);
+                    assertThat(context.getBean(OutboxStore.class)).isInstanceOf(InMemoryOutboxStore.class);
+                    assertThat(context).hasSingleBean(OutboxPayloadCodec.class);
+                    // No publisher wired -> no relay.
+                    assertThat(context).doesNotHaveBean(OutboxRelay.class);
+                });
+    }
+
+    @Test
+    void jdbcOutboxStoreIsRegisteredWhenDataSourcePresent() {
+        contextRunner
+                .withPropertyValues("adhar.messaging.outbox.enabled=true")
+                .withUserConfiguration(DataSourceConfiguration.class)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(OutboxStore.class);
+                    assertThat(context.getBean(OutboxStore.class)).isInstanceOf(JdbcOutboxStore.class);
+                });
+    }
+
+    @Test
+    void outboxRelayIsRegisteredWhenOutboxEnabledAndPublisherPresent() {
+        contextRunner
+                .withPropertyValues("adhar.messaging.outbox.enabled=true")
+                .withUserConfiguration(KafkaBeansConfiguration.class)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(OutboxStore.class);
+                    assertThat(context).hasSingleBean(OutboxRelay.class);
+                });
+    }
+
+    // --- Request-reply --------------------------------------------------------------------
+
+    @Test
+    void requestReplyClientIsAbsentWithoutBroker() {
+        contextRunner.run(context -> assertThat(context).doesNotHaveBean(RequestReplyClient.class));
+    }
+
+    @Test
+    void kafkaRequestReplyClientIsRegisteredWithKafkaBeans() {
+        contextRunner
+                .withUserConfiguration(KafkaBeansConfiguration.class)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(RequestReplyClient.class);
+                    assertThat(context.getBean(RequestReplyClient.class))
+                            .isInstanceOf(com.adhar.kit.messaging.requestreply.KafkaRequestReplyClient.class);
+                });
+    }
+
+    @Test
+    void rabbitRequestReplyClientIsRegisteredWithRabbitBeans() {
+        contextRunner
+                .withUserConfiguration(RabbitBeansConfiguration.class)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(RequestReplyClient.class);
+                    assertThat(context.getBean(RequestReplyClient.class))
+                            .isInstanceOf(com.adhar.kit.messaging.requestreply.RabbitRequestReplyClient.class);
+                });
+    }
+
     @Configuration
     static class KafkaBeansConfiguration {
         @Bean
@@ -172,6 +257,17 @@ class MessagingAutoConfigurationTest {
         @Bean
         SimpleMeterRegistry meterRegistry() {
             return new SimpleMeterRegistry();
+        }
+    }
+
+    @Configuration
+    static class DataSourceConfiguration {
+        @Bean
+        DataSource dataSource() {
+            DriverManagerDataSource ds = new DriverManagerDataSource(
+                    "jdbc:h2:mem:autoconf-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1", "sa", "");
+            ds.setDriverClassName("org.h2.Driver");
+            return ds;
         }
     }
 

@@ -3,7 +3,9 @@ package com.adhar.kit.grpc.client;
 import com.adhar.kit.grpc.config.GrpcProperties;
 import com.adhar.kit.grpc.exception.GrpcServiceConfigurationException;
 import com.adhar.kit.grpc.interceptor.DeadlineClientInterceptor;
+import com.adhar.kit.grpc.interceptor.GrpcObserver;
 import com.adhar.kit.grpc.interceptor.MetricsClientInterceptor;
+import com.adhar.kit.grpc.interceptor.TracingClientInterceptor;
 import com.adhar.kit.grpc.util.GrpcUtils;
 import io.grpc.ChannelCredentials;
 import io.grpc.Grpc;
@@ -86,6 +88,7 @@ public class AdharGrpcClientFactory {
     private final GrpcProperties properties;
     private final Map<String, ManagedChannel> channels = new HashMap<>();
     private volatile MeterRegistry meterRegistry;
+    private volatile GrpcObserver grpcObserver = GrpcObserver.NOOP;
 
     /**
      * Creates client factory with properties.
@@ -106,6 +109,20 @@ public class AdharGrpcClientFactory {
      */
     public AdharGrpcClientFactory withMeterRegistry(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
+        return this;
+    }
+
+    /**
+     * Supplies the {@link GrpcObserver} used by {@link TracingClientInterceptor}
+     * on channels created afterwards to record client spans. Optional; when
+     * never called, outbound calls still propagate the W3C {@code traceparent}
+     * header but record no spans.
+     *
+     * @param grpcObserver observer to record spans with
+     * @return this factory for chaining
+     */
+    public AdharGrpcClientFactory withGrpcObserver(GrpcObserver grpcObserver) {
+        this.grpcObserver = grpcObserver != null ? grpcObserver : GrpcObserver.NOOP;
         return this;
     }
 
@@ -167,6 +184,12 @@ public class AdharGrpcClientFactory {
 
         // Apply the configured default timeout as a deadline when the caller didn't set one
         channelBuilder.intercept(new DeadlineClientInterceptor(config.getDefaultTimeout()));
+
+        // Propagate W3C traceparent + record client spans (span recording is a no-op
+        // unless micrometer-observation is present and an observer has been wired in).
+        if (properties.getObservability().isEnableTracing()) {
+            channelBuilder.intercept(new TracingClientInterceptor(grpcObserver));
+        }
 
         // Optional Micrometer instrumentation
         MeterRegistry registry = this.meterRegistry;

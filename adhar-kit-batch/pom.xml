@@ -63,6 +63,13 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Jackson (optional - for JSON item reader/writer builders) -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>
@@ -81,6 +88,13 @@
             <artifactId>spring-batch-test</artifactId>
             <scope>test</scope>
             <optional>true</optional>
+        </dependency>
+
+        <!-- H2 in-memory database (test - for JDBC scheduler lock and JDBC IO builders) -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

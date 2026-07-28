@@ -68,6 +68,8 @@ public class AiProperties {
     private Security security = new Security();
     private Metrics metrics = new Metrics();
     private Costs costs = new Costs();
+    private Tools tools = new Tools();
+    private Guardrails guardrails = new Guardrails();
 
     @Data
     public static class Annotations {
@@ -201,6 +203,57 @@ public class AiProperties {
         private Duration ttl = Duration.ofMinutes(30);
         private Integer maxSize = 1000;
         private String provider = "caffeine"; // caffeine, redis
+
+        /** Semantic (embedding-similarity) response cache settings. */
+        private Semantic semantic = new Semantic();
+
+        /**
+         * Configuration for the optional semantic response cache layered on top of
+         * the exact-hash {@code @AiCache}. When enabled <b>and</b> an
+         * {@code EmbeddingModel} bean is available, cache misses are additionally
+         * matched by embedding cosine similarity against recent entries.
+         */
+        @Data
+        public static class Semantic {
+            /** Enable the embedding-similarity cache path. */
+            private boolean enabled = false;
+
+            /**
+             * Minimum cosine similarity (0..1) for a cached embedding to be treated
+             * as a hit for a new prompt.
+             */
+            private double similarityThreshold = 0.95;
+
+            /** Maximum number of embeddings retained per cache (bounded LRU). */
+            private int maxEntries = 1000;
+        }
+    }
+
+    /**
+     * Function/tool-calling loop settings.
+     */
+    @Data
+    public static class Tools {
+        /** Enable auto-configuration of the tool-calling service. */
+        private boolean enabled = true;
+
+        /**
+         * Maximum number of tool-execution rounds before the loop returns the
+         * model's latest (possibly partial) answer.
+         */
+        private int maxIterations = 5;
+    }
+
+    /**
+     * Guardrail chain settings.
+     */
+    @Data
+    public static class Guardrails {
+        /**
+         * Enable auto-configuration of the default guardrail chain (content-safety,
+         * PII and sensitive-data guardrails adapting {@code AiSecurityValidator}).
+         */
+        private boolean enabled = true;
     }
 
     @Data

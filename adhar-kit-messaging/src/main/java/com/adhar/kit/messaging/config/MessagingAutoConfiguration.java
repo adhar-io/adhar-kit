@@ -6,9 +6,15 @@ import com.adhar.kit.messaging.core.MessagePublisher;
 import com.adhar.kit.messaging.kafka.KafkaMessageListener;
 import com.adhar.kit.messaging.kafka.KafkaMessagePublisher;
 import com.adhar.kit.messaging.metrics.MessagingMetrics;
+import com.adhar.kit.messaging.outbox.OutboxPayloadCodec;
+import com.adhar.kit.messaging.outbox.OutboxStore;
 import com.adhar.kit.messaging.properties.AdharMessagingProperties;
 import com.adhar.kit.messaging.rabbitmq.RabbitMQMessageListener;
 import com.adhar.kit.messaging.rabbitmq.RabbitMQMessagePublisher;
+import com.adhar.kit.messaging.requestreply.KafkaRequestReplyClient;
+import com.adhar.kit.messaging.requestreply.RabbitRequestReplyClient;
+import com.adhar.kit.messaging.requestreply.RequestReplyClient;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,9 +83,14 @@ public class MessagingAutoConfiguration {
     public MessagingFacade messagingFacade(ObjectProvider<MessagePublisher> publisherProvider,
                                             ObjectProvider<MessageListener> listenerProvider,
                                             AdharMessagingProperties properties,
-                                            ObjectProvider<MessagingMetrics> metricsProvider) {
+                                            ObjectProvider<MessagingMetrics> metricsProvider,
+                                            ObjectProvider<OutboxStore> outboxStoreProvider,
+                                            ObjectProvider<OutboxPayloadCodec> outboxCodecProvider,
+                                            ObjectProvider<RequestReplyClient> requestReplyClientProvider) {
         return new MessagingFacade(publisherProvider.getIfAvailable(), listenerProvider.getIfAvailable(),
-                properties, metricsProvider.getIfAvailable());
+                properties, metricsProvider.getIfAvailable(),
+                outboxStoreProvider.getIfAvailable(), outboxCodecProvider.getIfAvailable(),
+                requestReplyClientProvider.getIfAvailable());
     }
 
     /**
@@ -110,6 +121,18 @@ public class MessagingAutoConfiguration {
                 AdharMessagingProperties properties) {
             log.debug("Registering Kafka-backed MessageListener");
             return new KafkaMessageListener(kafkaListenerContainerFactory, kafkaListenerEndpointRegistry, properties);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean(RequestReplyClient.class)
+        @ConditionalOnBean(KafkaTemplate.class)
+        public RequestReplyClient kafkaRequestReplyClient(KafkaTemplate<String, Object> kafkaTemplate,
+                                                          ObjectProvider<MessageListener> listenerProvider,
+                                                          AdharMessagingProperties properties,
+                                                          ObjectProvider<ObjectMapper> objectMapperProvider) {
+            log.debug("Registering Kafka-backed RequestReplyClient");
+            return new KafkaRequestReplyClient(kafkaTemplate, listenerProvider.getIfAvailable(),
+                    properties, objectMapperProvider.getIfAvailable(ObjectMapper::new));
         }
     }
 
@@ -142,6 +165,17 @@ public class MessagingAutoConfiguration {
             RabbitAdmin rabbitAdmin = rabbitAdminProvider.getIfAvailable(() -> new RabbitAdmin(connectionFactory));
             MessageConverter messageConverter = messageConverterProvider.getIfAvailable(SimpleMessageConverter::new);
             return new RabbitMQMessageListener(connectionFactory, rabbitAdmin, messageConverter, properties);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean(RequestReplyClient.class)
+        @ConditionalOnBean(RabbitTemplate.class)
+        public RequestReplyClient rabbitRequestReplyClient(RabbitTemplate rabbitTemplate,
+                                                           AdharMessagingProperties properties,
+                                                           ObjectProvider<ObjectMapper> objectMapperProvider) {
+            log.debug("Registering RabbitMQ-backed RequestReplyClient");
+            return new RabbitRequestReplyClient(rabbitTemplate, properties,
+                    objectMapperProvider.getIfAvailable(ObjectMapper::new));
         }
     }
 

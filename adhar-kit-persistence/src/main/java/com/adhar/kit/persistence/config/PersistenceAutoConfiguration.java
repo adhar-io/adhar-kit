@@ -1,6 +1,8 @@
 package com.adhar.kit.persistence.config;
 
 import com.adhar.kit.persistence.auditing.AuditorAwareImpl;
+import com.adhar.kit.persistence.diagnostics.NPlusOneDetector;
+import com.adhar.kit.persistence.envers.RevisionHistoryReader;
 import com.adhar.kit.persistence.metrics.PersistenceMetricsCollector;
 import com.adhar.kit.persistence.multitenancy.CurrentTenantIdentifierResolverImpl;
 import com.adhar.kit.persistence.multitenancy.SchemaMultiTenantConnectionProvider;
@@ -8,17 +10,22 @@ import com.adhar.kit.persistence.multitenancy.TenantIdentifierResolver;
 import com.adhar.kit.persistence.multitenancy.TenantWebFilter;
 import com.adhar.kit.persistence.outbox.ApplicationEventOutboxRelay;
 import com.adhar.kit.persistence.outbox.DomainEventOutboxBridge;
+import com.adhar.kit.persistence.outbox.KafkaOutboxRelay;
 import com.adhar.kit.persistence.outbox.OutboxPublisher;
 import com.adhar.kit.persistence.outbox.OutboxRelay;
 import com.adhar.kit.persistence.outbox.OutboxRepository;
 import com.adhar.kit.persistence.repository.SoftDeleteRepositoryImpl;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
+import jakarta.persistence.EntityManagerFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.cfg.AvailableSettings;
 import org.hibernate.cfg.MultiTenancySettings;
+import org.hibernate.envers.AuditReader;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -30,6 +37,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.domain.AuditorAware;
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.orm.jpa.SharedEntityManagerCreator;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
@@ -151,6 +160,8 @@ public class PersistenceAutoConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
+        @ConditionalOnProperty(prefix = "adhar.persistence.outbox", name = "relay",
+                havingValue = "application-event", matchIfMissing = true)
         public OutboxRelay outboxRelay(ApplicationEventPublisher eventPublisher) {
             return new ApplicationEventOutboxRelay(eventPublisher);
         }
@@ -172,6 +183,82 @@ public class PersistenceAutoConfiguration {
         public DomainEventOutboxBridge domainEventOutboxBridge(OutboxRepository outboxRepository) {
             log.info("Domain event -> outbox bridge enabled");
             return new DomainEventOutboxBridge(outboxRepository);
+        }
+    }
+
+    /**
+     * Kafka-backed outbox relay -- active only when {@code spring-kafka} is on the classpath, the
+     * outbox is enabled, a {@link KafkaTemplate} bean exists, and
+     * {@code adhar.persistence.outbox.relay=kafka}. Supplies a {@link KafkaOutboxRelay} in place of
+     * the default {@link ApplicationEventOutboxRelay}; the {@link OutboxPublisher} then relays due
+     * events onto Kafka. Isolated in its own {@code @ConditionalOnClass}-gated configuration so the
+     * module still loads when {@code spring-kafka} is absent.
+     */
+    @Slf4j
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(KafkaTemplate.class)
+    @ConditionalOnProperty(prefix = "adhar.persistence.outbox", name = "enabled", havingValue = "true")
+    public static class KafkaOutboxConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(OutboxRelay.class)
+        @ConditionalOnBean(KafkaTemplate.class)
+        @ConditionalOnProperty(prefix = "adhar.persistence.outbox", name = "relay", havingValue = "kafka")
+        public OutboxRelay kafkaOutboxRelay(KafkaTemplate<String, String> kafkaTemplate,
+                                            PersistenceProperties properties) {
+            String topic = properties.getOutbox().getKafka().getTopic();
+            log.info("Kafka outbox relay enabled (topic={})", topic);
+            return new KafkaOutboxRelay(kafkaTemplate, topic);
+        }
+    }
+
+    /**
+     * Hibernate Envers revision-history support -- active only when {@code hibernate-envers} is on
+     * the classpath and {@code adhar.persistence.envers.enabled} is not {@code false}. Envers
+     * auto-registers itself with Hibernate; this configuration only exposes a
+     * {@link RevisionHistoryReader} helper for reading that history. Isolated in its own
+     * {@code @ConditionalOnClass}-gated configuration so the module still loads when Envers is
+     * absent.
+     */
+    @Slf4j
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(AuditReader.class)
+    @ConditionalOnProperty(prefix = "adhar.persistence.envers", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public static class EnversConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnBean(EntityManagerFactory.class)
+        public RevisionHistoryReader revisionHistoryReader(EntityManagerFactory entityManagerFactory) {
+            log.info("Hibernate Envers revision-history reader enabled");
+            return new RevisionHistoryReader(
+                    SharedEntityManagerCreator.createSharedEntityManager(entityManagerFactory));
+        }
+    }
+
+    /**
+     * N+1 query detector -- disabled by default, enabled via
+     * {@code adhar.persistence.diagnostics.n-plus-one.enabled=true}. Registers a
+     * {@link NPlusOneDetector} as Hibernate's {@code StatementInspector} through a
+     * {@link HibernatePropertiesCustomizer} so it observes every statement Hibernate prepares.
+     */
+    @Slf4j
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnProperty(prefix = "adhar.persistence.diagnostics.n-plus-one", name = "enabled", havingValue = "true")
+    public static class NPlusOneDetectionConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        public NPlusOneDetector nPlusOneDetector(PersistenceProperties properties) {
+            int threshold = properties.getDiagnostics().getNPlusOne().getThreshold();
+            log.info("N+1 query detector enabled (threshold={})", threshold);
+            return new NPlusOneDetector(threshold);
+        }
+
+        @Bean
+        public HibernatePropertiesCustomizer nPlusOneStatementInspectorCustomizer(NPlusOneDetector detector) {
+            return hibernateProperties ->
+                    hibernateProperties.put(AvailableSettings.STATEMENT_INSPECTOR, detector);
         }
     }
 }

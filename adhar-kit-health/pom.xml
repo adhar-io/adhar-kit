@@ -87,6 +87,13 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- Spring Web MVC (Optional) - enables the SSE health-event endpoint -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Redis (Optional) -->
         <dependency>
             <groupId>org.springframework.data</groupId>

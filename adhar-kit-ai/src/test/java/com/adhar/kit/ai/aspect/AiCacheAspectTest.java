@@ -10,10 +10,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.ai.embedding.EmbeddingModel;
 
 import java.lang.reflect.Method;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
@@ -198,6 +201,99 @@ class AiCacheAspectTest {
         when(joinPoint.proceed()).thenReturn("r1-again");
         Object recomputed = aspect.processCacheAnnotation(joinPoint, ann);
         assertThat(recomputed).isEqualTo("r1-again");
+    }
+
+    // ==================== Semantic (embedding-similarity) cache ====================
+
+    @Test
+    void semanticHitServesCachedValueForSimilarButDifferentPrompt() throws Throwable {
+        EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
+        when(embeddingModel.embed("greeting one")).thenReturn(new float[]{1f, 0f});
+        when(embeddingModel.embed("greeting two")).thenReturn(new float[]{1f, 0.001f});
+        AiCacheAspect semanticAspect = new AiCacheAspect(embeddingModel, true, 0.95, 100);
+
+        AiCache ann = annotation(3600, 1000, true, new String[]{});
+        when(joinPoint.proceed()).thenReturn("cached-answer");
+
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"greeting one"});
+        Object first = semanticAspect.processCacheAnnotation(joinPoint, ann);
+
+        // Different exact key (different arg) but near-identical embedding -> semantic hit.
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"greeting two"});
+        Object second = semanticAspect.processCacheAnnotation(joinPoint, ann);
+
+        assertThat(first).isEqualTo("cached-answer");
+        assertThat(second).isEqualTo("cached-answer");
+        verify(joinPoint, times(1)).proceed();
+    }
+
+    @Test
+    void semanticMissForDissimilarPromptRecomputes() throws Throwable {
+        EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
+        when(embeddingModel.embed("about cats")).thenReturn(new float[]{1f, 0f});
+        when(embeddingModel.embed("about finance")).thenReturn(new float[]{0f, 1f});
+        AiCacheAspect semanticAspect = new AiCacheAspect(embeddingModel, true, 0.95, 100);
+
+        AiCache ann = annotation(3600, 1000, true, new String[]{});
+        when(joinPoint.proceed()).thenReturn("r1", "r2");
+
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"about cats"});
+        Object first = semanticAspect.processCacheAnnotation(joinPoint, ann);
+
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"about finance"});
+        Object second = semanticAspect.processCacheAnnotation(joinPoint, ann);
+
+        assertThat(first).isEqualTo("r1");
+        assertThat(second).isEqualTo("r2");
+        verify(joinPoint, times(2)).proceed();
+    }
+
+    @Test
+    void semanticPathIgnoredWhenDisabled() throws Throwable {
+        EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
+        // enabled=false -> embedding never consulted even though model is present.
+        AiCacheAspect semanticAspect = new AiCacheAspect(embeddingModel, false, 0.95, 100);
+
+        AiCache ann = annotation(3600, 1000, true, new String[]{});
+        when(joinPoint.proceed()).thenReturn("r1", "r2");
+
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"prompt a"});
+        semanticAspect.processCacheAnnotation(joinPoint, ann);
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"prompt b"});
+        semanticAspect.processCacheAnnotation(joinPoint, ann);
+
+        verify(joinPoint, times(2)).proceed();
+        verify(embeddingModel, never()).embed(anyString());
+    }
+
+    @Test
+    void semanticEmbeddingFailureFallsBackToExactHash() throws Throwable {
+        EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
+        when(embeddingModel.embed(anyString())).thenThrow(new RuntimeException("embedding down"));
+        AiCacheAspect semanticAspect = new AiCacheAspect(embeddingModel, true, 0.95, 100);
+
+        AiCache ann = annotation(3600, 1000, true, new String[]{});
+        when(joinPoint.proceed()).thenReturn("r1", "r2");
+
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"x"});
+        Object first = semanticAspect.processCacheAnnotation(joinPoint, ann);
+        when(joinPoint.getArgs()).thenReturn(new Object[]{"y"});
+        Object second = semanticAspect.processCacheAnnotation(joinPoint, ann);
+
+        // Embedding failures degrade gracefully to exact-hash-only behaviour.
+        assertThat(first).isEqualTo("r1");
+        assertThat(second).isEqualTo("r2");
+    }
+
+    @Test
+    void cosineSimilarityHandlesEdgeCases() {
+        assertThat(AiCacheAspect.cosineSimilarity(new float[]{1f, 0f}, new float[]{1f, 0f}))
+                .isCloseTo(1.0, within(1e-6));
+        assertThat(AiCacheAspect.cosineSimilarity(new float[]{1f, 0f}, new float[]{0f, 1f}))
+                .isCloseTo(0.0, within(1e-6));
+        // Mismatched dimensions and zero-magnitude vectors return 0.
+        assertThat(AiCacheAspect.cosineSimilarity(new float[]{1f}, new float[]{1f, 2f})).isZero();
+        assertThat(AiCacheAspect.cosineSimilarity(new float[]{0f, 0f}, new float[]{1f, 1f})).isZero();
     }
 
     @Test

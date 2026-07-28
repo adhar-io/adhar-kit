@@ -1,0 +1,32 @@
+[
+  {
+    "coordinates": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+    "description": "Apache Log4j Core",
+    "reference": "https://ossindex.sonatype.org/component/pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+    "vulnerabilities": [
+      {
+        "id": "CVE-2021-44228",
+        "displayName": "CVE-2021-44228",
+        "title": "Remote code execution via JNDI (Log4Shell)",
+        "cvssScore": 10.0,
+        "cvssVector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+        "cve": "CVE-2021-44228",
+        "reference": "https://ossindex.sonatype.org/vulnerability/CVE-2021-44228"
+      },
+      {
+        "id": "CVE-2021-45046",
+        "displayName": "CVE-2021-45046",
+        "title": "Incomplete fix denial of service",
+        "cvssScore": 5.9,
+        "cve": "CVE-2021-45046",
+        "reference": "https://ossindex.sonatype.org/vulnerability/CVE-2021-45046"
+      }
+    ]
+  },
+  {
+    "coordinates": "pkg:maven/org.slf4j/slf4j-api@2.0.9",
+    "description": "SLF4J API",
+    "reference": "https://ossindex.sonatype.org/component/pkg:maven/org.slf4j/slf4j-api@2.0.9",
+    "vulnerabilities": []
+  }
+]

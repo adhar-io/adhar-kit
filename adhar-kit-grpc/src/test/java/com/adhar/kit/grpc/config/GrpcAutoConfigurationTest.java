@@ -1,12 +1,16 @@
 package com.adhar.kit.grpc.config;
 
 import com.adhar.kit.grpc.client.AdharGrpcClientFactory;
+import com.adhar.kit.grpc.interceptor.ConcurrencyLimitServerInterceptor;
+import com.adhar.kit.grpc.interceptor.GrpcObserver;
+import com.adhar.kit.grpc.interceptor.MicrometerGrpcObserver;
 import com.adhar.kit.grpc.server.AdharGrpcServer;
 import com.adhar.kit.grpc.server.GrpcAuthenticator;
 import com.adhar.kit.grpc.server.StaticTokenAuthenticator;
 import com.adhar.kit.grpc.spring.GrpcClientBeanPostProcessor;
 import com.adhar.kit.grpc.spring.GrpcServiceRegistrar;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -85,11 +89,59 @@ class GrpcAutoConfigurationTest {
                 });
     }
 
+    @Test
+    void concurrencyLimitInterceptor_notCreated_byDefault() {
+        contextRunner.run(context ->
+                assertThat(context).doesNotHaveBean(ConcurrencyLimitServerInterceptor.class));
+    }
+
+    @Test
+    void concurrencyLimitInterceptor_created_whenEnabled() {
+        contextRunner.withPropertyValues(
+                        "adhar.grpc.concurrency.enabled=true",
+                        "adhar.grpc.concurrency.global-limit=50",
+                        "adhar.grpc.concurrency.service-limits.my.Svc=5")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(ConcurrencyLimitServerInterceptor.class);
+                    ConcurrencyLimitServerInterceptor limiter =
+                            context.getBean(ConcurrencyLimitServerInterceptor.class);
+                    assertThat(limiter.availableGlobalPermits()).isEqualTo(50);
+                    assertThat(limiter.availableServicePermits("my.Svc")).isEqualTo(5);
+                });
+    }
+
+    @Test
+    void grpcObserver_notCreated_withoutObservationRegistryBean() {
+        contextRunner.run(context -> assertThat(context).doesNotHaveBean(GrpcObserver.class));
+    }
+
+    @Test
+    void micrometerGrpcObserver_created_whenObservationRegistryPresent() {
+        contextRunner.withUserConfiguration(ObservationRegistryConfig.class)
+                .run(context -> assertThat(context.getBean(GrpcObserver.class))
+                        .isInstanceOf(MicrometerGrpcObserver.class));
+    }
+
+    @Test
+    void grpcObserver_notCreated_whenTracingDisabled() {
+        contextRunner.withUserConfiguration(ObservationRegistryConfig.class)
+                .withPropertyValues("adhar.grpc.observability.enable-tracing=false")
+                .run(context -> assertThat(context).doesNotHaveBean(GrpcObserver.class));
+    }
+
     @Configuration(proxyBeanMethods = false)
     static class MeterRegistryConfig {
         @Bean
         SimpleMeterRegistry meterRegistry() {
             return new SimpleMeterRegistry();
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class ObservationRegistryConfig {
+        @Bean
+        ObservationRegistry observationRegistry() {
+            return ObservationRegistry.create();
         }
     }
 }

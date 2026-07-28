@@ -131,6 +131,14 @@ public class ConfigMapReloadService {
         return informers.containsKey(key(name, namespace));
     }
 
+    /**
+     * @return the number of ConfigMaps currently being watched; useful as a
+     * health/observability signal for the watch subsystem
+     */
+    public int getActiveWatchCount() {
+        return informers.size();
+    }
+
     private static String key(String name, String namespace) {
         return namespace + "/" + name;
     }

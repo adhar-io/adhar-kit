@@ -6,6 +6,7 @@ import com.adhar.kit.dapr.api.StateWithETag;
 import com.adhar.kit.dapr.resilience.DaprInvocationResilience;
 import io.dapr.client.DaprClient;
 import io.dapr.client.DaprClientBuilder;
+import io.dapr.client.DaprPreviewClient;
 import io.dapr.client.domain.*;
 import io.dapr.utils.TypeRef;
 import lombok.extern.slf4j.Slf4j;
@@ -275,13 +276,17 @@ public class DaprFacade {
 
     private static volatile DaprFacade instance;
     private final DaprClient daprClient;
+    private final DaprPreviewClient previewClient;
     private final DaprInvocationResilience resilience = new DaprInvocationResilience();
     private volatile boolean available = false;
 
     private DaprFacade() {
         log.info("Initializing Dapr Facade v1.0.0");
         try {
-            this.daprClient = new DaprClientBuilder().build();
+            DaprClientBuilder builder = new DaprClientBuilder();
+            this.daprClient = builder.build();
+            // Preview client exposes the (stable-in-runtime) distributed-lock building block.
+            this.previewClient = builder.buildPreviewClient();
 
             // Check if Dapr is available
             this.available = true;
@@ -298,10 +303,27 @@ public class DaprFacade {
      * pre-configured client in production/DI scenarios where the default
      * {@link DaprClientBuilder#build()} construction in {@link #getInstance()} isn't desired.
      *
+     * <p>No {@link DaprPreviewClient} is supplied, so the distributed-lock methods
+     * ({@link #tryLock}/{@link #unlock}) are unavailable; use
+     * {@link #DaprFacade(DaprClient, DaprPreviewClient)} to enable them.</p>
+     *
      * @param daprClient the Dapr client
      */
     public DaprFacade(DaprClient daprClient) {
+        this(daprClient, null);
+    }
+
+    /**
+     * Constructor for injecting both the standard and preview Dapr clients directly - typically
+     * mocks in tests, or pre-configured clients in DI scenarios. The preview client backs the
+     * distributed-lock building block.
+     *
+     * @param daprClient    the Dapr client
+     * @param previewClient the Dapr preview client (may be {@code null} to disable locking)
+     */
+    public DaprFacade(DaprClient daprClient, DaprPreviewClient previewClient) {
         this.daprClient = daprClient;
+        this.previewClient = previewClient;
         this.available = true;
     }
 
@@ -638,21 +660,66 @@ public class DaprFacade {
     }
 
     // ==================== Distributed Lock ====================
-    // Note: Distributed lock API is alpha in Dapr SDK 1.11.0
+    // Backed by the Dapr preview client's lock building block (SDK 1.18).
 
+    /**
+     * Attempts to acquire a distributed lock on {@code resourceId} for {@code lockOwner}. The
+     * lock auto-expires after {@code expiryInSeconds}. Returns immediately (non-blocking) with
+     * {@code false} if the resource is already locked by someone else.
+     *
+     * @param storeName       lock store component name
+     * @param resourceId      the resource to lock
+     * @param lockOwner       an owner identifier (must be presented again to {@link #unlock})
+     * @param expiryInSeconds lock time-to-live in seconds
+     * @return {@code true} if the lock was acquired
+     * @throws IllegalStateException if this facade was created without a preview client
+     */
     public boolean tryLock(String storeName, String resourceId, String lockOwner, int expiryInSeconds) {
-        // Distributed lock API may not be available in all SDK versions
-        // Consider using direct Dapr HTTP API if this feature is needed
-        throw new UnsupportedOperationException(
-            "Distributed lock API is not available in Dapr SDK 1.11.0 Java client. " +
-            "Consider using direct Dapr HTTP API or upgrading to a newer SDK version.");
+        requirePreviewClient();
+        try {
+            Boolean acquired = previewClient.tryLock(
+                new LockRequest(storeName, resourceId, lockOwner, expiryInSeconds)).block();
+            boolean result = Boolean.TRUE.equals(acquired);
+            log.debug("tryLock: store={}, resource={}, owner={}, acquired={}",
+                storeName, resourceId, lockOwner, result);
+            return result;
+        } catch (Exception e) {
+            log.error("Failed to acquire lock: store={}, resource={}", storeName, resourceId, e);
+            throw new DaprException("Failed to acquire lock", e);
+        }
     }
 
+    /**
+     * Releases a distributed lock previously acquired via {@link #tryLock}.
+     *
+     * @param storeName  lock store component name
+     * @param resourceId the locked resource
+     * @param lockOwner  the owner identifier used to acquire the lock
+     * @return {@code true} if the lock was released (status {@code SUCCESS}); {@code false} if
+     *         the lock did not exist or belonged to another owner
+     * @throws IllegalStateException if this facade was created without a preview client
+     */
     public boolean unlock(String storeName, String resourceId, String lockOwner) {
-        // Distributed lock API may not be available in all SDK versions
-        throw new UnsupportedOperationException(
-            "Distributed lock API is not available in Dapr SDK 1.11.0 Java client. " +
-            "Consider using direct Dapr HTTP API or upgrading to a newer SDK version.");
+        requirePreviewClient();
+        try {
+            UnlockResponseStatus status = previewClient.unlock(
+                new UnlockRequest(storeName, resourceId, lockOwner)).block();
+            boolean released = status == UnlockResponseStatus.SUCCESS;
+            log.debug("unlock: store={}, resource={}, owner={}, status={}",
+                storeName, resourceId, lockOwner, status);
+            return released;
+        } catch (Exception e) {
+            log.error("Failed to release lock: store={}, resource={}", storeName, resourceId, e);
+            throw new DaprException("Failed to release lock", e);
+        }
+    }
+
+    private void requirePreviewClient() {
+        if (previewClient == null) {
+            throw new IllegalStateException(
+                "Distributed lock requires a DaprPreviewClient. Construct DaprFacade via "
+                    + "getInstance() or new DaprFacade(daprClient, previewClient) to enable it.");
+        }
     }
 
     // ==================== Actors ====================
@@ -719,6 +786,9 @@ public class DaprFacade {
             if (daprClient != null) {
                 daprClient.close();
                 log.info("Dapr client shut down successfully");
+            }
+            if (previewClient != null) {
+                previewClient.close();
             }
         } catch (Exception e) {
             log.error("Error shutting down Dapr client", e);

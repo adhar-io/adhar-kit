@@ -1,11 +1,18 @@
 package com.adhar.kit.ai;
 
 import com.adhar.kit.ai.api.AiService;
+import com.adhar.kit.ai.model.AiChatRequest;
+import com.adhar.kit.ai.model.AiChatResponse;
+import com.adhar.kit.ai.prompt.PromptTemplateRegistry;
+import com.adhar.kit.ai.tool.AiTool;
+import com.adhar.kit.ai.tool.ToolCallingService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.embedding.EmbeddingModel;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Universal AI Facade providing vendor-agnostic access to AI/LLM capabilities.
@@ -134,9 +141,19 @@ public class AiFacade implements AiService {
 
     /**
      * The underlying AI provider (OpenAI, Azure, Claude, etc.).
-     * Provider is detected automatically based on available configuration.
+     *
+     * <p>Starts as the no-op {@link DefaultAiProvider} and is replaced at runtime by
+     * {@link #connect} once the Spring context has a real {@code ChatModel}-backed
+     * service available. Declared {@code volatile} for safe publication across
+     * threads.</p>
      */
-    private final AiProvider provider;
+    private volatile AiProvider provider;
+
+    /**
+     * Named prompt template registry, usable even before a provider is connected.
+     * Replaced by the Spring-managed registry when {@link #connect} runs.
+     */
+    private volatile PromptTemplateRegistry promptRegistry = new PromptTemplateRegistry();
 
     /**
      * Indicates if the AI service is available and ready.
@@ -182,6 +199,68 @@ public class AiFacade implements AiService {
             }
         }
         return instance;
+    }
+
+    // ==================== Provider Wiring ====================
+
+    /**
+     * Connects this facade to the real Spring-managed AI stack, replacing the no-op
+     * {@link DefaultAiProvider} so facade operations delegate to the same pipeline
+     * as the REST/annotation paths (guardrails, rate limiting, caching, token/cost
+     * tracking). Invoked by {@code AiAutoConfiguration} at startup once a
+     * {@code ChatModel}-backed {@link com.adhar.kit.ai.service.AiService} exists.
+     *
+     * @param springService  the Spring AI-backed chat/RAG/embedding service
+     * @param embeddingModel  embedding model (nullable) used for facade-side
+     *                        {@code findSimilar}
+     * @param toolCallingService tool-calling service backing {@code chatWithFunctions}
+     * @param promptRegistry  the Spring-managed prompt template registry
+     */
+    public void connect(com.adhar.kit.ai.service.AiService springService,
+                        EmbeddingModel embeddingModel,
+                        ToolCallingService toolCallingService,
+                        PromptTemplateRegistry promptRegistry) {
+        this.provider = new SpringServiceProvider(springService, embeddingModel, toolCallingService);
+        if (promptRegistry != null) {
+            this.promptRegistry = promptRegistry;
+        }
+        this.available = true;
+        log.info("AiFacade connected to Spring-managed AI provider");
+    }
+
+    /**
+     * Restores the facade to its freshly-constructed state (no-op provider, empty
+     * prompt registry). Package-private, intended only for tests that exercise
+     * {@link #connect} against the shared singleton so they can avoid leaking a
+     * connected provider into unrelated tests.
+     */
+    void resetToDefaultForTesting() {
+        this.provider = new DefaultAiProvider();
+        this.promptRegistry = new PromptTemplateRegistry(null);
+        this.available = true;
+    }
+
+    // ==================== Prompt Templates ====================
+
+    /**
+     * Registers a named prompt template on the facade's registry.
+     */
+    public void registerPromptTemplate(String name, String template) {
+        promptRegistry.register(name, template);
+    }
+
+    /**
+     * Renders a named prompt template, substituting {@code {param}} placeholders.
+     */
+    public String renderPrompt(String name, Map<String, Object> params) {
+        return promptRegistry.render(name, params);
+    }
+
+    /**
+     * @return the facade's prompt template registry
+     */
+    public PromptTemplateRegistry getPromptRegistry() {
+        return promptRegistry;
     }
 
     // ==================== Chat Completions ====================
@@ -859,6 +938,392 @@ public class AiFacade implements AiService {
         public String getQuality() { return quality; }
         @Override
         public String getStyle() { return style; }
+    }
+
+    // ==================== Spring-backed Provider Adapter ====================
+
+    /**
+     * {@link AiProvider} adapter delegating facade operations to the Spring-managed
+     * {@link com.adhar.kit.ai.service.AiService} (and, for facade-only concerns such
+     * as candidate similarity and tool detection, to the {@link EmbeddingModel} and
+     * {@link ToolCallingService}). Operations the Spring service does not implement
+     * (image generation/vision, document deletion, dynamic model switching) continue
+     * to throw {@link UnsupportedOperationException}.
+     */
+    private static class SpringServiceProvider implements AiProvider {
+
+        private final com.adhar.kit.ai.service.AiService service;
+        private final EmbeddingModel embeddingModel;
+        private final ToolCallingService toolCallingService;
+
+        SpringServiceProvider(com.adhar.kit.ai.service.AiService service,
+                              EmbeddingModel embeddingModel,
+                              ToolCallingService toolCallingService) {
+            this.service = service;
+            this.embeddingModel = embeddingModel;
+            this.toolCallingService = toolCallingService;
+        }
+
+        @Override
+        public String getName() {
+            return "spring-ai";
+        }
+
+        @Override
+        public void test() {
+            // Connectivity is validated lazily on first real call to avoid a live
+            // model round-trip during facade wiring.
+        }
+
+        @Override
+        public String chat(String message) {
+            return service.chat(AiChatRequest.builder().message(message).build()).getContent();
+        }
+
+        @Override
+        public String chat(String systemPrompt, String message) {
+            AiChatRequest request = AiChatRequest.builder()
+                    .message(message)
+                    .history(List.of(AiChatRequest.ChatMessage.builder()
+                            .role(AiChatRequest.MessageRole.SYSTEM)
+                            .content(systemPrompt)
+                            .build()))
+                    .build();
+            return service.chat(request).getContent();
+        }
+
+        @Override
+        public String chatWithContext(List<ChatMessage> history, String message) {
+            List<AiChatRequest.ChatMessage> mapped = new ArrayList<>();
+            for (ChatMessage m : history) {
+                mapped.add(AiChatRequest.ChatMessage.builder()
+                        .role(toRole(m.getRole()))
+                        .content(m.getContent())
+                        .build());
+            }
+            AiChatRequest request = AiChatRequest.builder()
+                    .message(message)
+                    .history(mapped)
+                    .build();
+            return service.chat(request).getContent();
+        }
+
+        @Override
+        public ChatResponse chat(ChatRequest request) {
+            AiChatResponse response = service.chat(toModelRequest(request));
+            return new ChatResponseImpl(response);
+        }
+
+        @Override
+        public void chatStream(String message, Consumer<String> callback) {
+            AiChatRequest request = AiChatRequest.builder().message(message).build();
+            service.chatStream(request).toStream().forEach(chunk -> callback.accept(chunk.getContent()));
+        }
+
+        @Override
+        public void chatStream(ChatRequest request, Consumer<ChatChunk> callback) {
+            service.chatStream(toModelRequest(request)).toStream()
+                    .forEach(chunk -> callback.accept(new ChatChunkImpl(chunk.getContent(), false)));
+        }
+
+        @Override
+        public List<Float> embed(String text) {
+            return service.embed(text);
+        }
+
+        @Override
+        public List<List<Float>> embedBatch(List<String> texts) {
+            List<List<Float>> results = new ArrayList<>();
+            for (String text : texts) {
+                results.add(service.embed(text));
+            }
+            return results;
+        }
+
+        @Override
+        public List<SimilarityResult> findSimilar(String query, List<String> candidates, int topK) {
+            if (embeddingModel == null) {
+                throw new UnsupportedOperationException("No EmbeddingModel available for findSimilar");
+            }
+            float[] queryEmbedding = embeddingModel.embed(query);
+            List<SimilarityResult> scored = new ArrayList<>();
+            for (String candidate : candidates) {
+                double score = cosine(queryEmbedding, embeddingModel.embed(candidate));
+                scored.add(new SimilarityResultImpl(candidate, score, Map.of()));
+            }
+            scored.sort((a, b) -> Double.compare(b.getScore(), a.getScore()));
+            return scored.subList(0, Math.min(topK, scored.size()));
+        }
+
+        @Override
+        public ImageResult generateImage(ImageRequest request) {
+            throw new UnsupportedOperationException("Image generation not supported by the Spring AI service adapter");
+        }
+
+        @Override
+        public String analyzeImage(String imageUrl, String question) {
+            throw new UnsupportedOperationException("Image analysis not supported by the Spring AI service adapter");
+        }
+
+        @Override
+        public FunctionCallResponse chatWithFunctions(String message, List<AiFunction> functions) {
+            List<AiTool> tools = new ArrayList<>();
+            for (AiFunction fn : functions) {
+                tools.add(AiTool.builder()
+                        .name(fn.getName())
+                        .description(fn.getDescription())
+                        .handler(noHandler(fn.getName()))
+                        .build());
+            }
+            ToolCallingService.DetectionResult detection = toolCallingService.detectToolCalls(message, tools);
+            List<FunctionCall> calls = new ArrayList<>();
+            for (ToolCallingService.RequestedCall call : detection.requestedCalls()) {
+                calls.add(new FunctionCallImpl(call.name(), call.arguments()));
+            }
+            return new FunctionCallResponseImpl(detection.text(), calls);
+        }
+
+        @Override
+        public Object executeFunction(FunctionCall functionCall) {
+            return toolCallingService.execute(functionCall.getName(), functionCall.getArguments());
+        }
+
+        @Override
+        public void storeDocument(String id, String content, Map<String, Object> metadata) {
+            service.addDocuments(List.of(new com.adhar.kit.ai.service.AiService.DocumentChunk(
+                    id, content, "facade", metadata != null ? metadata : Map.of())), "default");
+        }
+
+        @Override
+        public void storeDocuments(List<Document> documents) {
+            List<com.adhar.kit.ai.service.AiService.DocumentChunk> chunks = new ArrayList<>();
+            for (Document doc : documents) {
+                chunks.add(new com.adhar.kit.ai.service.AiService.DocumentChunk(
+                        doc.getId(), doc.getContent(), "facade",
+                        doc.getMetadata() != null ? doc.getMetadata() : Map.of()));
+            }
+            service.addDocuments(chunks, "default");
+        }
+
+        @Override
+        public RagResponse queryDocuments(String question, int topK) {
+            AiChatResponse response = service.ragChat(AiChatRequest.builder().message(question).build(), "default");
+            List<Document> sources = new ArrayList<>();
+            for (com.adhar.kit.ai.service.AiService.SimilarityResult result : service.search(question, topK)) {
+                sources.add(new DocumentImpl(result.id(), result.content(), result.metadata()));
+            }
+            return new RagResponseImpl(response.getContent(), sources, 1.0);
+        }
+
+        @Override
+        public void deleteDocument(String documentId) {
+            throw new UnsupportedOperationException("Document deletion not supported by the Spring AI service adapter");
+        }
+
+        @Override
+        public List<String> listModels() {
+            return service.getAvailableModels();
+        }
+
+        @Override
+        public ModelInfo getModelInfo() {
+            List<String> models = service.getAvailableModels();
+            String id = models.isEmpty() ? "unknown" : models.get(0);
+            return new ModelInfoImpl(id, "spring-ai", 0, 0.0, List.of("chat", "embedding"));
+        }
+
+        @Override
+        public void useModel(String modelId) {
+            throw new UnsupportedOperationException(
+                    "Dynamic model switching is not supported; set the model per request instead");
+        }
+
+        @Override
+        public int countTokens(String text) {
+            return text.length() / 4;
+        }
+
+        @Override
+        public double estimateCost(String text) {
+            return 0.0;
+        }
+
+        @Override
+        public Map<String, Object> health() {
+            return Map.of("adapter", "spring-ai");
+        }
+
+        private AiChatRequest toModelRequest(ChatRequest request) {
+            List<AiChatRequest.ChatMessage> history = new ArrayList<>();
+            if (request.getSystemPrompt() != null && !request.getSystemPrompt().isEmpty()) {
+                history.add(AiChatRequest.ChatMessage.builder()
+                        .role(AiChatRequest.MessageRole.SYSTEM)
+                        .content(request.getSystemPrompt())
+                        .build());
+            }
+            String message = "";
+            List<ChatMessage> messages = request.getMessages();
+            if (messages != null && !messages.isEmpty()) {
+                for (int i = 0; i < messages.size() - 1; i++) {
+                    ChatMessage m = messages.get(i);
+                    history.add(AiChatRequest.ChatMessage.builder()
+                            .role(toRole(m.getRole()))
+                            .content(m.getContent())
+                            .build());
+                }
+                message = messages.get(messages.size() - 1).getContent();
+            }
+            return AiChatRequest.builder()
+                    .message(message)
+                    .history(history.isEmpty() ? null : history)
+                    .parameters(AiChatRequest.AiParameters.builder()
+                            .temperature(request.getTemperature())
+                            .maxTokens(request.getMaxTokens())
+                            .topP(request.getTopP())
+                            .frequencyPenalty(request.getFrequencyPenalty())
+                            .presencePenalty(request.getPresencePenalty())
+                            .stopSequences(request.getStopSequences())
+                            .build())
+                    .build();
+        }
+
+        private static AiChatRequest.MessageRole toRole(String role) {
+            if (role == null) {
+                return AiChatRequest.MessageRole.USER;
+            }
+            return switch (role.toLowerCase(Locale.ROOT)) {
+                case "system" -> AiChatRequest.MessageRole.SYSTEM;
+                case "assistant" -> AiChatRequest.MessageRole.ASSISTANT;
+                case "function" -> AiChatRequest.MessageRole.FUNCTION;
+                default -> AiChatRequest.MessageRole.USER;
+            };
+        }
+
+        private static Function<Map<String, Object>, Object> noHandler(String name) {
+            return args -> {
+                throw new UnsupportedOperationException(
+                        "Function '" + name + "' has no registered handler; register an executable tool "
+                                + "with the ToolCallingService to execute it");
+            };
+        }
+
+        private static double cosine(float[] a, float[] b) {
+            if (a == null || b == null || a.length != b.length || a.length == 0) {
+                return 0.0;
+            }
+            double dot = 0.0;
+            double normA = 0.0;
+            double normB = 0.0;
+            for (int i = 0; i < a.length; i++) {
+                dot += (double) a[i] * b[i];
+                normA += (double) a[i] * a[i];
+                normB += (double) b[i] * b[i];
+            }
+            if (normA == 0.0 || normB == 0.0) {
+                return 0.0;
+            }
+            return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+        }
+    }
+
+    // ==================== api.AiService type implementations ====================
+
+    private record ChatChunkImpl(String content, boolean finished) implements ChatChunk {
+        @Override
+        public String getContent() { return content; }
+        @Override
+        public boolean isFinished() { return finished; }
+        @Override
+        public Map<String, Object> getMetadata() { return Map.of(); }
+    }
+
+    private static class ChatResponseImpl implements ChatResponse {
+        private final AiChatResponse response;
+
+        ChatResponseImpl(AiChatResponse response) {
+            this.response = response;
+        }
+
+        @Override
+        public String getContent() { return response.getContent(); }
+        @Override
+        public String getModelId() { return response.getModel(); }
+        @Override
+        public int getPromptTokens() { return tokens(usage() != null ? usage().getPromptTokens() : null); }
+        @Override
+        public int getCompletionTokens() { return tokens(usage() != null ? usage().getCompletionTokens() : null); }
+        @Override
+        public int getTotalTokens() { return tokens(usage() != null ? usage().getTotalTokens() : null); }
+        @Override
+        public String getFinishReason() {
+            return response.getFinishReason() != null ? response.getFinishReason().name() : null;
+        }
+        @Override
+        public Map<String, Object> getMetadata() { return Map.of(); }
+
+        private AiChatResponse.UsageMetrics usage() { return response.getUsage(); }
+
+        private static int tokens(Integer value) { return value != null ? value : 0; }
+    }
+
+    private record SimilarityResultImpl(String text, double score, Map<String, Object> metadata)
+            implements SimilarityResult {
+        @Override
+        public String getText() { return text; }
+        @Override
+        public double getScore() { return score; }
+        @Override
+        public Map<String, Object> getMetadata() { return metadata; }
+    }
+
+    private record FunctionCallImpl(String name, Map<String, Object> arguments) implements FunctionCall {
+        @Override
+        public String getName() { return name; }
+        @Override
+        public Map<String, Object> getArguments() { return arguments; }
+    }
+
+    private record FunctionCallResponseImpl(String textResponse, List<FunctionCall> functionCalls)
+            implements FunctionCallResponse {
+        @Override
+        public String getTextResponse() { return textResponse; }
+        @Override
+        public List<FunctionCall> getFunctionCalls() { return functionCalls; }
+        @Override
+        public boolean hasFunctionCalls() { return functionCalls != null && !functionCalls.isEmpty(); }
+    }
+
+    private record DocumentImpl(String id, String content, Map<String, Object> metadata) implements Document {
+        @Override
+        public String getId() { return id; }
+        @Override
+        public String getContent() { return content; }
+        @Override
+        public Map<String, Object> getMetadata() { return metadata; }
+    }
+
+    private record RagResponseImpl(String answer, List<Document> sources, double confidence)
+            implements RagResponse {
+        @Override
+        public String getAnswer() { return answer; }
+        @Override
+        public List<Document> getSources() { return sources; }
+        @Override
+        public double getConfidence() { return confidence; }
+    }
+
+    private record ModelInfoImpl(String id, String provider, int maxTokens, double costPerToken,
+                                 List<String> capabilities) implements ModelInfo {
+        @Override
+        public String getId() { return id; }
+        @Override
+        public String getProvider() { return provider; }
+        @Override
+        public int getMaxTokens() { return maxTokens; }
+        @Override
+        public double getCostPerToken() { return costPerToken; }
+        @Override
+        public List<String> getCapabilities() { return capabilities; }
     }
 }
 

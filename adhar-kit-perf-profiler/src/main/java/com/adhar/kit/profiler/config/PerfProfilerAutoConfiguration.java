@@ -1,7 +1,10 @@
 package com.adhar.kit.profiler.config;
 
 import com.adhar.kit.profiler.aspect.ProfilingAspect;
+import com.adhar.kit.profiler.contention.ThreadContentionCollector;
 import com.adhar.kit.profiler.endpoint.ProfilingActuatorEndpoint;
+import com.adhar.kit.profiler.jfr.FlameGraphExporter;
+import com.adhar.kit.profiler.jfr.JfrRecordingManager;
 import com.adhar.kit.profiler.memory.MemoryProfiler;
 import com.adhar.kit.profiler.registry.ProfilingRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -47,9 +50,31 @@ public class PerfProfilerAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public JfrRecordingManager jfrRecordingManager(PerfProfilerProperties properties) {
+        return new JfrRecordingManager(properties.getJfr());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public FlameGraphExporter flameGraphExporter() {
+        return new FlameGraphExporter();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public ThreadContentionCollector threadContentionCollector(PerfProfilerProperties properties) {
+        return new ThreadContentionCollector(properties.getContention());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnClass(Endpoint.class)
     public ProfilingActuatorEndpoint profilingActuatorEndpoint(ProfilingRegistry profilingRegistry,
-                                                               MemoryProfiler memoryProfiler) {
-        return new ProfilingActuatorEndpoint(profilingRegistry, memoryProfiler);
+                                                               MemoryProfiler memoryProfiler,
+                                                               JfrRecordingManager jfrRecordingManager,
+                                                               FlameGraphExporter flameGraphExporter,
+                                                               ThreadContentionCollector threadContentionCollector) {
+        return new ProfilingActuatorEndpoint(profilingRegistry, memoryProfiler,
+                jfrRecordingManager, flameGraphExporter, threadContentionCollector);
     }
 }

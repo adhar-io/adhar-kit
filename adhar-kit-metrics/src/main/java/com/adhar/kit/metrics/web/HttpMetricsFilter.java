@@ -1,6 +1,7 @@
 package com.adhar.kit.metrics.web;
 
 import com.adhar.kit.metrics.slo.SloRecorder;
+import com.adhar.kit.metrics.trace.TraceContext;
 import com.adhar.kit.metrics.util.TagCardinalityLimiter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -9,9 +10,11 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
@@ -62,6 +65,7 @@ public class HttpMetricsFilter extends OncePerRequestFilter {
     private final MeterRegistry registry;
     private final TagCardinalityLimiter cardinalityLimiter;
     private final SloRecorder sloRecorder;
+    private final TraceContext traceContext;
 
     /**
      * Creates the filter without SLO tracking.
@@ -70,7 +74,19 @@ public class HttpMetricsFilter extends OncePerRequestFilter {
      * @param cardinalityLimiter limiter applied to the uri tag
      */
     public HttpMetricsFilter(MeterRegistry registry, TagCardinalityLimiter cardinalityLimiter) {
-        this(registry, cardinalityLimiter, null);
+        this(registry, cardinalityLimiter, null, null);
+    }
+
+    /**
+     * Creates the filter with SLO tracking but without trace correlation.
+     *
+     * @param registry the meter registry
+     * @param cardinalityLimiter limiter applied to the uri tag
+     * @param sloRecorder optional SLO recorder fed with request outcomes (may be null)
+     */
+    public HttpMetricsFilter(MeterRegistry registry, TagCardinalityLimiter cardinalityLimiter,
+                             SloRecorder sloRecorder) {
+        this(registry, cardinalityLimiter, sloRecorder, null);
     }
 
     /**
@@ -79,12 +95,16 @@ public class HttpMetricsFilter extends OncePerRequestFilter {
      * @param registry the meter registry
      * @param cardinalityLimiter limiter applied to the uri tag
      * @param sloRecorder optional SLO recorder fed with request outcomes (may be null)
+     * @param traceContext optional trace context; when present, the current trace/span id is
+     *        published to the SLF4J {@link MDC} for the duration of the request so that logs
+     *        and metrics can be correlated in a cardinality-safe way (may be null)
      */
     public HttpMetricsFilter(MeterRegistry registry, TagCardinalityLimiter cardinalityLimiter,
-                             SloRecorder sloRecorder) {
+                             SloRecorder sloRecorder, TraceContext traceContext) {
         this.registry = registry;
         this.cardinalityLimiter = cardinalityLimiter;
         this.sloRecorder = sloRecorder;
+        this.traceContext = traceContext;
     }
 
     @Override
@@ -92,11 +112,31 @@ public class HttpMetricsFilter extends OncePerRequestFilter {
                                     FilterChain filterChain) throws ServletException, IOException {
         long startNanos = System.nanoTime();
         int status = 500;
+        boolean traceIdSet = false;
+        boolean spanIdSet = false;
         try {
+            if (traceContext != null) {
+                Optional<String> traceId = traceContext.currentTraceId();
+                if (traceId.isPresent()) {
+                    MDC.put(TraceContext.TRACE_ID_KEY, traceId.get());
+                    traceIdSet = true;
+                    Optional<String> spanId = traceContext.currentSpanId();
+                    if (spanId.isPresent()) {
+                        MDC.put(TraceContext.SPAN_ID_KEY, spanId.get());
+                        spanIdSet = true;
+                    }
+                }
+            }
             filterChain.doFilter(request, response);
             status = response.getStatus();
         } finally {
             recordRequest(request, status, System.nanoTime() - startNanos);
+            if (traceIdSet) {
+                MDC.remove(TraceContext.TRACE_ID_KEY);
+            }
+            if (spanIdSet) {
+                MDC.remove(TraceContext.SPAN_ID_KEY);
+            }
         }
     }
 

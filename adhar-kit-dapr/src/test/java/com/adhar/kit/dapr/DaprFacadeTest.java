@@ -490,11 +490,12 @@ class DaprFacadeTest {
     // ==================== Unsupported operations ====================
 
     @Test
-    void distributedLockOperationsAreUnsupported() {
+    void distributedLockRequiresPreviewClient() {
+        // This facade was constructed without a preview client, so locking is unavailable.
         assertThatThrownBy(() -> facade.tryLock("store", "res", "owner", 30))
-            .isInstanceOf(UnsupportedOperationException.class);
+            .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> facade.unlock("store", "res", "owner"))
-            .isInstanceOf(UnsupportedOperationException.class);
+            .isInstanceOf(IllegalStateException.class);
     }
 
     @Test

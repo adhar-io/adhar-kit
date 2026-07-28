@@ -92,6 +92,39 @@ class PersistencePropertiesTest {
     }
 
     @Test
+    @DisplayName("Should default outbox relay + kafka topic")
+    void testOutboxRelayDefaults() {
+        PersistenceProperties.Outbox outbox = new PersistenceProperties.Outbox();
+
+        assertEquals("application-event", outbox.getRelay());
+        assertNotNull(outbox.getKafka());
+        assertEquals("adhar.outbox.events", outbox.getKafka().getTopic());
+
+        outbox.setRelay("kafka");
+        outbox.getKafka().setTopic("orders.events");
+        assertEquals("kafka", outbox.getRelay());
+        assertEquals("orders.events", outbox.getKafka().getTopic());
+    }
+
+    @Test
+    @DisplayName("Should default Envers enabled and Diagnostics N+1 disabled")
+    void testEnversAndDiagnosticsDefaults() {
+        PersistenceProperties properties = new PersistenceProperties();
+
+        assertTrue(properties.getEnvers().isEnabled());
+        assertFalse(properties.getDiagnostics().getNPlusOne().isEnabled());
+        assertEquals(10, properties.getDiagnostics().getNPlusOne().getThreshold());
+
+        properties.getEnvers().setEnabled(false);
+        properties.getDiagnostics().getNPlusOne().setEnabled(true);
+        properties.getDiagnostics().getNPlusOne().setThreshold(25);
+
+        assertFalse(properties.getEnvers().isEnabled());
+        assertTrue(properties.getDiagnostics().getNPlusOne().isEnabled());
+        assertEquals(25, properties.getDiagnostics().getNPlusOne().getThreshold());
+    }
+
+    @Test
     @DisplayName("Should test MultiTenancyStrategy enum")
     void testMultiTenancyStrategy() {
         assertEquals(3, PersistenceProperties.MultiTenancyStrategy.values().length);

@@ -10,8 +10,13 @@ import com.adhar.kit.messaging.core.SimpleMessageContext;
 import com.adhar.kit.messaging.dedup.DeduplicatingMessageHandler;
 import com.adhar.kit.messaging.dedup.InMemoryProcessedMessageStore;
 import com.adhar.kit.messaging.dedup.ProcessedMessageStore;
+import com.adhar.kit.messaging.exception.MessagingException;
 import com.adhar.kit.messaging.metrics.MessagingMetrics;
+import com.adhar.kit.messaging.outbox.OutboxEntry;
+import com.adhar.kit.messaging.outbox.OutboxPayloadCodec;
+import com.adhar.kit.messaging.outbox.OutboxStore;
 import com.adhar.kit.messaging.properties.AdharMessagingProperties;
+import com.adhar.kit.messaging.requestreply.RequestReplyClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -288,6 +293,24 @@ public class MessagingFacade implements MessagingService {
     private final DeadLetterPublisher deadLetterPublisher;
 
     /**
+     * Transactional-outbox store used by {@link #publishViaOutbox}, or {@code null} when the
+     * outbox is not enabled (in which case {@link #publishViaOutbox} throws).
+     */
+    private final OutboxStore outboxStore;
+
+    /**
+     * Codec used to serialize payloads persisted via {@link #publishViaOutbox}. Never
+     * {@code null} - a default codec is created when none is supplied.
+     */
+    private final OutboxPayloadCodec outboxCodec;
+
+    /**
+     * Broker-specific request-reply client backing {@link #sendAndReceive}, or {@code null}
+     * when no broker is configured (in which case {@link #sendAndReceive} throws).
+     */
+    private final RequestReplyClient requestReplyClient;
+
+    /**
      * Private no-arg constructor used by the legacy {@link #getInstance()} singleton
      * accessor. It builds a fully-stubbed facade (no broker wiring), matching the
      * historical behaviour of this class before broker wiring was introduced.
@@ -320,10 +343,45 @@ public class MessagingFacade implements MessagingService {
      */
     public MessagingFacade(MessagePublisher messagePublisher, MessageListener messageListener,
                            AdharMessagingProperties properties, MessagingMetrics metrics) {
+        this(messagePublisher, messageListener, properties, metrics, null, null, null);
+    }
+
+    /**
+     * Creates a fully-featured messaging facade, additionally wiring the transactional
+     * outbox ({@link #publishViaOutbox}) and request-reply ({@link #sendAndReceive})
+     * capabilities.
+     *
+     * <p>All arguments are optional (see
+     * {@link #MessagingFacade(MessagePublisher, MessageListener, AdharMessagingProperties, MessagingMetrics)}
+     * for the first four). Additionally:</p>
+     * <ul>
+     *   <li>a {@code null} {@code outboxStore} makes {@link #publishViaOutbox} throw a
+     *       {@link MessagingException} (outbox not enabled)</li>
+     *   <li>a {@code null} {@code outboxCodec} falls back to a default
+     *       {@link OutboxPayloadCodec}</li>
+     *   <li>a {@code null} {@code requestReplyClient} makes {@link #sendAndReceive} throw a
+     *       {@link MessagingException} (no broker configured)</li>
+     * </ul>
+     *
+     * @param messagePublisher   the publisher to delegate {@link #publish} calls to, or {@code null}
+     * @param messageListener    the listener to delegate {@link #subscribe} calls to, or {@code null}
+     * @param properties         messaging configuration, or {@code null} for defaults
+     * @param metrics            optional metrics recorder, or {@code null}
+     * @param outboxStore        the transactional-outbox store, or {@code null} if disabled
+     * @param outboxCodec        the outbox payload codec, or {@code null} for a default one
+     * @param requestReplyClient the request-reply client, or {@code null} if no broker
+     */
+    public MessagingFacade(MessagePublisher messagePublisher, MessageListener messageListener,
+                           AdharMessagingProperties properties, MessagingMetrics metrics,
+                           OutboxStore outboxStore, OutboxPayloadCodec outboxCodec,
+                           RequestReplyClient requestReplyClient) {
         this.messagePublisher = messagePublisher;
         this.messageListener = messageListener;
         this.properties = properties != null ? properties : new AdharMessagingProperties();
         this.metrics = metrics;
+        this.outboxStore = outboxStore;
+        this.outboxCodec = outboxCodec != null ? outboxCodec : new OutboxPayloadCodec();
+        this.requestReplyClient = requestReplyClient;
 
         AdharMessagingProperties.CommonProperties common = this.properties.getCommon();
         this.dedupStore = common.getDedup().isEnabled()
@@ -333,9 +391,11 @@ public class MessagingFacade implements MessagingService {
                 ? new DeadLetterPublisher(messagePublisher, common.getDlq(), metrics)
                 : null;
 
-        log.info("Initialized MessagingFacade (publisher={}, listener={}, retry.enabled={}, dlq.enabled={}, dedup.enabled={})",
+        log.info("Initialized MessagingFacade (publisher={}, listener={}, retry.enabled={}, dlq.enabled={}, "
+                        + "dedup.enabled={}, outbox={}, requestReply={})",
                 describe(messagePublisher), describe(messageListener),
-                common.getRetry().isEnabled(), common.getDlq().isEnabled(), common.getDedup().isEnabled());
+                common.getRetry().isEnabled(), common.getDlq().isEnabled(), common.getDedup().isEnabled(),
+                describe(outboxStore), describe(requestReplyClient));
     }
 
     private static String describe(Object delegate) {
@@ -541,6 +601,59 @@ public class MessagingFacade implements MessagingService {
         } else {
             metrics.recordPublishFailure(topic);
         }
+    }
+
+    /**
+     * Publishes a message through the <b>transactional outbox</b> (persist-then-relay).
+     *
+     * <p>Rather than sending to the broker immediately, the payload is durably persisted as
+     * a pending {@link OutboxEntry} in the configured {@link OutboxStore}. When a JDBC-backed
+     * store is used and this call runs inside the same database transaction as the business
+     * change, the message is committed atomically with that change, eliminating the
+     * dual-write problem. A scheduled
+     * {@link com.adhar.kit.messaging.outbox.OutboxRelay} then publishes the persisted entry
+     * to the broker, retrying on failure.</p>
+     *
+     * @param <T>         the payload type
+     * @param destination the destination (topic/exchange) to eventually publish to
+     * @param payload     the payload to persist and later relay (must not be {@code null})
+     * @return the id of the persisted outbox entry
+     * @throws IllegalArgumentException if {@code destination} is null/blank or {@code payload} is null
+     * @throws MessagingException       if the outbox is not enabled (no {@link OutboxStore} wired)
+     * @see #publishViaOutbox(String, String, Object)
+     */
+    public <T> String publishViaOutbox(String destination, T payload) {
+        return publishViaOutbox(destination, null, payload);
+    }
+
+    /**
+     * Publishes a message through the transactional outbox with a partition/routing key.
+     *
+     * @param <T>         the payload type
+     * @param destination the destination (topic/exchange) to eventually publish to
+     * @param routingKey  optional partition/routing key applied when the entry is relayed
+     * @param payload     the payload to persist and later relay (must not be {@code null})
+     * @return the id of the persisted outbox entry
+     * @throws IllegalArgumentException if {@code destination} is null/blank or {@code payload} is null
+     * @throws MessagingException       if the outbox is not enabled (no {@link OutboxStore} wired)
+     * @see #publishViaOutbox(String, Object)
+     */
+    public <T> String publishViaOutbox(String destination, String routingKey, T payload) {
+        if (destination == null || destination.isBlank()) {
+            throw new IllegalArgumentException("destination must not be null or empty");
+        }
+        if (payload == null) {
+            throw new IllegalArgumentException("payload must not be null");
+        }
+        if (outboxStore == null) {
+            throw new MessagingException("Transactional outbox is not enabled - set "
+                    + "adhar.messaging.outbox.enabled=true (or register an OutboxStore bean)");
+        }
+        String json = outboxCodec.serialize(payload);
+        OutboxEntry entry = OutboxEntry.pending(destination, routingKey, json, payload.getClass().getName());
+        outboxStore.save(entry);
+        log.debug("Enqueued outbox entry {} for destination {}", entry.getId(), destination);
+        return entry.getId();
     }
 
     /**
@@ -1046,10 +1159,19 @@ public class MessagingFacade implements MessagingService {
      */
     @Override
     public <REQ, REP> REP sendAndReceive(String topic, REQ request, Class<REP> replyType) {
+        if (topic == null || topic.isBlank()) {
+            throw new IllegalArgumentException("topic must not be null or empty");
+        }
+        if (request == null) {
+            throw new IllegalArgumentException("request must not be null");
+        }
+        if (requestReplyClient == null) {
+            throw new MessagingException("Request-reply is not available: no messaging broker "
+                    + "(Kafka or RabbitMQ) is configured");
+        }
         log.debug("Sending request-reply to topic: {}", topic);
-        // Framework-specific implementation will override this
-        log.warn("MessagingFacade sendAndReceive not fully implemented - using stub");
-        return null;
+        Duration timeout = Duration.ofMillis(Math.max(1, properties.getCommon().getReply().getTimeoutMs()));
+        return requestReplyClient.sendAndReceive(topic, request, replyType, timeout);
     }
 
     @Override

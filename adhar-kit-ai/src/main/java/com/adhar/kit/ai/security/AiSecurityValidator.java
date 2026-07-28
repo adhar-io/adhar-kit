@@ -1,9 +1,11 @@
 package com.adhar.kit.ai.security;
 
 import com.adhar.kit.ai.config.AiProperties;
+import com.adhar.kit.ai.guardrail.GuardrailChain;
 import com.adhar.kit.commons.exception.ValidationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -12,6 +14,12 @@ import java.util.regex.Pattern;
 /**
  * Security validator for AI requests.
  * Implements content filtering, PII detection, and security policies.
+ *
+ * <p>When a {@link GuardrailChain} bean is present it is used to run the individual
+ * content-safety / PII / sensitive-data checks (which are themselves adapters over
+ * the methods on this class) plus any application-contributed guardrails. When no
+ * chain is wired - e.g. in isolated unit tests - the historical inline checks run
+ * instead, so behaviour is unchanged by default.</p>
  */
 @Slf4j
 @Component
@@ -19,6 +27,18 @@ import java.util.regex.Pattern;
 public class AiSecurityValidator {
 
     private final AiProperties aiProperties;
+
+    /**
+     * Optional guardrail chain, injected by setter so this component keeps its
+     * single-arg constructor (used directly by unit tests). {@code null} when no
+     * chain bean is available, in which case the legacy inline checks are used.
+     */
+    private GuardrailChain guardrailChain;
+
+    @Autowired(required = false)
+    public void setGuardrailChain(GuardrailChain guardrailChain) {
+        this.guardrailChain = guardrailChain;
+    }
 
     // Common PII patterns
     private static final Pattern EMAIL_PATTERN = Pattern.compile(
@@ -44,9 +64,16 @@ public class AiSecurityValidator {
             return;
         }
 
-        validateContentSafety(content);
-        validatePiiCompliance(content);
-        validateSensitiveInformation(content);
+        if (guardrailChain != null) {
+            // The default chain's guardrails delegate back to the individual
+            // validate* methods below, so behaviour matches the legacy sequence
+            // while also running any application-contributed guardrails.
+            guardrailChain.validateRequest(content, userId, tenantId);
+        } else {
+            validateContentSafety(content);
+            validatePiiCompliance(content);
+            validateSensitiveInformation(content);
+        }
         validateUserPermissions(userId, tenantId);
 
         log.debug("Security validation passed for user: {}, tenant: {}", userId, tenantId);
@@ -127,9 +154,26 @@ public class AiSecurityValidator {
     }
 
     /**
-     * Sanitizes content by removing or masking PII.
+     * Sanitizes an outbound model response. When a {@link GuardrailChain} is wired,
+     * the response is passed through the chain's response guardrails (whose default
+     * set includes PII redaction); otherwise the raw {@link #redactPii(String)}
+     * routine is applied. Behaviour is identical for the default chain.
      */
     public String sanitizeContent(String content) {
+        if (content == null) return null;
+        if (guardrailChain != null) {
+            return guardrailChain.applyResponse(content);
+        }
+        return redactPii(content);
+    }
+
+    /**
+     * Raw PII redaction: masks emails, SSNs, credit cards and phone numbers. This
+     * is the routine the default PII guardrail delegates to, and is kept separate
+     * from {@link #sanitizeContent(String)} so guardrail-driven response handling
+     * does not recurse.
+     */
+    public String redactPii(String content) {
         if (content == null) return null;
 
         String sanitized = content;

@@ -184,6 +184,16 @@ public class SpringBootHealthIntegration {
             registry.register(new CertificateExpiryHealthIndicator(certificate));
         }
 
+        // Weighted aggregation: thresholds + per-indicator weights (applied last, once
+        // every built-in indicator has been registered).
+        AdharHealthProperties.WeightedConfig weighted = properties.getWeighted();
+        registry.setWeightedThresholds(weighted.getUpThreshold(), weighted.getDownThreshold());
+        weighted.getWeights().forEach((name, weight) -> {
+            if (weight != null && registry.setWeight(name, weight)) {
+                log.info("Applied health weight {} to indicator {}", weight, name);
+            }
+        });
+
         return registry;
     }
 

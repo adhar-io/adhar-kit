@@ -11,6 +11,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import org.springframework.context.support.StaticMessageSource;
+
+import java.util.Locale;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -115,5 +118,81 @@ class TemplateNotificationServiceTest {
         assertThat(removed).isNotNull();
         assertThat(service.templateCount()).isZero();
         assertThat(service.removeTemplate("welcome")).isNull();
+    }
+
+    @Test
+    @DisplayName("sendFromTemplate with locale resolves localized subject/body from MessageSource")
+    void sendFromTemplateLocalized() {
+        StaticMessageSource messages = new StaticMessageSource();
+        messages.addMessage("welcome.subject", Locale.FRENCH, "Bonjour ${name}");
+        messages.addMessage("welcome.body", Locale.FRENCH, "Bienvenue ${name} sur ${product}");
+        TemplateNotificationService localizedService =
+                new TemplateNotificationService(notificationService, messages);
+        localizedService.registerTemplate(welcomeTemplate());
+
+        localizedService.sendFromTemplate("welcome", "alice@example.com",
+                Map.of("name", "Alice", "product", "Adhar"), Locale.FRENCH);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationService).send(captor.capture());
+        Notification sent = captor.getValue();
+        assertThat(sent.subject()).isEqualTo("Bonjour Alice");
+        assertThat(sent.body()).isEqualTo("Bienvenue Alice sur Adhar");
+    }
+
+    @Test
+    @DisplayName("sendFromTemplate falls back to template defaults when message code missing")
+    void sendFromTemplateLocalizedFallback() {
+        StaticMessageSource messages = new StaticMessageSource();
+        TemplateNotificationService localizedService =
+                new TemplateNotificationService(notificationService, messages);
+        localizedService.registerTemplate(welcomeTemplate());
+
+        localizedService.sendFromTemplate("welcome", "alice@example.com",
+                Map.of("name", "Alice", "product", "Adhar"), Locale.GERMAN);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationService).send(captor.capture());
+        assertThat(captor.getValue().subject()).isEqualTo("Hi Alice");
+        assertThat(captor.getValue().body()).isEqualTo("Welcome Alice to Adhar");
+    }
+
+    @Test
+    @DisplayName("HTML template escapes substituted variable values in the body")
+    void sendFromTemplateHtmlEscaping() {
+        NotificationTemplate htmlTemplate = new NotificationTemplate(
+                "alert",
+                "Alert",
+                NotificationType.EMAIL,
+                "Alert for ${name}",
+                "<p>Hello ${name}</p>",
+                Map.of(TemplateNotificationService.CONTENT_TYPE_METADATA,
+                        TemplateNotificationService.HTML_CONTENT_TYPE));
+        service.registerTemplate(htmlTemplate);
+
+        service.sendFromTemplate("alert", "bob@example.com",
+                Map.of("name", "<b>x</b>&\"'"));
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationService).send(captor.capture());
+        Notification sent = captor.getValue();
+        assertThat(sent.body()).isEqualTo("<p>Hello &lt;b&gt;x&lt;/b&gt;&amp;&quot;&#39;</p>");
+        // subject is plain text, not escaped
+        assertThat(sent.subject()).isEqualTo("Alert for <b>x</b>&\"'");
+        assertThat(sent.metadata()).containsEntry(
+                TemplateNotificationService.CONTENT_TYPE_METADATA, TemplateNotificationService.HTML_CONTENT_TYPE);
+    }
+
+    @Test
+    @DisplayName("sendFromTemplate tolerates null variables map")
+    void sendFromTemplateNullVariables() {
+        service.registerTemplate(welcomeTemplate());
+
+        service.sendFromTemplate("welcome", "alice@example.com", null);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationService).send(captor.capture());
+        // placeholders remain unresolved but no exception is thrown
+        assertThat(captor.getValue().subject()).isEqualTo("Hi ${name}");
     }
 }

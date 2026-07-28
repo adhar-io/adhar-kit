@@ -1,13 +1,20 @@
 package com.adhar.kit.config.autoconfigure;
 
 import com.adhar.kit.config.ConfigFacade;
+import com.adhar.kit.config.audit.ConfigChangeAuditPublisher;
 import com.adhar.kit.config.encryption.PropertyEncryptor;
+import com.adhar.kit.config.endpoint.AdharConfigEndpoint;
+import com.adhar.kit.config.featureflag.FeatureFlag;
+import com.adhar.kit.config.featureflag.FeatureFlagService;
 import com.adhar.kit.config.manager.ConfigManager;
 import com.adhar.kit.config.properties.ConfigProperties;
 import com.adhar.kit.config.refresh.ConfigRefreshManager;
 import com.adhar.kit.config.refresh.RefreshConfigBeanPostProcessor;
+import com.adhar.kit.config.source.impl.ConfigMapConfigSource;
+import com.adhar.kit.config.source.impl.ConsulConfigSource;
 import com.adhar.kit.config.source.impl.EnvironmentConfigSource;
 import com.adhar.kit.config.source.impl.FileConfigSource;
+import com.adhar.kit.config.source.impl.VaultConfigSource;
 import com.adhar.kit.config.validator.ConfigValidationRunner;
 import com.adhar.kit.config.validator.ConfigValidator;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +25,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -25,6 +33,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import jakarta.annotation.PostConstruct;
+import java.util.LinkedHashSet;
 import java.util.Map;
 
 /**
@@ -195,6 +204,49 @@ public class ConfigAutoConfiguration {
     }
 
     /**
+     * Creates the FeatureFlagService, seeded from configured flag definitions.
+     *
+     * @return FeatureFlagService instance
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.config.feature-flags", name = "enabled", havingValue = "true")
+    public FeatureFlagService featureFlagService() {
+        FeatureFlagService service = new FeatureFlagService();
+        properties.getFeatureFlags().getFlags().forEach((flagName, cfg) ->
+                service.setFlag(new FeatureFlag(
+                        flagName,
+                        cfg.isEnabled(),
+                        cfg.getRolloutPercentage(),
+                        new LinkedHashSet<>(cfg.getAllowList()),
+                        new LinkedHashSet<>(cfg.getDenyList()))));
+        log.info("FeatureFlagService initialized with {} flags", service.getFlags().size());
+        return service;
+    }
+
+    /**
+     * Creates the config-change audit publisher and registers it on the
+     * ConfigManager so every property change is emitted as a
+     * {@link com.adhar.kit.config.audit.ConfigChangeEvent}.
+     *
+     * @param configManager the config manager to observe
+     * @param eventPublisher Spring application event publisher
+     * @return ConfigChangeAuditPublisher instance
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.config.audit", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public ConfigChangeAuditPublisher configChangeAuditPublisher(ConfigManager configManager,
+                                                                 ApplicationEventPublisher eventPublisher) {
+        ConfigProperties.AuditConfig auditConfig = properties.getAudit();
+        ConfigChangeAuditPublisher publisher = new ConfigChangeAuditPublisher(
+                eventPublisher, auditConfig.getSecretKeyPatterns(), auditConfig.getMaxEvents());
+        configManager.addChangeListener(publisher);
+        log.info("Config-change audit publisher registered (maxEvents={})", auditConfig.getMaxEvents());
+        return publisher;
+    }
+
+    /**
      * Adds a configuration source based on source config.
      */
     private void addConfigSource(ConfigManager manager, String name, ConfigProperties.SourceConfig sourceConfig) {
@@ -216,11 +268,45 @@ public class ConfigAutoConfiguration {
                     log.debug("Environment source already configured");
                     break;
 
-                case "consul":
-                case "vault":
+                case "vault": {
+                    Map<String, String> auth = sourceConfig.getAuth();
+                    String token = auth.get("token");
+                    String namespace = auth.get("namespace");
+                    int kvVersion = auth.containsKey("kvVersion")
+                            ? Integer.parseInt(auth.get("kvVersion")) : 2;
+                    VaultConfigSource vault = new VaultConfigSource(
+                            sourceConfig.getLocation(), sourceConfig.getPrefix(),
+                            namespace, token, priority, true, kvVersion);
+                    manager.addSource(vault);
+                    log.debug("Added VaultConfigSource '{}' from {} path {} with priority {}",
+                            name, sourceConfig.getLocation(), sourceConfig.getPrefix(), priority);
+                    break;
+                }
+
+                case "consul": {
+                    String token = sourceConfig.getAuth().get("token");
+                    ConsulConfigSource consul = new ConsulConfigSource(
+                            sourceConfig.getLocation(), sourceConfig.getPrefix(), token, priority, true);
+                    manager.addSource(consul);
+                    log.debug("Added ConsulConfigSource '{}' from {} prefix {} with priority {}",
+                            name, sourceConfig.getLocation(), sourceConfig.getPrefix(), priority);
+                    break;
+                }
+
+                case "configmap":
+                case "k8s": {
+                    boolean watch = Boolean.parseBoolean(
+                            sourceConfig.getAuth().getOrDefault("watch", "false"));
+                    ConfigMapConfigSource configMap = new ConfigMapConfigSource(
+                            sourceConfig.getLocation(), priority, watch);
+                    manager.addSource(configMap);
+                    log.debug("Added ConfigMapConfigSource '{}' from {} (watch={}) with priority {}",
+                            name, sourceConfig.getLocation(), watch, priority);
+                    break;
+                }
+
                 case "springcloud":
-                case "k8s":
-                    log.info("Source type '{}' requires additional configuration - see documentation", type);
+                    log.info("Source type '{}' handled by Spring Cloud Config integration", type);
                     break;
 
                 default:
@@ -362,16 +448,30 @@ public class ConfigAutoConfiguration {
     }
 
     /**
-     * HashiCorp Vault integration (conditional on classpath).
+     * Registers the {@code adharconfig} actuator endpoint when Spring Boot
+     * Actuator is on the classpath and the endpoint is enabled.
      */
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnClass(name = "org.springframework.vault.core.VaultTemplate")
-    @ConditionalOnProperty(prefix = "spring.cloud.vault", name = "enabled", havingValue = "true")
-    static class VaultConfiguration {
+    @ConditionalOnClass(name = "org.springframework.boot.actuate.endpoint.annotation.Endpoint")
+    @ConditionalOnProperty(prefix = "adhar.config.endpoint", name = "enabled", havingValue = "true", matchIfMissing = true)
+    static class ConfigEndpointConfiguration {
 
-        @PostConstruct
-        public void logVaultIntegration() {
-            log.info("HashiCorp Vault integration enabled - secrets will be loaded from Vault");
+        /**
+         * Creates the config actuator endpoint.
+         *
+         * @param configManager the config manager
+         * @param featureFlagService optional feature-flag service
+         * @param auditPublisher optional audit publisher
+         * @return AdharConfigEndpoint instance
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        public AdharConfigEndpoint adharConfigEndpoint(
+                ConfigManager configManager,
+                ObjectProvider<FeatureFlagService> featureFlagService,
+                ObjectProvider<ConfigChangeAuditPublisher> auditPublisher) {
+            log.info("Initializing 'adharconfig' actuator endpoint");
+            return new AdharConfigEndpoint(configManager, featureFlagService, auditPublisher);
         }
     }
 }

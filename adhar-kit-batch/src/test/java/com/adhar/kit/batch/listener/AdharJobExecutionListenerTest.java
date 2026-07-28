@@ -1,17 +1,26 @@
 package com.adhar.kit.batch.listener;
 
+import com.adhar.kit.batch.event.BatchJobFailedEvent;
+import com.adhar.kit.batch.metrics.BatchMetrics;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.JobInstance;
 import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.job.parameters.JobParametersBuilder;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.LocalDateTime;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 /**
  * Unit tests for {@link AdharJobExecutionListener}.
@@ -84,6 +93,59 @@ class AdharJobExecutionListenerTest {
     @DisplayName("afterJob uses Duration.ZERO when start or end time is missing")
     void afterJobMissingTimes() {
         var exec = execution(BatchStatus.COMPLETED, ExitStatus.COMPLETED, null, null);
+
+        assertThatCode(() -> listener.afterJob(exec)).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("afterJob records a successful execution to metrics")
+    void afterJobRecordsSuccessMetrics() {
+        var metrics = mock(BatchMetrics.class);
+        var publisher = mock(ApplicationEventPublisher.class);
+        var listener = new AdharJobExecutionListener(metrics, publisher);
+        var start = LocalDateTime.now();
+        var exec = execution(BatchStatus.COMPLETED, ExitStatus.COMPLETED, start, start.plusSeconds(3));
+
+        listener.afterJob(exec);
+
+        verify(metrics).recordJobExecution(eq("sampleJob"), org.mockito.ArgumentMatchers.anyLong(), eq(true));
+        verify(publisher, never()).publishEvent(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("afterJob records failure to metrics and publishes a BatchJobFailedEvent")
+    void afterJobRecordsFailureAndPublishesEvent() {
+        var metrics = mock(BatchMetrics.class);
+        var publisher = mock(ApplicationEventPublisher.class);
+        var listener = new AdharJobExecutionListener(metrics, publisher);
+        var start = LocalDateTime.now();
+        var exec = execution(BatchStatus.FAILED, new ExitStatus("FAILED", "broke"),
+                start, start.plusSeconds(1));
+        exec.addFailureException(new IllegalStateException("boom"));
+
+        listener.afterJob(exec);
+
+        verify(metrics).recordJobExecution(eq("sampleJob"), org.mockito.ArgumentMatchers.anyLong(), eq(false));
+
+        ArgumentCaptor<BatchJobFailedEvent> captor = ArgumentCaptor.forClass(BatchJobFailedEvent.class);
+        verify(publisher).publishEvent(captor.capture());
+        var event = captor.getValue();
+        assertThat(event.getJobName()).isEqualTo("sampleJob");
+        assertThat(event.getStatus()).isEqualTo(BatchStatus.FAILED);
+        assertThat(event.getExitCode()).isEqualTo("FAILED");
+        assertThat(event.getFailureExceptions()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("afterJob tolerates a failing metrics collector")
+    void afterJobToleratesMetricsFailure() {
+        var metrics = mock(BatchMetrics.class);
+        org.mockito.Mockito.doThrow(new RuntimeException("registry down"))
+                .when(metrics).recordJobExecution(org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyBoolean());
+        var listener = new AdharJobExecutionListener(metrics, null);
+        var start = LocalDateTime.now();
+        var exec = execution(BatchStatus.COMPLETED, ExitStatus.COMPLETED, start, start.plusSeconds(1));
 
         assertThatCode(() -> listener.afterJob(exec)).doesNotThrowAnyException();
     }

@@ -2,9 +2,13 @@ package com.adhar.kit.tracing.config;
 
 import com.adhar.kit.tracing.async.TraceContextTaskDecorator;
 import com.adhar.kit.tracing.aspect.TracingAspect;
+import com.adhar.kit.tracing.metrics.SpanMetricsProcessor;
 import com.adhar.kit.tracing.properties.AdharTracingProperties;
+import com.adhar.kit.tracing.sampling.TailSamplingSpanProcessor;
 import com.adhar.kit.tracing.util.AdharTracing;
 import com.adhar.kit.tracing.web.TraceContextMdcFilter;
+import com.adhar.kit.tracing.web.TracingServerSpanFilter;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.tracing.BaggageManager;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.otel.bridge.OtelBaggageManager;
@@ -23,12 +27,15 @@ import io.opentelemetry.sdk.OpenTelemetrySdkBuilder;
 import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.SdkTracerProviderBuilder;
+import io.opentelemetry.sdk.trace.SpanProcessor;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
 import io.opentelemetry.sdk.trace.samplers.Sampler;
 import io.opentelemetry.semconv.ResourceAttributes;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -38,6 +45,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.Environment;
+import org.springframework.util.ClassUtils;
+import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -69,13 +78,13 @@ public class AdharTracingAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean
-    public OpenTelemetry openTelemetry() {
+    public OpenTelemetry openTelemetry(ObjectProvider<SpanMetricsProcessor> spanMetricsProcessorProvider) {
         log.info("Initializing Adhar Tracing with OpenTelemetry support");
 
         OpenTelemetrySdkBuilder builder = OpenTelemetrySdk.builder();
 
         // Configure tracer provider
-        SdkTracerProvider tracerProvider = createTracerProvider();
+        SdkTracerProvider tracerProvider = createTracerProvider(spanMetricsProcessorProvider.getIfAvailable());
         builder.setTracerProvider(tracerProvider);
 
         // Configure context propagators
@@ -164,9 +173,13 @@ public class AdharTracingAutoConfiguration {
     }
 
     /**
-     * Create the tracer provider with exporters and sampling.
+     * Create the tracer provider with exporters, sampling, optional tail sampling and the
+     * optional span-to-metrics bridge.
+     *
+     * @param metricsProcessor the span-to-RED-metrics processor, or {@code null} if disabled
+     *                         or no {@link MeterRegistry} is available
      */
-    private SdkTracerProvider createTracerProvider() {
+    private SdkTracerProvider createTracerProvider(SpanMetricsProcessor metricsProcessor) {
         SdkTracerProviderBuilder builder = SdkTracerProvider.builder();
 
         // Configure resource attributes
@@ -177,17 +190,41 @@ public class AdharTracingAutoConfiguration {
         Sampler sampler = createSampler();
         builder.setSampler(sampler);
 
-        // Configure exporters
-        List<SpanExporter> exporters = createExporters();
-        for (SpanExporter exporter : exporters) {
-            BatchSpanProcessor processor = BatchSpanProcessor.builder(exporter)
+        // Build the exporting processors.
+        List<SpanProcessor> exportProcessors = new ArrayList<>();
+        for (SpanExporter exporter : createExporters()) {
+            exportProcessors.add(BatchSpanProcessor.builder(exporter)
                     .setMaxExportBatchSize(512)
                     .setScheduleDelay(Duration.ofSeconds(5))
-                    .build();
-            builder.addSpanProcessor(processor);
+                    .build());
+        }
+
+        // Wire tail sampling in front of the exporters when requested; otherwise export directly.
+        if (isTailSamplingEnabled()) {
+            SpanProcessor exportDelegate = SpanProcessor.composite(exportProcessors);
+            builder.addSpanProcessor(new TailSamplingSpanProcessor(exportDelegate, properties.getSampling().getTail()));
+            log.info("Tail-based sampling enabled (holdWindowMs={}, latencyThresholdMs={}, keepRate={})",
+                    properties.getSampling().getTail().getHoldWindowMs(),
+                    properties.getSampling().getTail().getLatencyThresholdMs(),
+                    properties.getSampling().getTail().getKeepRate());
+        } else {
+            exportProcessors.forEach(builder::addSpanProcessor);
+        }
+
+        // The metrics bridge observes every recorded span, independent of the sampling decision.
+        if (metricsProcessor != null) {
+            builder.addSpanProcessor(metricsProcessor);
+            log.info("Span-to-RED metrics bridge enabled");
         }
 
         return builder.build();
+    }
+
+    /**
+     * Whether tail-based sampling is selected (mode == "tail").
+     */
+    private boolean isTailSamplingEnabled() {
+        return "tail".equalsIgnoreCase(properties.getSampling().getMode());
     }
 
     /**
@@ -226,6 +263,13 @@ public class AdharTracingAutoConfiguration {
      * Create the sampler based on configuration.
      */
     private Sampler createSampler() {
+        // In tail-sampling mode the tail processor makes the keep/drop decision, so the head
+        // sampler must record every span.
+        if (isTailSamplingEnabled()) {
+            log.info("Tail-based sampling active; head sampler set to alwaysOn so all spans are recorded");
+            return Sampler.alwaysOn();
+        }
+
         double probability = properties.getSampling().getProbability();
 
         if (probability <= 0.0) {
@@ -452,6 +496,87 @@ public class AdharTracingAutoConfiguration {
             registration.addUrlPatterns("/*");
             registration.setName("traceContextMdcFilter");
             return registration;
+        }
+    }
+
+    /**
+     * Registers the {@link TracingServerSpanFilter}, which creates a {@code SERVER} span per
+     * incoming HTTP request, joining any incoming remote trace. It is ordered <em>before</em>
+     * {@link TraceContextMdcFilter} (lower order value) so the SERVER span is the current span
+     * when the MDC filter publishes the traceId/spanId.
+     * <p>
+     * Gated on {@code adhar.tracing.web.server-spans-enabled}. When
+     * {@code detect-existing-instrumentation} is true and any configured
+     * {@code instrumentation-detection-classes} is on the classpath, the filter is registered
+     * but left <em>disabled</em> to avoid emitting duplicate SERVER spans alongside a framework
+     * instrumentation (e.g. the OpenTelemetry Java agent).
+     * </p>
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = {"jakarta.servlet.Filter", "org.springframework.web.filter.OncePerRequestFilter"})
+    @ConditionalOnProperty(prefix = "adhar.tracing.web", name = "server-spans-enabled", havingValue = "true", matchIfMissing = true)
+    public static class TracingServerSpanFilterConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(name = "tracingServerSpanFilterRegistration")
+        public FilterRegistrationBean<TracingServerSpanFilter> tracingServerSpanFilterRegistration(
+                OpenTelemetry openTelemetry, AdharTracingProperties properties) {
+            AdharTracingProperties.WebTracingProperties web = properties.getWeb();
+            TracingServerSpanFilter filter = new TracingServerSpanFilter(openTelemetry, web.getSkipPatterns());
+            FilterRegistrationBean<TracingServerSpanFilter> registration = new FilterRegistrationBean<>(filter);
+            // Before the MDC filter (HIGHEST_PRECEDENCE + 10) so the SERVER span is current.
+            registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 5);
+            registration.addUrlPatterns("/*");
+            registration.setName("tracingServerSpanFilter");
+
+            if (web.isDetectExistingInstrumentation()
+                    && isInstrumentationPresent(web.getInstrumentationDetectionClasses())) {
+                log.info("Detected existing server-span instrumentation on the classpath; "
+                        + "disabling TracingServerSpanFilter to avoid duplicate SERVER spans");
+                registration.setEnabled(false);
+            }
+
+            return registration;
+        }
+
+        /**
+         * Whether any of the given class names is present on the classpath.
+         */
+        static boolean isInstrumentationPresent(String[] classNames) {
+            if (classNames == null) {
+                return false;
+            }
+            ClassLoader classLoader = TracingServerSpanFilterConfiguration.class.getClassLoader();
+            for (String className : classNames) {
+                if (StringUtils.hasText(className) && ClassUtils.isPresent(className.trim(), classLoader)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Registers the {@link SpanMetricsProcessor} (span-to-RED-metrics bridge) as a bean when a
+     * {@link MeterRegistry} is available and {@code adhar.tracing.metrics.enabled} is set. The
+     * processor is consumed by {@link #openTelemetry(ObjectProvider)} and attached to the SDK
+     * tracer provider.
+     * <p>
+     * This lives in a {@code @ConditionalOnClass(MeterRegistry.class)}-gated nested class so
+     * that Micrometer-core-free applications skip it entirely before the {@link MeterRegistry}
+     * method-signature type ever needs to be resolved.
+     * </p>
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(MeterRegistry.class)
+    @ConditionalOnProperty(prefix = "adhar.tracing.metrics", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public static class SpanMetricsConfiguration {
+
+        @Bean
+        @ConditionalOnBean(MeterRegistry.class)
+        @ConditionalOnMissingBean
+        public SpanMetricsProcessor spanMetricsProcessor(MeterRegistry meterRegistry, AdharTracingProperties properties) {
+            return new SpanMetricsProcessor(meterRegistry, properties.getMetrics());
         }
     }
 }

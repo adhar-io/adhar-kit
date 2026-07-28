@@ -1,7 +1,9 @@
 package com.adhar.kit.analytics.config;
 
 import com.adhar.kit.analytics.AnalyticsFacade;
+import com.adhar.kit.analytics.aggregation.EventAggregator;
 import com.adhar.kit.analytics.aspect.*;
+import com.adhar.kit.analytics.flag.LocalFlagEvaluator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -49,11 +51,35 @@ public class AnalyticsAutoConfiguration {
      */
     @Bean(destroyMethod = "shutdown")
     @ConditionalOnMissingBean
-    public AnalyticsFacade analyticsFacade(AnalyticsProperties properties) {
+    public AnalyticsFacade analyticsFacade(AnalyticsProperties properties, LocalFlagEvaluator localFlagEvaluator) {
         log.info("Initializing Analytics Facade (PostHog)");
         AnalyticsFacade facade = AnalyticsFacade.getInstance();
         facade.configure(properties);
+        if (properties.getPostHog().isLocalEvaluationEnabled()) {
+            log.info("Enabling local feature flag evaluation");
+            facade.setLocalFlagEvaluator(localFlagEvaluator);
+        }
         return facade;
+    }
+
+    /**
+     * In-memory event aggregator (funnel, retention, counts, distributions).
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public EventAggregator eventAggregator() {
+        return new EventAggregator();
+    }
+
+    /**
+     * Local feature-flag evaluator (rollout % + property-condition matching)
+     * with fallback to the {@code /decide}-backed cache. Definitions are loaded
+     * by the application (e.g. from PostHog's {@code /local_evaluation}).
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public LocalFlagEvaluator localFlagEvaluator() {
+        return new LocalFlagEvaluator();
     }
 
     /**

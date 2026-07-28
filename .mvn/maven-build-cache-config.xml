@@ -3,7 +3,13 @@
        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
        xsi:schemaLocation="http://maven.apache.org/BUILD-CACHE-CONFIG/1.0.0 https://maven.apache.org/xsd/build-cache-config-1.0.0.xsd">
     <configuration>
-        <enabled>true</enabled>
+        <!--
+          Disabled: on a cache hit the extension skips a module's compile without
+          restoring its target/classes, so that module's own test-compile fails to
+          resolve its main classes (e.g. adhar-kit-rewrite). It also masked test runs
+          ("No tests to run"). Re-enable only with a fix for target/classes restore.
+        -->
+        <enabled>false</enabled>
         <hashAlgorithm>XX</hashAlgorithm>
     </configuration>
 </cache>

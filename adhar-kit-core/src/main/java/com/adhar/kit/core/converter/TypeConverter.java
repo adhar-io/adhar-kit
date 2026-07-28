@@ -1,14 +1,24 @@
 package com.adhar.kit.core.converter;
 
-import java.math.BigDecimal;
-import java.time.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Type converter utility for converting between different types.
  *
  * <p>Provides safe type conversions with default values.</p>
+ *
+ * <p>The {@code convert(...)} methods delegate to the process-wide
+ * {@linkplain ConverterRegistry#getDefault() default converter registry}, which
+ * ships with converters for the common JDK value types and is extensible: custom
+ * {@link TypeConverterSpi} converters can be added programmatically via
+ * {@link #registerConverter(TypeConverterSpi)} or discovered automatically via
+ * the {@link java.util.ServiceLoader}. This keeps the static utility API stable
+ * while allowing new conversions to be plugged in.</p>
  *
  * <p><b>Example - String to Types:</b></p>
  * <pre>{@code
@@ -25,98 +35,56 @@ import java.util.*;
  * Map<String, Object> map = TypeConverter.objectToMap(user);
  * }</pre>
  *
+ * <p><b>Example - custom converter:</b></p>
+ * <pre>{@code
+ * TypeConverter.registerConverter(new TypeConverterSpi<Color>() {
+ *     public Class<Color> targetType() { return Color.class; }
+ *     public Color convert(Object value) { return Color.parse(value.toString()); }
+ * });
+ * Color c = TypeConverter.convert("#ff0000", Color.class);
+ * }</pre>
+ *
  * @author Adhar Platform Team
  * @since 1.0.0
  */
 public class TypeConverter {
 
+    private TypeConverter() {
+    }
+
     /**
-     * Converts value to target type.
+     * Converts value to target type using the default {@link ConverterRegistry}.
      *
      * @param value the value to convert
      * @param targetType target type class
      * @param <T> target type
      * @return converted value or null if conversion fails
      */
-    @SuppressWarnings("unchecked")
     public static <T> T convert(Object value, Class<T> targetType) {
-        if (value == null) {
-            return null;
-        }
+        return ConverterRegistry.getDefault().convert(value, targetType);
+    }
 
-        if (targetType.isInstance(value)) {
-            return (T) value;
-        }
+    /**
+     * Registers a custom converter on the default {@link ConverterRegistry},
+     * making it available to all {@link #convert(Object, Class)} callers.
+     *
+     * @param converter the converter (its {@link TypeConverterSpi#targetType()} must be non-null)
+     * @param <T> the target type
+     */
+    public static <T> void registerConverter(TypeConverterSpi<T> converter) {
+        ConverterRegistry.getDefault().register(converter);
+    }
 
-        String stringValue = value.toString();
-
-        try {
-            // String
-            if (targetType == String.class) {
-                return (T) stringValue;
-            }
-
-            // Integer
-            if (targetType == Integer.class || targetType == int.class) {
-                return (T) Integer.valueOf(stringValue);
-            }
-
-            // Long
-            if (targetType == Long.class || targetType == long.class) {
-                return (T) Long.valueOf(stringValue);
-            }
-
-            // Double
-            if (targetType == Double.class || targetType == double.class) {
-                return (T) Double.valueOf(stringValue);
-            }
-
-            // Float
-            if (targetType == Float.class || targetType == float.class) {
-                return (T) Float.valueOf(stringValue);
-            }
-
-            // Boolean
-            if (targetType == Boolean.class || targetType == boolean.class) {
-                return (T) Boolean.valueOf(stringValue);
-            }
-
-            // BigDecimal
-            if (targetType == BigDecimal.class) {
-                return (T) new BigDecimal(stringValue);
-            }
-
-            // LocalDate
-            if (targetType == LocalDate.class) {
-                return (T) LocalDate.parse(stringValue);
-            }
-
-            // LocalDateTime
-            if (targetType == LocalDateTime.class) {
-                return (T) LocalDateTime.parse(stringValue);
-            }
-
-            // LocalTime
-            if (targetType == LocalTime.class) {
-                return (T) LocalTime.parse(stringValue);
-            }
-
-            // Instant
-            if (targetType == Instant.class) {
-                return (T) Instant.parse(stringValue);
-            }
-
-            // UUID
-            if (targetType == UUID.class) {
-                return (T) UUID.fromString(stringValue);
-            }
-
-        } catch (Exception e) {
-            // Conversion failed, return null
-            return null;
-        }
-
-        return null;
+    /**
+     * Registers a custom converter for an explicit target type on the default
+     * {@link ConverterRegistry}.
+     *
+     * @param targetType the exact target type the converter produces
+     * @param converter the converter
+     * @param <T> the target type
+     */
+    public static <T> void registerConverter(Class<T> targetType, TypeConverterSpi<T> converter) {
+        ConverterRegistry.getDefault().register(targetType, converter);
     }
 
     /**

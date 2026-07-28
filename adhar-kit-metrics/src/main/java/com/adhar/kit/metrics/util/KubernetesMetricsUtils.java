@@ -16,6 +16,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Utility class for Kubernetes-specific metrics.
@@ -45,6 +47,39 @@ public class KubernetesMetricsUtils {
     private static final String POD_NAMESPACE_ENV = "POD_NAMESPACE";
     private static final String NODE_NAME_ENV = "NODE_NAME";
 
+    // -------------------------------------------------------------------------
+    // Container (cgroup) resource metrics
+    // -------------------------------------------------------------------------
+
+    /** Default cgroup mount point present in Linux containers. */
+    public static final String DEFAULT_CGROUP_ROOT = "/sys/fs/cgroup";
+
+    /** Gauge: CPU limit for the container in cores (NaN when unlimited/unknown). */
+    public static final String CPU_LIMIT_METRIC = "adhar.container.cpu.limit.cores";
+    /** Gauge: CPU usage for the container in cores, computed from the delta between polls. */
+    public static final String CPU_USAGE_METRIC = "adhar.container.cpu.usage.cores";
+    /** Gauge: memory limit for the container in bytes (NaN when unlimited/unknown). */
+    public static final String MEMORY_LIMIT_METRIC = "adhar.container.memory.limit.bytes";
+    /** Gauge: current memory usage for the container in bytes. */
+    public static final String MEMORY_USAGE_METRIC = "adhar.container.memory.usage.bytes";
+
+    // Above this a cgroup limit is treated as "unlimited" (cgroup v1 writes a near-Long.MAX sentinel).
+    private static final long UNLIMITED_THRESHOLD = 0x7000_0000_0000_0000L;
+    private static final Pattern USAGE_USEC_PATTERN = Pattern.compile("(?m)^usage_usec\\s+(\\d+)");
+
+    private final Path cgroupRoot;
+
+    // Gauge holders for container resources (NaN = unknown/unavailable).
+    private final AtomicReference<Double> cpuLimitCores = new AtomicReference<>(Double.NaN);
+    private final AtomicReference<Double> cpuUsageCores = new AtomicReference<>(Double.NaN);
+    private final AtomicReference<Double> memoryLimitBytes = new AtomicReference<>(Double.NaN);
+    private final AtomicReference<Double> memoryUsageBytes = new AtomicReference<>(Double.NaN);
+
+    // Previous CPU-usage sample for rate (cores) computation.
+    private double prevCpuUsageSeconds = Double.NaN;
+    private long prevSampleNanos = -1L;
+    private volatile boolean containerGaugesRegistered = false;
+
     /**
      * Constructor for KubernetesMetricsUtils.
      *
@@ -52,8 +87,21 @@ public class KubernetesMetricsUtils {
      * @param properties The metrics properties
      */
     public KubernetesMetricsUtils(MeterRegistry registry, AdharMetricsProperties properties) {
+        this(registry, properties, Paths.get(DEFAULT_CGROUP_ROOT));
+    }
+
+    /**
+     * Constructor allowing a custom cgroup root (primarily for tests that point at fixture
+     * directories emulating the cgroup v1 / v2 file layouts).
+     *
+     * @param registry The meter registry
+     * @param properties The metrics properties
+     * @param cgroupRoot The cgroup filesystem root to read container limits/usage from
+     */
+    public KubernetesMetricsUtils(MeterRegistry registry, AdharMetricsProperties properties, Path cgroupRoot) {
         this.registry = registry;
         this.properties = properties;
+        this.cgroupRoot = cgroupRoot;
 
         if (isRunningInKubernetes()) {
             initializeKubernetesMetadata();
@@ -303,6 +351,236 @@ public class KubernetesMetricsUtils {
         metadataCache.clear();
         isInKubernetes.set(null);
         log.debug("Kubernetes metadata cache cleared");
+    }
+
+    // -------------------------------------------------------------------------
+    // Container (cgroup) resource metrics -- works without any Kubernetes API,
+    // by reading the container's cgroup limit/usage files directly.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Whether a cgroup filesystem is present (auto-detection for the resource poller).
+     *
+     * @return {@code true} when the configured cgroup root is a directory
+     */
+    public boolean isCgroupAvailable() {
+        return Files.isDirectory(cgroupRoot);
+    }
+
+    /**
+     * Whether the cgroup root uses the unified (v2) hierarchy. Detection relies on the
+     * {@code cgroup.controllers} file, which only exists under cgroup v2.
+     *
+     * @return {@code true} for cgroup v2, {@code false} for v1 (or when neither is present)
+     */
+    public boolean isCgroupV2() {
+        return Files.exists(cgroupRoot.resolve("cgroup.controllers"));
+    }
+
+    /**
+     * Reads the container CPU/memory limits and usage from the cgroup filesystem, parsing
+     * both the cgroup v2 (unified) and cgroup v1 file layouts.
+     *
+     * @return a snapshot of the container resources; individual fields are {@link Double#NaN}
+     *         when the corresponding file is absent, unreadable, or denotes "unlimited"
+     */
+    public CgroupStats readCgroupStats() {
+        return isCgroupV2() ? readCgroupV2() : readCgroupV1();
+    }
+
+    /**
+     * Registers the container resource gauges (once) and refreshes their values from the
+     * current cgroup snapshot. The CPU-usage gauge is expressed in cores and derived from the
+     * delta of cumulative CPU seconds between successive invocations.
+     */
+    public void collectContainerResourceMetrics() {
+        registerContainerGauges();
+
+        CgroupStats stats = readCgroupStats();
+        cpuLimitCores.set(stats.cpuLimitCores());
+        memoryLimitBytes.set(stats.memoryLimitBytes());
+        memoryUsageBytes.set(stats.memoryUsageBytes());
+
+        long nowNanos = System.nanoTime();
+        double usageSeconds = stats.cpuUsageSeconds();
+        if (!Double.isNaN(usageSeconds) && !Double.isNaN(prevCpuUsageSeconds) && prevSampleNanos > 0) {
+            double elapsedSeconds = (nowNanos - prevSampleNanos) / 1_000_000_000.0;
+            if (elapsedSeconds > 0) {
+                double cores = (usageSeconds - prevCpuUsageSeconds) / elapsedSeconds;
+                cpuUsageCores.set(Math.max(0.0, cores));
+            }
+        }
+        prevCpuUsageSeconds = usageSeconds;
+        prevSampleNanos = nowNanos;
+
+        log.debug("Container resources: cpuLimit={} cores, cpuUsage={} cores, memLimit={} B, memUsage={} B",
+                cpuLimitCores.get(), cpuUsageCores.get(), memoryLimitBytes.get(), memoryUsageBytes.get());
+    }
+
+    private synchronized void registerContainerGauges() {
+        if (containerGaugesRegistered) {
+            return;
+        }
+        registry.gauge(CPU_LIMIT_METRIC, cpuLimitCores, ref -> ref.get());
+        registry.gauge(CPU_USAGE_METRIC, cpuUsageCores, ref -> ref.get());
+        registry.gauge(MEMORY_LIMIT_METRIC, memoryLimitBytes, ref -> ref.get());
+        registry.gauge(MEMORY_USAGE_METRIC, memoryUsageBytes, ref -> ref.get());
+        containerGaugesRegistered = true;
+        log.debug("Registered container resource gauges under {}", cgroupRoot);
+    }
+
+    private CgroupStats readCgroupV2() {
+        double cpuLimit = parseCpuMaxV2(readFile(cgroupRoot.resolve("cpu.max")));
+        double cpuUsage = parseCpuUsageV2(readFile(cgroupRoot.resolve("cpu.stat")));
+        double memLimit = parseMemoryLimit(readFile(cgroupRoot.resolve("memory.max")));
+        double memUsage = parseBytes(readFile(cgroupRoot.resolve("memory.current")));
+        return new CgroupStats(cpuLimit, cpuUsage, memLimit, memUsage, true);
+    }
+
+    private CgroupStats readCgroupV1() {
+        double cpuLimit = parseCpuQuotaV1(
+                readFile(cgroupRoot.resolve("cpu/cpu.cfs_quota_us")),
+                readFile(cgroupRoot.resolve("cpu/cpu.cfs_period_us")));
+        // cpuacct.usage is in nanoseconds; convert to seconds.
+        double cpuUsageNanos = parseBytes(readFile(cgroupRoot.resolve("cpuacct/cpuacct.usage")));
+        double cpuUsage = Double.isNaN(cpuUsageNanos) ? Double.NaN : cpuUsageNanos / 1_000_000_000.0;
+        double memLimit = parseMemoryLimit(readFile(cgroupRoot.resolve("memory/memory.limit_in_bytes")));
+        double memUsage = parseBytes(readFile(cgroupRoot.resolve("memory/memory.usage_in_bytes")));
+        return new CgroupStats(cpuLimit, cpuUsage, memLimit, memUsage, false);
+    }
+
+    /**
+     * Parses a cgroup v2 {@code cpu.max} value ("{@code <quota> <period>}" or
+     * "{@code max <period>}") into a CPU-core limit.
+     *
+     * @param content the raw file content (may be null)
+     * @return cores allowed, or {@link Double#NaN} when unlimited ("max") or unparseable
+     */
+    static double parseCpuMaxV2(String content) {
+        if (content == null) {
+            return Double.NaN;
+        }
+        String[] parts = content.trim().split("\\s+");
+        if (parts.length < 2 || "max".equals(parts[0])) {
+            return Double.NaN;
+        }
+        try {
+            double quota = Double.parseDouble(parts[0]);
+            double period = Double.parseDouble(parts[1]);
+            return period > 0 ? quota / period : Double.NaN;
+        } catch (NumberFormatException e) {
+            return Double.NaN;
+        }
+    }
+
+    /**
+     * Parses a cgroup v1 CPU quota/period pair into a CPU-core limit.
+     *
+     * @param quotaContent content of {@code cpu.cfs_quota_us} (may be null); -1 means unlimited
+     * @param periodContent content of {@code cpu.cfs_period_us} (may be null)
+     * @return cores allowed, or {@link Double#NaN} when unlimited or unparseable
+     */
+    static double parseCpuQuotaV1(String quotaContent, String periodContent) {
+        Long quota = parseLong(quotaContent);
+        Long period = parseLong(periodContent);
+        if (quota == null || period == null || quota < 0 || period <= 0) {
+            return Double.NaN;
+        }
+        return (double) quota / (double) period;
+    }
+
+    /**
+     * Extracts the {@code usage_usec} value from a cgroup v2 {@code cpu.stat} file and
+     * converts it to seconds.
+     *
+     * @param content the raw file content (may be null)
+     * @return cumulative CPU seconds, or {@link Double#NaN} when absent/unparseable
+     */
+    static double parseCpuUsageV2(String content) {
+        if (content == null) {
+            return Double.NaN;
+        }
+        Matcher matcher = USAGE_USEC_PATTERN.matcher(content);
+        if (matcher.find()) {
+            try {
+                return Long.parseLong(matcher.group(1)) / 1_000_000.0;
+            } catch (NumberFormatException e) {
+                return Double.NaN;
+            }
+        }
+        return Double.NaN;
+    }
+
+    /**
+     * Parses a memory limit value, treating "max" and near-{@code Long.MAX_VALUE} sentinels
+     * (used by cgroup v1 for "unlimited") as unlimited.
+     *
+     * @param content the raw file content (may be null)
+     * @return limit in bytes, or {@link Double#NaN} when unlimited/unparseable
+     */
+    static double parseMemoryLimit(String content) {
+        if (content == null) {
+            return Double.NaN;
+        }
+        String trimmed = content.trim();
+        if ("max".equals(trimmed)) {
+            return Double.NaN;
+        }
+        Long value = parseLong(trimmed);
+        if (value == null || value < 0 || value >= UNLIMITED_THRESHOLD) {
+            return Double.NaN;
+        }
+        return (double) value;
+    }
+
+    /**
+     * Parses a plain numeric (byte/count) value.
+     *
+     * @param content the raw file content (may be null)
+     * @return the parsed value, or {@link Double#NaN} when absent/unparseable
+     */
+    static double parseBytes(String content) {
+        Long value = parseLong(content);
+        return value == null ? Double.NaN : (double) value;
+    }
+
+    private static Long parseLong(String content) {
+        if (content == null) {
+            return null;
+        }
+        String trimmed = content.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(trimmed);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String readFile(Path path) {
+        try {
+            if (Files.isRegularFile(path)) {
+                return Files.readString(path);
+            }
+        } catch (IOException e) {
+            log.debug("Failed to read cgroup file {}: {}", path, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Immutable snapshot of container CPU/memory limits and usage read from cgroup files.
+     *
+     * @param cpuLimitCores CPU limit in cores ({@link Double#NaN} when unlimited/unknown)
+     * @param cpuUsageSeconds cumulative CPU seconds consumed ({@link Double#NaN} when unknown)
+     * @param memoryLimitBytes memory limit in bytes ({@link Double#NaN} when unlimited/unknown)
+     * @param memoryUsageBytes current memory usage in bytes ({@link Double#NaN} when unknown)
+     * @param v2 whether the values were read from a cgroup v2 (unified) hierarchy
+     */
+    public record CgroupStats(double cpuLimitCores, double cpuUsageSeconds,
+                              double memoryLimitBytes, double memoryUsageBytes, boolean v2) {
     }
 
     /**

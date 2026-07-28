@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.scheduler;
 
+import com.adhar.kit.batch.lock.SchedulerLock;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.parameters.JobParameters;
@@ -9,8 +10,8 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.support.CronTrigger;
 
+import java.time.Duration;
 import java.util.Collections;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
@@ -35,22 +36,49 @@ import java.util.concurrent.ScheduledFuture;
 @Slf4j
 public class BatchScheduler {
 
+    /** Default maximum duration a scheduled-job lock is held before it expires. */
+    private static final Duration DEFAULT_LOCK_TTL = Duration.ofMinutes(30);
+
     private final TaskScheduler taskScheduler;
     private final JobLauncher jobLauncher;
     private final ApplicationContext applicationContext;
+    private final SchedulerLock schedulerLock;
+    private final Duration lockTtl;
     private final ConcurrentHashMap<String, ScheduledFuture<?>> scheduledJobs = new ConcurrentHashMap<>();
 
     /**
-     * Constructs a new {@code BatchScheduler}.
+     * Constructs a new {@code BatchScheduler} without multi-instance locking.
      *
      * @param taskScheduler      the Spring task scheduler used for cron-based scheduling
      * @param jobLauncher        the Spring Batch job launcher
      * @param applicationContext the application context for looking up job beans by name
      */
     public BatchScheduler(TaskScheduler taskScheduler, JobLauncher jobLauncher, ApplicationContext applicationContext) {
+        this(taskScheduler, jobLauncher, applicationContext, null, DEFAULT_LOCK_TTL);
+    }
+
+    /**
+     * Constructs a new {@code BatchScheduler} with an optional {@link SchedulerLock}
+     * for multi-instance cron safety.
+     *
+     * <p>When a lock is supplied, each scheduled execution first attempts to
+     * acquire the lock named after the job; if the lock is held elsewhere the
+     * execution is skipped on this instance, ensuring the job runs on only one
+     * node per fire time.</p>
+     *
+     * @param taskScheduler      the Spring task scheduler used for cron-based scheduling
+     * @param jobLauncher        the Spring Batch job launcher
+     * @param applicationContext the application context for looking up job beans by name
+     * @param schedulerLock      the distributed scheduler lock, or {@code null} to disable locking
+     * @param lockTtl            the maximum time a lock is held before it expires
+     */
+    public BatchScheduler(TaskScheduler taskScheduler, JobLauncher jobLauncher,
+                          ApplicationContext applicationContext, SchedulerLock schedulerLock, Duration lockTtl) {
         this.taskScheduler = taskScheduler;
         this.jobLauncher = jobLauncher;
         this.applicationContext = applicationContext;
+        this.schedulerLock = schedulerLock;
+        this.lockTtl = lockTtl != null ? lockTtl : DEFAULT_LOCK_TTL;
     }
 
     /**
@@ -72,21 +100,42 @@ public class BatchScheduler {
 
         var trigger = new CronTrigger(cronExpression);
 
-        ScheduledFuture<?> future = taskScheduler.schedule(() -> {
-            try {
-                var job = applicationContext.getBean(jobName, Job.class);
-                JobParameters params = new JobParametersBuilder()
-                        .addLong("run.id", System.currentTimeMillis())
-                        .toJobParameters();
-                jobLauncher.run(job, params);
-                log.info("Scheduled job [{}] executed successfully", jobName);
-            } catch (Exception e) {
-                log.error("Scheduled job [{}] failed: {}", jobName, e.getMessage(), e);
-            }
-        }, trigger);
+        ScheduledFuture<?> future = taskScheduler.schedule(() -> runScheduled(jobName), trigger);
 
         scheduledJobs.put(jobName, future);
         log.info("Scheduled job [{}] with cron expression: {}", jobName, cronExpression);
+    }
+
+    /**
+     * Executes a scheduled job, honouring the optional {@link SchedulerLock} so
+     * that only one instance runs the job per fire time in a clustered
+     * deployment.
+     *
+     * @param jobName the Spring bean name of the job to run
+     */
+    void runScheduled(String jobName) {
+        boolean lockAcquired = false;
+        if (schedulerLock != null) {
+            lockAcquired = schedulerLock.tryLock(jobName, lockTtl);
+            if (!lockAcquired) {
+                log.info("Skipping scheduled job [{}] - lock held by another instance", jobName);
+                return;
+            }
+        }
+        try {
+            var job = applicationContext.getBean(jobName, Job.class);
+            JobParameters params = new JobParametersBuilder()
+                    .addLong("run.id", System.currentTimeMillis())
+                    .toJobParameters();
+            jobLauncher.run(job, params);
+            log.info("Scheduled job [{}] executed successfully", jobName);
+        } catch (Exception e) {
+            log.error("Scheduled job [{}] failed: {}", jobName, e.getMessage(), e);
+        } finally {
+            if (lockAcquired) {
+                schedulerLock.unlock(jobName);
+            }
+        }
     }
 
     /**

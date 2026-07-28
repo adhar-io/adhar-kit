@@ -6,7 +6,11 @@ import com.adhar.kit.metrics.auto.MetricsInterceptor;
 import com.adhar.kit.metrics.auto.PlatformMetrics;
 import com.adhar.kit.metrics.properties.AdharMetricsProperties;
 import com.adhar.kit.metrics.slo.SloRecorder;
+import com.adhar.kit.metrics.trace.AdharPrometheusSpanContext;
+import com.adhar.kit.metrics.trace.OpenTelemetryTraceContext;
+import com.adhar.kit.metrics.trace.TraceContext;
 import com.adhar.kit.metrics.util.AdharMetrics;
+import com.adhar.kit.metrics.util.CgroupMetricsPoller;
 import com.adhar.kit.metrics.util.KubernetesMetricsUtils;
 import com.adhar.kit.metrics.util.MetricsUtils;
 import com.adhar.kit.metrics.util.TagCardinalityLimiter;
@@ -319,9 +323,85 @@ public class AdharMetricsAutoConfiguration {
         @ConditionalOnMissingBean
         public HttpMetricsFilter httpMetricsFilter(MeterRegistry meterRegistry,
                                                    TagCardinalityLimiter tagCardinalityLimiter,
-                                                   ObjectProvider<SloRecorder> sloRecorder) {
-            return new HttpMetricsFilter(meterRegistry, tagCardinalityLimiter, sloRecorder.getIfAvailable());
+                                                   ObjectProvider<SloRecorder> sloRecorder,
+                                                   ObjectProvider<TraceContext> traceContext) {
+            return new HttpMetricsFilter(meterRegistry, tagCardinalityLimiter,
+                    sloRecorder.getIfAvailable(), traceContext.getIfAvailable());
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Trace Correlation / Exemplars (optional: gated on the tracing libraries)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Provides a {@link TraceContext} backed by the OpenTelemetry Span API when it is on the
+     * classpath. The bean lets {@link HttpMetricsFilter} publish the current trace/span id to
+     * the SLF4J MDC (cardinality-safe log/metric correlation) and feeds the Prometheus
+     * exemplar bridge below.
+     */
+    @Configuration
+    @ConditionalOnClass(name = "io.opentelemetry.api.trace.Span")
+    public static class OpenTelemetryTraceConfiguration {
+
+        /**
+         * Creates the OpenTelemetry-backed trace context.
+         *
+         * @return the trace context bean
+         */
+        @Bean
+        @ConditionalOnMissingBean(TraceContext.class)
+        public TraceContext openTelemetryTraceContext() {
+            log.debug("Registering OpenTelemetry-backed TraceContext for metric/trace correlation");
+            return new OpenTelemetryTraceContext();
+        }
+    }
+
+    /**
+     * Provides a Prometheus exemplar {@code SpanContext} bean when both the Prometheus client
+     * and a {@link TraceContext} are available. Spring Boot's Prometheus auto-configuration
+     * wires this bean into the {@code PrometheusMeterRegistry}, attaching exemplars (carrying
+     * the current trace id) to counters and histograms -- including the timers recorded by
+     * {@link HttpMetricsFilter} and the metrics aspect -- without inflating cardinality.
+     */
+    @Configuration
+    @ConditionalOnClass(name = "io.prometheus.metrics.tracer.common.SpanContext")
+    public static class PrometheusExemplarConfiguration {
+
+        /**
+         * Creates the Prometheus exemplar bridge over the current {@link TraceContext}.
+         *
+         * @param traceContext the trace context to read the current span from
+         * @return the Prometheus {@code SpanContext} bean
+         */
+        @Bean
+        @ConditionalOnMissingBean(io.prometheus.metrics.tracer.common.SpanContext.class)
+        public io.prometheus.metrics.tracer.common.SpanContext adharPrometheusSpanContext(
+                TraceContext traceContext) {
+            log.debug("Registering Prometheus exemplar SpanContext bridge for trace correlation");
+            return new AdharPrometheusSpanContext(traceContext);
+        }
+    }
+
+    /**
+     * Creates and starts the scheduled container (cgroup) resource poller. Enabled via
+     * {@code adhar.metrics.kubernetes.resource-polling.enabled}; it additionally auto-detects
+     * the cgroup filesystem at runtime and stays idle when none is present. The poller reads
+     * both cgroup v1 and v2 layouts and needs no Kubernetes API access.
+     */
+    @Bean(destroyMethod = "shutdown")
+    @ConditionalOnProperty(prefix = "adhar.metrics.kubernetes.resource-polling", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public CgroupMetricsPoller cgroupMetricsPoller(MeterRegistry meterRegistry,
+                                                   ObjectProvider<KubernetesMetricsUtils> kubernetesMetricsUtils) {
+        KubernetesMetricsUtils utils = kubernetesMetricsUtils.getIfAvailable(
+                () -> new KubernetesMetricsUtils(meterRegistry, properties));
+        CgroupMetricsPoller poller = new CgroupMetricsPoller(utils,
+                properties.getKubernetes().getResourcePolling().getIntervalSeconds());
+        poller.start();
+        log.debug("Registered CgroupMetricsPoller (interval={}s)",
+                properties.getKubernetes().getResourcePolling().getIntervalSeconds());
+        return poller;
     }
 
     // -------------------------------------------------------------------------

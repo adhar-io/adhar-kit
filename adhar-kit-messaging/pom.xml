@@ -54,6 +54,17 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Spring JDBC (Optional) - powers the JDBC-backed transactional outbox store
+             (JdbcOutboxStore). Gated at runtime by @ConditionalOnClass(JdbcTemplate.class)
+             in MessagingAutoConfiguration so the module works fine without it on the
+             classpath (falling back to the in-memory store). Version managed by the
+             Spring Boot BOM. -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jdbc</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Micrometer (Optional) - powers MessagingMetrics; gated at runtime by
              @ConditionalOnClass(MeterRegistry.class) in MessagingAutoConfiguration so the
              module works fine without it on the classpath. Version managed by the
@@ -92,6 +103,13 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- H2 in-memory database - exercises the JDBC-backed outbox store (JdbcOutboxStore)
+             end-to-end without Docker. Version managed by the Spring Boot BOM. -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

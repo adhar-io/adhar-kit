@@ -98,6 +98,60 @@ public class AnalyticsProperties {
          * they are re-fetched from the PostHog {@code /decide} endpoint.
          */
         private long featureFlagCacheTtlSeconds = 60;
+
+        /**
+         * Enable local flag evaluation via
+         * {@link com.adhar.kit.analytics.flag.LocalFlagEvaluator}. When on, flags
+         * with cached local definitions are evaluated in-process (rollout % +
+         * property conditions), falling back to {@code /decide} when a flag
+         * cannot be decided locally. Off by default.
+         */
+        private boolean localEvaluationEnabled = false;
+
+        /**
+         * Enable the failed-batch retry buffer in
+         * {@link com.adhar.kit.analytics.batching.BatchingEventSender}. When off,
+         * batches that fail to send are logged and dropped (legacy behaviour).
+         */
+        private boolean retryEnabled = true;
+
+        /**
+         * Maximum delivery attempts for a failed batch before it is spilled or dropped.
+         */
+        private int retryMaxAttempts = 3;
+
+        /**
+         * Backoff before the first retry, in milliseconds.
+         */
+        private long retryInitialBackoffMillis = 500;
+
+        /**
+         * Exponential backoff multiplier applied per retry attempt.
+         */
+        private double retryBackoffMultiplier = 2.0;
+
+        /**
+         * Maximum backoff between retries, in milliseconds.
+         */
+        private long retryMaxBackoffMillis = 30_000;
+
+        /**
+         * Maximum number of failed batches held in the in-memory retry queue.
+         */
+        private int retryMaxBatches = 1_000;
+
+        /**
+         * Enable the optional file-based offline spill: batches that exhaust
+         * retries (or overflow the retry queue) are persisted as JSONL and
+         * reloaded on startup. Off by default.
+         */
+        private boolean spillEnabled = false;
+
+        /**
+         * Directory for the offline spill file. Required when
+         * {@code spillEnabled} is true.
+         */
+        private String spillDirectory;
     }
 
     /**

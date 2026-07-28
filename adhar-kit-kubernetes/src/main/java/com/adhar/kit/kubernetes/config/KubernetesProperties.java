@@ -83,6 +83,11 @@ public class KubernetesProperties {
     private GracefulShutdownConfig gracefulShutdown = new GracefulShutdownConfig();
 
     /**
+     * Health probe (readiness/liveness) configuration.
+     */
+    private ProbesConfig probes = new ProbesConfig();
+
+    /**
      * Service discovery configuration.
      */
     @Data
@@ -90,7 +95,26 @@ public class KubernetesProperties {
         private boolean enabled = true;
         private boolean allNamespaces = false;
         private String serviceLabel = "app";
+        /**
+         * Enable the TTL cache in front of live service discovery. When disabled
+         * every lookup lists directly against the API server.
+         */
+        private boolean cacheEnabled = true;
+        /**
+         * Cache time-to-live in milliseconds; also used as the discovery cache
+         * refresh interval. Non-positive disables caching.
+         */
         private long cacheRefreshInterval = 30000; // 30 seconds
+    }
+
+    /**
+     * Health probe configuration. Gates registration of the Kubernetes readiness
+     * and liveness {@code HealthIndicator} beans (only active when Spring Boot
+     * Actuator is on the classpath).
+     */
+    @Data
+    public static class ProbesConfig {
+        private boolean enabled = true;
     }
 
     /**

@@ -63,6 +63,11 @@ class SpringToMicronautRecipeTest implements RewriteTest {
     @Test
     void migratesRestControllerToMicronautController() {
         rewriteRun(
+                // spring-web is not on this module's test classpath, so parse a stub of the
+                // annotation alongside the usage to give the AST proper type attribution
+                // (same pattern as AdoptCloudEventsTest). The stub itself is left unchanged
+                // because ChangeType runs with ignoreDefinition=true.
+                java("package org.springframework.web.bind.annotation; public @interface RestController {}"),
                 java(
                         """
                         import org.springframework.web.bind.annotation.RestController;

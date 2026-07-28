@@ -1,6 +1,7 @@
 package com.adhar.kit.config.properties;
 
 import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -44,6 +45,7 @@ import java.util.Map;
  * @since 1.0.0
  */
 @Data
+@ConfigurationProperties(prefix = "adhar.config")
 public class ConfigProperties {
 
     /**
@@ -80,6 +82,21 @@ public class ConfigProperties {
      * Validation configuration.
      */
     private ValidationConfig validation = new ValidationConfig();
+
+    /**
+     * Feature flag configuration.
+     */
+    private FeatureFlagsConfig featureFlags = new FeatureFlagsConfig();
+
+    /**
+     * Config-change audit configuration.
+     */
+    private AuditConfig audit = new AuditConfig();
+
+    /**
+     * Actuator endpoint configuration.
+     */
+    private EndpointConfig endpoint = new EndpointConfig();
 
     /**
      * Configuration source settings.
@@ -223,6 +240,81 @@ public class ConfigProperties {
          * Regex pattern rules per property key (validated when the key is present).
          */
         private Map<String, String> patterns = new HashMap<>();
+    }
+
+    /**
+     * Feature flag configuration.
+     */
+    @Data
+    public static class FeatureFlagsConfig {
+        /**
+         * Enable the feature flag service.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Flag definitions keyed by flag name.
+         */
+        private Map<String, FlagConfig> flags = new HashMap<>();
+    }
+
+    /**
+     * A single feature flag definition.
+     */
+    @Data
+    public static class FlagConfig {
+        /**
+         * Global on/off switch for the flag.
+         */
+        private boolean enabled = true;
+
+        /**
+         * Rollout percentage (0-100) applied via deterministic key bucketing.
+         */
+        private int rolloutPercentage = 100;
+
+        /**
+         * Keys always enabled (overrides rollout, not deny).
+         */
+        private List<String> allowList = new ArrayList<>();
+
+        /**
+         * Keys always disabled (highest precedence).
+         */
+        private List<String> denyList = new ArrayList<>();
+    }
+
+    /**
+     * Config-change audit configuration.
+     */
+    @Data
+    public static class AuditConfig {
+        /**
+         * Enable publishing of config-change audit events.
+         */
+        private boolean enabled = true;
+
+        /**
+         * Maximum number of recent change events retained in memory.
+         */
+        private int maxEvents = 100;
+
+        /**
+         * Case-insensitive key substrings whose values are masked in audit events
+         * and the actuator endpoint. Empty means use built-in defaults.
+         */
+        private List<String> secretKeyPatterns = new ArrayList<>();
+    }
+
+    /**
+     * Actuator endpoint configuration.
+     */
+    @Data
+    public static class EndpointConfig {
+        /**
+         * Enable the {@code adharconfig} actuator endpoint.
+         */
+        private boolean enabled = true;
     }
 }
 

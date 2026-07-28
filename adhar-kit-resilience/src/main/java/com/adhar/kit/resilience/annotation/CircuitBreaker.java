@@ -35,6 +35,15 @@ public @interface CircuitBreaker {
     String fallbackMethod() default "";
 
     /**
+     * Enables the "last known good" fallback cache for this method. When {@code true},
+     * successful results are cached and, if a later call fails (e.g. while the breaker is
+     * open) with no {@link #fallbackMethod()} configured, the most recent cached result is
+     * returned instead of propagating the failure. Requires the fallback cache bean.
+     * @return whether the fallback cache is enabled for this method
+     */
+    boolean fallbackCache() default false;
+
+    /**
      * Failure rate threshold in percentage. {@code -1} means use default config.
      * @return failure rate threshold
      */

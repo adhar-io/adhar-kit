@@ -7,11 +7,19 @@ import com.adhar.kit.security.audit.AuditEventSink;
 import com.adhar.kit.security.audit.SecurityAuditLogger;
 import com.adhar.kit.security.audit.Slf4jAuditEventSink;
 import com.adhar.kit.security.config.AdharSecurityAutoConfiguration;
+import com.adhar.kit.security.jwks.JwksController;
+import com.adhar.kit.security.jwks.JwksKeyManager;
 import com.adhar.kit.security.properties.AdharSecurityProperties;
+import com.adhar.kit.security.ratelimit.InMemoryRateLimiterStore;
+import com.adhar.kit.security.ratelimit.RateLimiterStore;
+import com.adhar.kit.security.ratelimit.RedisRateLimiterStore;
+import com.adhar.kit.security.relay.BearerTokenRelayInterceptor;
 import com.adhar.kit.security.service.ApiKeyService;
 import com.adhar.kit.security.service.InMemoryRefreshTokenStore;
+import com.adhar.kit.security.service.RedisRefreshTokenStore;
 import com.adhar.kit.security.service.RefreshTokenStore;
 import com.adhar.kit.security.service.TokenRefreshService;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import com.adhar.kit.security.spring.SpringSecurityAdapter;
 import com.adhar.kit.security.util.JwtUtils;
 import org.junit.jupiter.api.Test;
@@ -178,6 +186,98 @@ public class AdharSecurityAutoConfigurationTest {
                     assertThat(context).hasSingleBean(SecurityAuditLogger.class);
                 });
         SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testDefaultRateLimiterStoreIsInMemory() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(RateLimiterStore.class);
+                    assertThat(context.getBean(RateLimiterStore.class))
+                            .isInstanceOf(InMemoryRateLimiterStore.class);
+                });
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testRedisRateLimiterStoreSelectedWhenConfigured() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class, RedisMockConfiguration.class)
+                .withPropertyValues(
+                        "adhar.security.rate-limit.enabled=true",
+                        "adhar.security.rate-limit.store=redis")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(RateLimiterStore.class);
+                    assertThat(context.getBean(RateLimiterStore.class))
+                            .isInstanceOf(RedisRateLimiterStore.class);
+                });
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testRedisRefreshTokenStoreSelectedWhenConfigured() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class, RedisMockConfiguration.class)
+                .withPropertyValues(
+                        "adhar.security.token-refresh.enabled=true",
+                        "adhar.security.token-refresh.store=redis",
+                        "adhar.security.token-refresh.secret=this-is-a-very-long-test-secret-key-256bits!!")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(RefreshTokenStore.class);
+                    assertThat(context.getBean(RefreshTokenStore.class))
+                            .isInstanceOf(RedisRefreshTokenStore.class);
+                    assertThat(context).hasSingleBean(TokenRefreshService.class);
+                });
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testTokenRelayInterceptorLoadsWhenEnabled() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .withPropertyValues("adhar.security.token-relay.enabled=true")
+                .run(context -> assertThat(context).hasSingleBean(BearerTokenRelayInterceptor.class));
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testTokenRelayInterceptorAbsentByDefault() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .run(context -> assertThat(context).doesNotHaveBean(BearerTokenRelayInterceptor.class));
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testJwksBeansLoadWhenEnabled() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .withPropertyValues("adhar.security.jwks.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(JwksKeyManager.class);
+                    assertThat(context).hasSingleBean(JwksController.class);
+                });
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Test
+    public void testJwksBeansAbsentByDefault() {
+        contextRunner
+                .withUserConfiguration(MockConfiguration.class)
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(JwksKeyManager.class);
+                    assertThat(context).doesNotHaveBean(JwksController.class);
+                });
+        SecurityFacade.getInstance().clearDelegate();
+    }
+
+    @Configuration
+    static class RedisMockConfiguration {
+        @Bean
+        public StringRedisTemplate stringRedisTemplate() {
+            return mock(StringRedisTemplate.class);
+        }
     }
 
     @Configuration

@@ -1,0 +1,148 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "title": "Adhar Kit - JVM & Container",
+  "uid": "adhar-jvm",
+  "tags": ["adhar-kit", "jvm", "container"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "Data source",
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Memory",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Heap memory (bytes)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "adhar_jvm_memory_heap_used", "legendFormat": "used" },
+        { "refId": "B", "expr": "adhar_jvm_memory_heap_committed", "legendFormat": "committed" },
+        { "refId": "C", "expr": "adhar_jvm_memory_heap_max", "legendFormat": "max" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Non-heap memory (bytes)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "adhar_jvm_memory_nonheap_used", "legendFormat": "used" },
+        { "refId": "B", "expr": "adhar_jvm_memory_nonheap_committed", "legendFormat": "committed" }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Threads / Classes / GC",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Threads",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "adhar_jvm_threads_live", "legendFormat": "live" },
+        { "refId": "B", "expr": "adhar_jvm_threads_daemon", "legendFormat": "daemon" },
+        { "refId": "C", "expr": "adhar_jvm_threads_peak", "legendFormat": "peak" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Loaded classes",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "adhar_jvm_classes_loaded", "legendFormat": "loaded" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "GC average pause (s)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (collector) (rate(adhar_jvm_gc_pause_seconds_sum[$__rate_interval])) / clamp_min(sum by (collector) (rate(adhar_jvm_gc_pause_seconds_count[$__rate_interval])), 1e-9)",
+          "legendFormat": "{{collector}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "CPU / File descriptors",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 }
+    },
+    {
+      "type": "timeseries",
+      "title": "System load average",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 19 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "adhar_jvm_cpu_system_load_average", "legendFormat": "load avg" },
+        { "refId": "B", "expr": "adhar_jvm_cpu_processors", "legendFormat": "processors" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "File descriptors",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 19 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "adhar_jvm_file_descriptors_open", "legendFormat": "open" },
+        { "refId": "B", "expr": "adhar_jvm_file_descriptors_max", "legendFormat": "max" }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Container (cgroup) resources",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Container CPU (cores)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "adhar_container_cpu_usage_cores", "legendFormat": "usage" },
+        { "refId": "B", "expr": "adhar_container_cpu_limit_cores", "legendFormat": "limit" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Container memory (bytes)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "adhar_container_memory_usage_bytes", "legendFormat": "usage" },
+        { "refId": "B", "expr": "adhar_container_memory_limit_bytes", "legendFormat": "limit" }
+      ]
+    }
+  ]
+}

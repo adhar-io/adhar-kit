@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
@@ -213,5 +214,94 @@ class DefaultNotificationServiceTest {
 
         verify(channel).send(notification);
         verify(history).record(eq(notification), eq(true), eq("IN_APP"), isNull());
+    }
+
+    private DefaultNotificationService serviceWithGuards(NotificationPreferenceStore prefs,
+                                                         NotificationRateLimiter limiter,
+                                                         NotificationIdempotencyStore idempotency) {
+        return new DefaultNotificationService(List.of(channel), directExecutor, retryHandler, history,
+                null, prefs, limiter, idempotency);
+    }
+
+    @Test
+    @DisplayName("send is skipped silently when recipient opted out of the channel")
+    void sendSkippedWhenOptedOut() {
+        NotificationPreferenceStore prefs = org.mockito.Mockito.mock(NotificationPreferenceStore.class);
+        when(prefs.isOptedOut("user-1", NotificationType.IN_APP)).thenReturn(true);
+        DefaultNotificationService service = serviceWithGuards(prefs, null, null);
+
+        service.send(notification);
+
+        verify(channel, never()).send(any(Notification.class));
+        verifyNoInteractions(history);
+    }
+
+    @Test
+    @DisplayName("send proceeds when recipient has not opted out")
+    void sendProceedsWhenNotOptedOut() {
+        NotificationPreferenceStore prefs = org.mockito.Mockito.mock(NotificationPreferenceStore.class);
+        when(prefs.isOptedOut("user-1", NotificationType.IN_APP)).thenReturn(false);
+        DefaultNotificationService service = serviceWithGuards(prefs, null, null);
+
+        service.send(notification);
+
+        verify(channel).send(notification);
+    }
+
+    @Test
+    @DisplayName("send is skipped and recorded as failure when rate-limited")
+    void sendSkippedWhenRateLimited() {
+        NotificationRateLimiter limiter = org.mockito.Mockito.mock(NotificationRateLimiter.class);
+        when(limiter.tryAcquire("user-1", NotificationType.IN_APP)).thenReturn(false);
+        DefaultNotificationService service = serviceWithGuards(null, limiter, null);
+
+        service.send(notification);
+
+        verify(channel, never()).send(any(Notification.class));
+        verify(history).record(eq(notification), eq(false), eq("IN_APP"), eq("Rate limit exceeded"));
+    }
+
+    @Test
+    @DisplayName("send proceeds when a rate-limit permit is acquired")
+    void sendProceedsWhenPermitAcquired() {
+        NotificationRateLimiter limiter = org.mockito.Mockito.mock(NotificationRateLimiter.class);
+        when(limiter.tryAcquire("user-1", NotificationType.IN_APP)).thenReturn(true);
+        DefaultNotificationService service = serviceWithGuards(null, limiter, null);
+
+        service.send(notification);
+
+        verify(channel).send(notification);
+    }
+
+    @Test
+    @DisplayName("send is skipped silently for a duplicate idempotency key")
+    void sendSkippedForDuplicateIdempotencyKey() {
+        NotificationIdempotencyStore idempotency = org.mockito.Mockito.mock(NotificationIdempotencyStore.class);
+        when(idempotency.register("key-1")).thenReturn(false);
+        Notification withKey = new Notification("notif-2", NotificationType.IN_APP, "user-1",
+                "S", "B", Map.of(DefaultNotificationService.IDEMPOTENCY_KEY_METADATA, "key-1"), null);
+        DefaultNotificationService service = serviceWithGuards(null, null, idempotency);
+
+        service.send(withKey);
+
+        verify(channel, never()).send(any(Notification.class));
+        verifyNoInteractions(history);
+    }
+
+    @Test
+    @DisplayName("send proceeds for a new idempotency key and when no key is present")
+    void sendProceedsForNewIdempotencyKey() {
+        NotificationIdempotencyStore idempotency = org.mockito.Mockito.mock(NotificationIdempotencyStore.class);
+        when(idempotency.register("key-1")).thenReturn(true);
+        Notification withKey = new Notification("notif-2", NotificationType.IN_APP, "user-1",
+                "S", "B", Map.of(DefaultNotificationService.IDEMPOTENCY_KEY_METADATA, "key-1"), null);
+        DefaultNotificationService service = serviceWithGuards(null, null, idempotency);
+
+        service.send(withKey);
+        // notification without any idempotency key is unaffected
+        service.send(notification);
+
+        verify(channel).send(withKey);
+        verify(channel).send(notification);
     }
 }

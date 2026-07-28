@@ -76,6 +76,11 @@ public class GrpcProperties {
     private AuthConfig auth = new AuthConfig();
 
     /**
+     * Concurrency-limiting configuration.
+     */
+    private ConcurrencyConfig concurrency = new ConcurrencyConfig();
+
+    /**
      * Enable automatic registration of {@code @GrpcService} beans with the
      * {@code AdharGrpcServer} bean (via {@code GrpcServiceRegistrar}).
      */
@@ -360,6 +365,39 @@ public class GrpcProperties {
          * Bearer tokens / API keys.
          */
         private String sharedSecret;
+    }
+
+    /**
+     * Concurrency-limiting configuration.
+     *
+     * <p>When {@link #enabled} is {@code true}, the server applies a
+     * {@code ConcurrencyLimitServerInterceptor} that bounds the number of
+     * concurrent in-flight calls. A {@link #globalLimit} caps total concurrent
+     * calls across all services, and {@link #serviceLimits} caps concurrent
+     * calls per fully-qualified gRPC service name (e.g.
+     * {@code my.package.OrderService}). Calls that would exceed a limit are
+     * rejected with {@code RESOURCE_EXHAUSTED} rather than queued.</p>
+     */
+    @Data
+    public static class ConcurrencyConfig {
+        /**
+         * Enable concurrency limiting.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Maximum number of concurrent in-flight calls across all services.
+         * Values less than or equal to zero disable the global limit.
+         */
+        private int globalLimit = 200;
+
+        /**
+         * Per-service concurrency limits keyed by fully-qualified gRPC service
+         * name (e.g. {@code my.package.OrderService}). Only services with an
+         * entry here are individually bounded; a value less than or equal to
+         * zero disables the limit for that service.
+         */
+        private Map<String, Integer> serviceLimits = new HashMap<>();
     }
 }
 

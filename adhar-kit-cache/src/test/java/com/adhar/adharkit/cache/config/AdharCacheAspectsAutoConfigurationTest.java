@@ -1,6 +1,10 @@
 package com.adhar.adharkit.cache.config;
 
+import com.adhar.adharkit.cache.aspect.CacheCircuitBreakerAspect;
 import com.adhar.adharkit.cache.aspect.CacheLockAspect;
+import com.adhar.adharkit.cache.aspect.CacheMonitorAspect;
+import com.adhar.adharkit.cache.aspect.CachePartitionAspect;
+import com.adhar.adharkit.cache.aspect.CacheRateLimitAspect;
 import com.adhar.adharkit.cache.aspect.CacheRefreshAspect;
 import com.adhar.adharkit.cache.aspect.CachingAspect;
 import com.adhar.adharkit.cache.aspect.MultiLevelCacheAspect;
@@ -10,7 +14,10 @@ import com.adhar.adharkit.cache.metrics.CacheMetricsBinder;
 import com.adhar.adharkit.cache.multilevel.InMemorySecondLevelCache;
 import com.adhar.adharkit.cache.multilevel.MultiLevelCacheService;
 import com.adhar.adharkit.cache.multilevel.SecondLevelCache;
+import com.adhar.adharkit.cache.partition.KeyPartitionResolver;
+import com.adhar.adharkit.cache.partition.ThreadLocalKeyPartitionResolver;
 import com.adhar.adharkit.cache.refresh.CacheRefreshScheduler;
+import com.adhar.adharkit.cache.warmup.CacheWarmupProcessor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -42,8 +49,15 @@ class AdharCacheAspectsAutoConfigurationTest {
             assertThat(context).hasSingleBean(CacheRefreshScheduler.class);
             assertThat(context).hasSingleBean(CacheMetricsBinder.class);
             assertThat(context).hasSingleBean(CacheManager.class);
+            assertThat(context).hasSingleBean(CacheCircuitBreakerAspect.class);
+            assertThat(context).hasSingleBean(CacheRateLimitAspect.class);
+            assertThat(context).hasSingleBean(CachePartitionAspect.class);
+            assertThat(context).hasSingleBean(CacheMonitorAspect.class);
+            assertThat(context).hasSingleBean(CacheWarmupProcessor.class);
             assertThat(context).getBean(SecondLevelCache.class)
                 .isInstanceOf(InMemorySecondLevelCache.class);
+            assertThat(context).getBean(KeyPartitionResolver.class)
+                .isInstanceOf(ThreadLocalKeyPartitionResolver.class);
         });
     }
 
@@ -56,6 +70,11 @@ class AdharCacheAspectsAutoConfigurationTest {
             assertThat(context).doesNotHaveBean(MultiLevelCacheAspect.class);
             assertThat(context).doesNotHaveBean(CacheRefreshScheduler.class);
             assertThat(context).doesNotHaveBean(CacheMetricsBinder.class);
+            assertThat(context).doesNotHaveBean(CacheCircuitBreakerAspect.class);
+            assertThat(context).doesNotHaveBean(CacheRateLimitAspect.class);
+            assertThat(context).doesNotHaveBean(CachePartitionAspect.class);
+            assertThat(context).doesNotHaveBean(CacheMonitorAspect.class);
+            assertThat(context).doesNotHaveBean(CacheWarmupProcessor.class);
         });
     }
 

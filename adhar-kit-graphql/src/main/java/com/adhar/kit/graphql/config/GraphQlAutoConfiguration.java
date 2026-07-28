@@ -1,17 +1,24 @@
 package com.adhar.kit.graphql.config;
 
+import com.adhar.kit.graphql.allowlist.AllowedQueryInterceptor;
+import com.adhar.kit.graphql.allowlist.AllowedQueryRegistry;
 import com.adhar.kit.graphql.dataloader.CompositeBatchLoaderRegistry;
 import com.adhar.kit.graphql.dataloader.DataLoaderRegistrar;
 import com.adhar.kit.graphql.exception.GraphQlExceptionResolver;
 import com.adhar.kit.graphql.instrumentation.QueryComplexityInstrumentation;
+import com.adhar.kit.graphql.instrumentation.ResolverTracingInstrumentation;
 import com.adhar.kit.graphql.persisted.InMemoryPersistedQueryCache;
 import com.adhar.kit.graphql.persisted.PersistedQueryCache;
 import com.adhar.kit.graphql.persisted.PersistedQueryInterceptor;
+import com.adhar.kit.graphql.ratelimit.ClientRateLimiter;
+import com.adhar.kit.graphql.ratelimit.QueryCostRateLimitInterceptor;
 import com.adhar.kit.graphql.scalar.DateTimeScalar;
 import com.adhar.kit.graphql.schema.GraphQlSchemaRegistry;
+import com.adhar.kit.graphql.security.FieldAuthorizationInstrumentation;
 import com.adhar.kit.graphql.security.GraphQlSecurityInterceptor;
 import com.adhar.kit.graphql.validation.InputValidator;
 import graphql.schema.GraphQLScalarType;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -248,5 +255,115 @@ public class GraphQlAutoConfiguration {
                 properties.getSecurity().isRequireAuthentication(),
                 properties.isIntrospectionEnabled());
         return new GraphQlSecurityInterceptor(properties);
+    }
+
+    /**
+     * Creates the registry of allow-listed (approved) GraphQL queries, eagerly loading
+     * any documents found under the configured classpath directory.
+     *
+     * @return the allow-list registry
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public AllowedQueryRegistry allowedQueryRegistry() {
+        AllowedQueryRegistry registry = new AllowedQueryRegistry(properties.getAllowList().getLocation());
+        int loaded = registry.loadFromClasspath();
+        log.info("Registering GraphQL allow-list registry with {} query/queries from classpath:{}",
+                loaded, properties.getAllowList().getLocation());
+        return registry;
+    }
+
+    /**
+     * Creates the allow-list enforcement interceptor.
+     *
+     * <p>Only registered when {@code adhar.graphql.allow-list.enabled} is {@code true}
+     * and Spring GraphQL server support is on the classpath. Non-allow-listed queries are
+     * rejected before execution.</p>
+     *
+     * @param allowedQueryRegistry the registry of approved queries
+     * @return the allow-list web interceptor
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.graphql.allow-list", name = "enabled", havingValue = "true")
+    @ConditionalOnClass(name = "org.springframework.graphql.server.WebGraphQlInterceptor")
+    public AllowedQueryInterceptor allowedQueryInterceptor(AllowedQueryRegistry allowedQueryRegistry) {
+        log.info("Registering GraphQL allow-list interceptor (enforcement enabled)");
+        return new AllowedQueryInterceptor(allowedQueryRegistry);
+    }
+
+    /**
+     * Creates the per-client cost rate limiter.
+     *
+     * <p>Only registered when {@code adhar.graphql.rate-limit.enabled} is {@code true}.</p>
+     *
+     * @return the client rate limiter
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.graphql.rate-limit", name = "enabled", havingValue = "true")
+    public ClientRateLimiter graphQlClientRateLimiter() {
+        GraphQlProperties.RateLimit rateLimit = properties.getRateLimit();
+        log.info("Registering GraphQL client rate limiter - capacity: {}, refillPerSecond: {}, maxClients: {}",
+                rateLimit.getCapacity(), rateLimit.getRefillPerSecond(), rateLimit.getMaxClients());
+        return new ClientRateLimiter(rateLimit.getCapacity(), rateLimit.getRefillPerSecond(), rateLimit.getMaxClients());
+    }
+
+    /**
+     * Creates the per-client cost rate limiting interceptor.
+     *
+     * <p>Only registered when {@code adhar.graphql.rate-limit.enabled} is {@code true}
+     * and Spring GraphQL server support is on the classpath.</p>
+     *
+     * @param clientRateLimiter the per-client rate limiter
+     * @return the rate-limit web interceptor
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.graphql.rate-limit", name = "enabled", havingValue = "true")
+    @ConditionalOnClass(name = "org.springframework.graphql.server.WebGraphQlInterceptor")
+    public QueryCostRateLimitInterceptor queryCostRateLimitInterceptor(ClientRateLimiter clientRateLimiter) {
+        log.info("Registering GraphQL per-client cost rate limiting interceptor");
+        return new QueryCostRateLimitInterceptor(clientRateLimiter, properties);
+    }
+
+    /**
+     * Creates the field-level authorization instrumentation driven by the {@code @auth}
+     * schema directive.
+     *
+     * <p>Only registered when {@code adhar.graphql.security.field-authorization-enabled}
+     * is {@code true} (the default) and Spring Security is on the classpath.</p>
+     *
+     * @return the field authorization instrumentation
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.graphql.security", name = "field-authorization-enabled",
+            havingValue = "true", matchIfMissing = true)
+    @ConditionalOnClass(name = "org.springframework.security.core.context.SecurityContextHolder")
+    public FieldAuthorizationInstrumentation fieldAuthorizationInstrumentation() {
+        log.info("Registering GraphQL field-level authorization instrumentation (@auth directive)");
+        return new FieldAuthorizationInstrumentation();
+    }
+
+    /**
+     * Creates the resolver tracing instrumentation.
+     *
+     * <p>Only registered when {@code adhar.graphql.tracing.enabled} is {@code true},
+     * Micrometer is on the classpath, and a {@link MeterRegistry} bean is available.</p>
+     *
+     * @param meterRegistry the Micrometer registry timers are recorded to
+     * @return the resolver tracing instrumentation
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.graphql.tracing", name = "enabled", havingValue = "true")
+    @ConditionalOnClass(MeterRegistry.class)
+    public ResolverTracingInstrumentation resolverTracingInstrumentation(MeterRegistry meterRegistry) {
+        GraphQlProperties.Tracing tracing = properties.getTracing();
+        log.info("Registering GraphQL resolver tracing instrumentation - apolloTracing: {}, includeTrivial: {}",
+                tracing.isApolloTracingEnabled(), tracing.isIncludeTrivialDataFetchers());
+        return new ResolverTracingInstrumentation(meterRegistry, tracing.isApolloTracingEnabled(),
+                tracing.isIncludeTrivialDataFetchers());
     }
 }

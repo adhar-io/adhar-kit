@@ -95,6 +95,12 @@
             <version>${semver4j.version}</version>
         </dependency>
 
+        <!-- JSON (OSS Index CVE reports) - version managed by Spring Boot BOM -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
         <!-- Adhar Kit Commons -->
         <dependency>
             <groupId>com.adhar.kit</groupId>

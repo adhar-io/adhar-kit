@@ -5,8 +5,12 @@ import com.adhar.kit.ai.component.AiRateLimiter;
 import com.adhar.kit.ai.config.AiProperties;
 import com.adhar.kit.ai.model.AiChatRequest;
 import com.adhar.kit.ai.model.AiChatResponse;
+import com.adhar.kit.ai.prompt.PromptTemplateRegistry;
 import com.adhar.kit.ai.security.AiSecurityValidator;
 import com.adhar.kit.ai.service.AiService;
+import com.adhar.kit.ai.tool.AiTool;
+import com.adhar.kit.ai.tool.ToolCallResult;
+import com.adhar.kit.ai.tool.ToolCallingService;
 import com.adhar.kit.commons.exception.ServiceException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -68,6 +72,11 @@ class AiServiceImplTest {
     @Mock
     private AiMetricsCollector metricsCollector;
 
+    @Mock
+    private ToolCallingService toolCallingService;
+
+    private PromptTemplateRegistry promptTemplateRegistry;
+
     private AiServiceImpl aiService;
 
     @BeforeEach
@@ -83,8 +92,11 @@ class AiServiceImplTest {
         lenient().when(securityValidator.sanitizeContent(anyString()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
+        // Skip classpath scanning for deterministic, isolated registry state.
+        promptTemplateRegistry = new PromptTemplateRegistry(null);
+
         aiService = new AiServiceImpl(chatModel, embeddingModel, vectorStore, aiProperties,
-                rateLimiter, securityValidator, metricsCollector);
+                rateLimiter, securityValidator, metricsCollector, promptTemplateRegistry, toolCallingService);
     }
 
     @Test
@@ -524,6 +536,53 @@ class AiServiceImplTest {
         assertThat(response.getUsage().getCost()).isNull();
         verify(metricsCollector, never()).recordCost(anyDouble(), anyInt(), anyString(), anyString());
         verify(metricsCollector).recordChatRequest(anyString(), anyString(), any(Duration.class), eq(0L));
+    }
+
+    // ==================== Prompt templates ====================
+
+    @Test
+    void testRegisterAndRenderPromptTemplate() {
+        aiService.registerPromptTemplate("greeting", "Hello {name}, welcome to {place}");
+
+        String rendered = aiService.renderPromptTemplate("greeting",
+                Map.of("name", "Alice", "place", "Wonderland"));
+
+        assertThat(rendered).isEqualTo("Hello Alice, welcome to Wonderland");
+    }
+
+    @Test
+    void testChatWithTemplateRendersThenChats() {
+        aiService.registerPromptTemplate("ask", "Explain {topic} simply");
+
+        ChatResponse mockResponse = mock(ChatResponse.class);
+        when(chatModel.call(any(org.springframework.ai.chat.prompt.Prompt.class))).thenReturn(mockResponse);
+        when(mockResponse.getResults()).thenReturn(List.of(createMockResult("Simple explanation")));
+
+        AiChatResponse response = aiService.chatWithTemplate("ask", Map.of("topic", "gravity"));
+
+        assertThat(response.getContent()).isEqualTo("Simple explanation");
+        ArgumentCaptor<org.springframework.ai.chat.prompt.Prompt> captor =
+                ArgumentCaptor.forClass(org.springframework.ai.chat.prompt.Prompt.class);
+        verify(chatModel).call(captor.capture());
+        assertThat(captor.getValue().getContents()).contains("Explain gravity simply");
+    }
+
+    // ==================== Tool calling ====================
+
+    @Test
+    void testChatWithToolsDelegatesToToolCallingService() {
+        AiProperties.Tools tools = new AiProperties.Tools();
+        tools.setMaxIterations(7);
+        when(aiProperties.getTools()).thenReturn(tools);
+
+        AiTool tool = AiTool.builder().name("noop").description("d").handler(a -> "r").build();
+        ToolCallResult expected = new ToolCallResult("final", List.of(), 1, false);
+        when(toolCallingService.chat("do it", List.of(tool), 7)).thenReturn(expected);
+
+        ToolCallResult result = aiService.chatWithTools("do it", List.of(tool));
+
+        assertThat(result).isSameAs(expected);
+        verify(toolCallingService).chat("do it", List.of(tool), 7);
     }
 
     private AiProperties.Security createSecurityProperties() {

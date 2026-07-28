@@ -44,4 +44,34 @@ public class EventSourcingProperties {
      * fails due to an optimistic concurrency conflict.
      */
     private int retryMaxAttempts = 3;
+
+    /**
+     * Kafka event bus settings. Only relevant when {@code spring-kafka} is on the classpath and
+     * {@link Kafka#isEnabled() enabled}.
+     */
+    private final Kafka kafka = new Kafka();
+
+    /**
+     * Settings for the Kafka-backed {@link com.adhar.kit.eventsourcing.bus.EventBus}.
+     */
+    @Getter
+    @Setter
+    public static class Kafka {
+
+        /**
+         * Whether the Kafka event bus should be used in place of the in-process bus. Requires a
+         * {@code KafkaTemplate} bean to be available.
+         */
+        private boolean enabled = false;
+
+        /**
+         * The topic domain events are published to and consumed from.
+         */
+        private String topic = "adhar.event-sourcing.events";
+
+        /**
+         * The consumer group id used by the event bus listener.
+         */
+        private String groupId = "adhar-event-sourcing";
+    }
 }

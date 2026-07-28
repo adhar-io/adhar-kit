@@ -1,6 +1,7 @@
 package com.adhar.kit.dapr.config;
 
 import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +27,7 @@ import java.util.List;
  * @since 1.0.0
  */
 @Data
+@ConfigurationProperties(prefix = "adhar.dapr")
 public class DaprProperties {
 
     /**
@@ -134,6 +136,11 @@ public class DaprProperties {
     private CryptoConfig crypto = new CryptoConfig();
 
     /**
+     * Transactional outbox configuration.
+     */
+    private OutboxConfig outbox = new OutboxConfig();
+
+    /**
      * State store configuration.
      */
     @Data
@@ -230,6 +237,19 @@ public class DaprProperties {
     public static class CryptoConfig {
         private boolean enabled = true;
         private String defaultComponent = "crypto";
+    }
+
+    /**
+     * Transactional outbox configuration. Disabled by default; enabling it wires an
+     * {@code OutboxPublisher} plus a scheduled relay.
+     */
+    @Data
+    public static class OutboxConfig {
+        private boolean enabled = false;
+        private String stateStore = "statestore";
+        private String pubsub = "pubsub";
+        private int maxAttempts = 5;
+        private long relayIntervalMs = 5000;
     }
 }
 

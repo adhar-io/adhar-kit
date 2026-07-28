@@ -83,6 +83,20 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Micrometer Observation (Optional) - used by MicrometerGrpcObserver to
+             record client/server spans for TracingServerInterceptor /
+             TracingClientInterceptor. Declared optional so it is present on this
+             module's own compile/test classpath (mirroring micrometer-core above)
+             but is NOT propagated transitively: consuming applications that do not
+             depend on it fall back to MDC-only trace correlation, gated at runtime
+             by @ConditionalOnClass(ObservationRegistry.class). Version is managed
+             by the Spring Boot BOM. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-observation</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- gRPC testing support (InProcess server/channel helpers, GrpcCleanupRule) -->
         <dependency>
             <groupId>io.grpc</groupId>

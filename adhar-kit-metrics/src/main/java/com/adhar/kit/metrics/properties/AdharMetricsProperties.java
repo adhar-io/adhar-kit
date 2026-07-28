@@ -318,5 +318,33 @@ public class AdharMetricsProperties {
          * Custom Kubernetes labels to include as tags.
          */
         private String[] customLabels = {};
+
+        /**
+         * Configuration for scheduled container (cgroup) resource polling.
+         */
+        private ResourcePollingProperties resourcePolling = new ResourcePollingProperties();
+    }
+
+    /**
+     * Configuration properties for scheduled container resource polling.
+     * <p>
+     * The poller reads the container's cgroup CPU/memory limits and usage directly from the
+     * cgroup filesystem (both v1 and v2 layouts are supported) and requires no Kubernetes API
+     * access. It is opt-in via {@code enabled}, but it additionally auto-detects the presence
+     * of {@code /sys/fs/cgroup} at runtime and does nothing when no cgroup filesystem exists.
+     * </p>
+     */
+    @Data
+    public static class ResourcePollingProperties {
+
+        /**
+         * Whether scheduled container resource polling is enabled.
+         */
+        private boolean enabled = false;
+
+        /**
+         * Polling interval in seconds.
+         */
+        private long intervalSeconds = 15;
     }
 }

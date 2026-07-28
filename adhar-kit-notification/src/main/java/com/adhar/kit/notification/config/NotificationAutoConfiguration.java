@@ -1,7 +1,13 @@
 package com.adhar.kit.notification.config;
 
 import com.adhar.kit.notification.DefaultNotificationService;
+import com.adhar.kit.notification.InMemoryNotificationIdempotencyStore;
+import com.adhar.kit.notification.InMemoryNotificationPreferenceStore;
+import com.adhar.kit.notification.NotificationDigestService;
 import com.adhar.kit.notification.NotificationHistory;
+import com.adhar.kit.notification.NotificationIdempotencyStore;
+import com.adhar.kit.notification.NotificationPreferenceStore;
+import com.adhar.kit.notification.NotificationRateLimiter;
 import com.adhar.kit.notification.NotificationRetryHandler;
 import com.adhar.kit.notification.NotificationService;
 import com.adhar.kit.notification.TemplateNotificationService;
@@ -18,6 +24,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.MessageSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -121,29 +128,85 @@ public class NotificationAutoConfiguration {
     }
 
     /**
+     * Registers the in-memory per-recipient/channel preference (opt-out) store.
+     */
+    @Bean
+    @ConditionalOnMissingBean(NotificationPreferenceStore.class)
+    public NotificationPreferenceStore notificationPreferenceStore() {
+        log.info("Registering InMemoryNotificationPreferenceStore");
+        return new InMemoryNotificationPreferenceStore();
+    }
+
+    /**
+     * Registers the per-recipient/channel sliding-window rate limiter when enabled.
+     */
+    @Bean
+    @ConditionalOnMissingBean(NotificationRateLimiter.class)
+    @ConditionalOnProperty(prefix = "adhar.notification.rate-limit", name = "enabled", havingValue = "true")
+    public NotificationRateLimiter notificationRateLimiter(NotificationProperties properties) {
+        log.info("Registering NotificationRateLimiter with maxPerWindow={}, windowMs={}",
+                properties.getRateLimit().getMaxPerWindow(), properties.getRateLimit().getWindowMs());
+        return new NotificationRateLimiter(properties.getRateLimit());
+    }
+
+    /**
+     * Registers the in-memory idempotency-key store for duplicate suppression when enabled.
+     */
+    @Bean
+    @ConditionalOnMissingBean(NotificationIdempotencyStore.class)
+    @ConditionalOnProperty(prefix = "adhar.notification.idempotency", name = "enabled", havingValue = "true",
+            matchIfMissing = true)
+    public NotificationIdempotencyStore notificationIdempotencyStore(NotificationProperties properties) {
+        log.info("Registering InMemoryNotificationIdempotencyStore with ttlMs={}",
+                properties.getIdempotency().getTtlMs());
+        return new InMemoryNotificationIdempotencyStore(properties.getIdempotency().getTtlMs());
+    }
+
+    /**
+     * Registers the digest/batching service when enabled.
+     */
+    @Bean
+    @ConditionalOnMissingBean(NotificationDigestService.class)
+    @ConditionalOnProperty(prefix = "adhar.notification.digest", name = "enabled", havingValue = "true")
+    public NotificationDigestService notificationDigestService(NotificationService notificationService,
+                                                               NotificationProperties properties) {
+        log.info("Registering NotificationDigestService with windowMs={}, maxBatchSize={}",
+                properties.getDigest().getWindowMs(), properties.getDigest().getMaxBatchSize());
+        return new NotificationDigestService(notificationService, properties.getDigest());
+    }
+
+    /**
      * Creates the default notification service that routes to available channels,
-     * with retry and history support.
+     * with retry, history, preference, rate-limit, and idempotency support.
      */
     @Bean
     @ConditionalOnMissingBean(NotificationService.class)
     public NotificationService notificationService(List<NotificationChannel> channels,
                                                     NotificationProperties properties,
                                                     ObjectProvider<NotificationRetryHandler> retryHandlerProvider,
-                                                    ObjectProvider<NotificationHistory> historyProvider) {
+                                                    ObjectProvider<NotificationHistory> historyProvider,
+                                                    ObjectProvider<NotificationPreferenceStore> preferenceProvider,
+                                                    ObjectProvider<NotificationRateLimiter> rateLimiterProvider,
+                                                    ObjectProvider<NotificationIdempotencyStore> idempotencyProvider) {
         Executor executor = properties.isAsync()
                 ? Executors.newVirtualThreadPerTaskExecutor()
                 : Runnable::run;
         return new DefaultNotificationService(channels, executor,
-                retryHandlerProvider.getIfAvailable(), historyProvider.getIfAvailable());
+                retryHandlerProvider.getIfAvailable(), historyProvider.getIfAvailable(),
+                null,
+                preferenceProvider.getIfAvailable(),
+                rateLimiterProvider.getIfAvailable(),
+                idempotencyProvider.getIfAvailable());
     }
 
     /**
-     * Registers the template notification service.
+     * Registers the template notification service with optional localization support.
      */
     @Bean
     @ConditionalOnMissingBean(TemplateNotificationService.class)
-    public TemplateNotificationService templateNotificationService(NotificationService notificationService) {
+    public TemplateNotificationService templateNotificationService(NotificationService notificationService,
+                                                                   ObjectProvider<MessageSource> messageSourceProvider) {
         log.info("Registering TemplateNotificationService");
-        return new TemplateNotificationService(notificationService);
+        return new TemplateNotificationService(notificationService, messageSourceProvider.getIfAvailable());
     }
 }

@@ -71,10 +71,13 @@ public class HealthRegistry {
     /** Response detail key listing degraded (non-critical, not UP) indicators. */
     public static final String DEGRADED_DETAIL = "degraded";
 
+    /** Response detail key carrying the weighted health score [0..1] (weighted mode only). */
+    public static final String WEIGHTED_SCORE_DETAIL = "weightedScore";
+
     private static final String ALL_CACHE_KEY = "__all__";
     private static final long DEFAULT_TIMEOUT_MILLIS = 5000;
 
-    private record Registration(AdharHealthIndicator indicator, Set<String> groups, boolean critical) {
+    private record Registration(AdharHealthIndicator indicator, Set<String> groups, boolean critical, double weight) {
     }
 
     private record CachedResponse(HealthResponse response, long expiresAtNanos) {
@@ -95,6 +98,20 @@ public class HealthRegistry {
 
     /** Flapping detection window in milliseconds. */
     private volatile long flappingWindowMillis = 60_000;
+
+    /**
+     * Weighted-score threshold at or above which a group aggregates to UP.
+     * Only consulted when at least one selected indicator carries a weight.
+     */
+    private volatile double weightedUpThreshold = 1.0;
+
+    /**
+     * Weighted-score threshold at or below which a group aggregates to DOWN.
+     * Scores strictly between {@link #weightedDownThreshold} and
+     * {@link #weightedUpThreshold} aggregate to the degraded band
+     * ({@link Health.Status#OUT_OF_SERVICE}).
+     */
+    private volatile double weightedDownThreshold = 0.0;
 
     /**
      * Creates a registry with caching disabled and default history capacity.
@@ -145,13 +162,89 @@ public class HealthRegistry {
      * @param groups    group names (default group when empty)
      */
     public void register(AdharHealthIndicator indicator, boolean critical, String... groups) {
+        register(indicator, critical, 0.0, groups);
+    }
+
+    /**
+     * Registers a health indicator with an aggregation weight.
+     *
+     * <p>A positive {@code weight} opts the indicator into <b>weighted aggregation</b>:
+     * whenever any selected indicator carries a weight, the group status is derived
+     * from the weighted health score (see {@link #setWeightedThresholds(double, double)})
+     * rather than the critical/non-critical worst-of rule. A {@code weight} of {@code 0}
+     * leaves the indicator on the classic critical/non-critical path.</p>
+     *
+     * @param indicator health indicator
+     * @param critical  whether the indicator participates in classic status aggregation
+     *                  (also folded into weighted results as a hard failure)
+     * @param weight    non-negative aggregation weight ({@code 0} = unweighted)
+     * @param groups    group names (default group when empty)
+     */
+    public void register(AdharHealthIndicator indicator, boolean critical, double weight, String... groups) {
+        if (weight < 0) {
+            throw new IllegalArgumentException("weight must not be negative");
+        }
         String name = indicator.getName();
         Set<String> groupSet = (groups == null || groups.length == 0)
                 ? Set.of(DEFAULT_GROUP)
                 : Set.copyOf(new LinkedHashSet<>(Arrays.asList(groups)));
-        registrations.put(name, new Registration(indicator, groupSet, critical));
+        registrations.put(name, new Registration(indicator, groupSet, critical, weight));
         cache.clear();
-        log.info("Registered health indicator: {} (groups={}, critical={})", name, groupSet, critical);
+        log.info("Registered health indicator: {} (groups={}, critical={}, weight={})",
+                name, groupSet, critical, weight);
+    }
+
+    /**
+     * Sets the aggregation weight of an already-registered indicator.
+     *
+     * <p>Convenience for applying config-driven weights after indicators have been
+     * registered. No-op when the indicator is unknown.</p>
+     *
+     * @param name   indicator name
+     * @param weight non-negative aggregation weight ({@code 0} = unweighted)
+     * @return true when the weight was applied
+     */
+    public boolean setWeight(String name, double weight) {
+        if (weight < 0) {
+            throw new IllegalArgumentException("weight must not be negative");
+        }
+        Registration existing = registrations.get(name);
+        if (existing == null) {
+            return false;
+        }
+        registrations.put(name, new Registration(existing.indicator(), existing.groups(), existing.critical(), weight));
+        cache.clear();
+        return true;
+    }
+
+    /**
+     * Gets the aggregation weight of an indicator.
+     *
+     * @param name indicator name
+     * @return the weight, or {@code 0} when unweighted or unknown
+     */
+    public double getWeight(String name) {
+        Registration registration = registrations.get(name);
+        return registration == null ? 0.0 : registration.weight();
+    }
+
+    /**
+     * Configures the weighted-aggregation thresholds.
+     *
+     * <p>With a weighted score {@code s} in {@code [0..1]}: {@code s >= up} aggregates
+     * to UP, {@code s <= down} aggregates to DOWN, and anything in between aggregates
+     * to the degraded band ({@link Health.Status#OUT_OF_SERVICE}).</p>
+     *
+     * @param up   UP threshold (inclusive)
+     * @param down DOWN threshold (inclusive), must not exceed {@code up}
+     */
+    public void setWeightedThresholds(double up, double down) {
+        if (down > up) {
+            throw new IllegalArgumentException("down threshold must not exceed up threshold");
+        }
+        this.weightedUpThreshold = up;
+        this.weightedDownThreshold = down;
+        cache.clear();
     }
 
     /**
@@ -232,10 +325,20 @@ public class HealthRegistry {
 
         List<String> degraded = new ArrayList<>();
         List<Health.Status> criticalStatuses = new ArrayList<>();
+        double weightSum = 0.0;
+        double weightedValue = 0.0;
+        boolean weighted = false;
         for (Map.Entry<String, Health> entry : results.entrySet()) {
             Registration registration = selected.get(entry.getKey());
             Health.Status status = entry.getValue().getStatus();
-            if (registration != null && !registration.critical()) {
+            if (registration != null && registration.weight() > 0) {
+                weighted = true;
+                weightSum += registration.weight();
+                weightedValue += registration.weight() * healthValue(status);
+                if (status != Health.Status.UP) {
+                    degraded.add(entry.getKey());
+                }
+            } else if (registration != null && !registration.critical()) {
                 if (status != Health.Status.UP) {
                     degraded.add(entry.getKey());
                 }
@@ -244,10 +347,23 @@ public class HealthRegistry {
             }
         }
 
+        Health.Status overall;
+        Double score = null;
+        if (weighted) {
+            score = weightSum == 0.0 ? 1.0 : weightedValue / weightSum;
+            // Fold in any unweighted critical indicators as hard failures via worst-of.
+            overall = worstOf(Arrays.asList(weightedStatus(score), worstOf(criticalStatuses)));
+        } else {
+            overall = worstOf(criticalStatuses);
+        }
+
         HealthResponse response = HealthResponse.builder()
-                .status(worstOf(criticalStatuses))
+                .status(overall)
                 .components(results)
                 .build();
+        if (score != null) {
+            response.addDetail(WEIGHTED_SCORE_DETAIL, score);
+        }
         if (!degraded.isEmpty()) {
             degraded.sort(String::compareTo);
             response.addDetail(DEGRADED_DETAIL, degraded);
@@ -332,6 +448,37 @@ public class HealthRegistry {
             case UNKNOWN -> 1;
             case UP -> 0;
         };
+    }
+
+    /**
+     * Maps a status to a health value in {@code [0..1]} for weighted scoring:
+     * UP = 1.0, UNKNOWN / OUT_OF_SERVICE = 0.5 (partial), DOWN = 0.0.
+     *
+     * @param status status to score
+     * @return health value in {@code [0..1]}
+     */
+    private static double healthValue(Health.Status status) {
+        return switch (status) {
+            case UP -> 1.0;
+            case UNKNOWN, OUT_OF_SERVICE -> 0.5;
+            case DOWN -> 0.0;
+        };
+    }
+
+    /**
+     * Maps a weighted score to a status using the configured thresholds.
+     *
+     * @param score weighted score in {@code [0..1]}
+     * @return UP, OUT_OF_SERVICE (degraded band) or DOWN
+     */
+    private Health.Status weightedStatus(double score) {
+        if (score >= weightedUpThreshold) {
+            return Health.Status.UP;
+        }
+        if (score <= weightedDownThreshold) {
+            return Health.Status.DOWN;
+        }
+        return Health.Status.OUT_OF_SERVICE;
     }
 
     private void recordTransitions(Map<String, Health> results) {

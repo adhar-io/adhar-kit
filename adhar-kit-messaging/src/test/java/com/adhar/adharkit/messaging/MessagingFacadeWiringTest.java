@@ -204,10 +204,64 @@ class MessagingFacadeWiringTest {
     }
 
     @Test
-    void sendAndReceiveRemainsAStub() {
+    void sendAndReceiveWithoutRequestReplyClientThrows() {
         MessagingFacade facade = new MessagingFacade(messagePublisher, messageListener, properties, null);
 
-        assertNull(facade.sendAndReceive("order-queries", "request", String.class));
+        assertThrows(com.adhar.kit.messaging.exception.MessagingException.class,
+                () -> facade.sendAndReceive("order-queries", "request", String.class));
+    }
+
+    @Test
+    void sendAndReceiveDelegatesToRequestReplyClient() {
+        com.adhar.kit.messaging.requestreply.RequestReplyClient client =
+                mock(com.adhar.kit.messaging.requestreply.RequestReplyClient.class);
+        properties.getCommon().getReply().setTimeoutMs(1234);
+        when(client.sendAndReceive(eq("order-queries"), eq("request"), eq(String.class), any()))
+                .thenReturn("reply");
+        MessagingFacade facade = new MessagingFacade(messagePublisher, messageListener, properties, null,
+                null, null, client);
+
+        String reply = facade.sendAndReceive("order-queries", "request", String.class);
+
+        assertEquals("reply", reply);
+        verify(client).sendAndReceive(eq("order-queries"), eq("request"), eq(String.class),
+                eq(java.time.Duration.ofMillis(1234)));
+    }
+
+    @Test
+    void publishViaOutboxWithoutStoreThrows() {
+        MessagingFacade facade = new MessagingFacade(messagePublisher, messageListener, properties, null);
+
+        assertThrows(com.adhar.kit.messaging.exception.MessagingException.class,
+                () -> facade.publishViaOutbox("order-events", "payload"));
+    }
+
+    @Test
+    void publishViaOutboxPersistsEntryToStore() {
+        com.adhar.kit.messaging.outbox.InMemoryOutboxStore store =
+                new com.adhar.kit.messaging.outbox.InMemoryOutboxStore();
+        MessagingFacade facade = new MessagingFacade(messagePublisher, messageListener, properties, null,
+                store, null, null);
+
+        String id = facade.publishViaOutbox("order-events", "customer-1", "payload");
+
+        assertNotNull(id);
+        assertEquals(1, store.countByStatus(com.adhar.kit.messaging.outbox.OutboxStatus.PENDING));
+        com.adhar.kit.messaging.outbox.OutboxEntry entry = store.findById(id).orElseThrow();
+        assertEquals("order-events", entry.getDestination());
+        assertEquals("customer-1", entry.getRoutingKey());
+        assertEquals(String.class.getName(), entry.getPayloadType());
+    }
+
+    @Test
+    void publishViaOutboxRejectsInvalidArguments() {
+        com.adhar.kit.messaging.outbox.InMemoryOutboxStore store =
+                new com.adhar.kit.messaging.outbox.InMemoryOutboxStore();
+        MessagingFacade facade = new MessagingFacade(messagePublisher, messageListener, properties, null,
+                store, null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> facade.publishViaOutbox("", "payload"));
+        assertThrows(IllegalArgumentException.class, () -> facade.publishViaOutbox("order-events", (Object) null));
     }
 
     @SuppressWarnings("unchecked")

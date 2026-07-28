@@ -1,6 +1,8 @@
 package com.adhar.kit.security.filter;
 
 import com.adhar.kit.security.properties.AdharSecurityProperties;
+import com.adhar.kit.security.ratelimit.InMemoryRateLimiterStore;
+import com.adhar.kit.security.ratelimit.RateLimiterStore;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -10,24 +12,22 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.time.Instant;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Rate limiting filter for request throttling.
  *
- * <p>Implements a sliding window rate limiting algorithm using an in-memory cache.
- * Limits requests per client IP address within a configurable time window.</p>
+ * <p>Implements a fixed-window rate limiting algorithm. The counting state is held
+ * by a pluggable {@link RateLimiterStore}: the default {@link InMemoryRateLimiterStore}
+ * keeps counters in a local map (single node), while a distributed implementation
+ * (e.g. Redis-backed) enforces limits across a cluster. Limits are applied per
+ * client IP address within a configurable time window.</p>
  *
  * <p><b>Features:</b></p>
  * <ul>
  *   <li>IP-based rate limiting</li>
  *   <li>Configurable request limit and time window</li>
  *   <li>Standard rate limit headers (X-RateLimit-*)</li>
- *   <li>Automatic cache cleanup</li>
+ *   <li>Pluggable in-memory or distributed counter store</li>
  *   <li>Graceful 429 Too Many Requests response</li>
  * </ul>
  *
@@ -39,6 +39,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *       enabled: true
  *       max-requests: 100
  *       window-seconds: 60
+ *       store: memory   # or "redis"
  * }</pre>
  *
  * <p><b>Response Headers:</b></p>
@@ -56,59 +57,28 @@ import java.util.concurrent.atomic.AtomicLong;
 public class RateLimitingFilter extends OncePerRequestFilter {
 
     private final AdharSecurityProperties.RateLimitProperties config;
-    private final Map<String, RateLimitEntry> rateLimitCache = new ConcurrentHashMap<>();
-    private final AtomicLong lastCleanup = new AtomicLong(System.currentTimeMillis());
-    private static final long CLEANUP_INTERVAL_MS = 60000; // 1 minute
+    private final RateLimiterStore store;
 
     /**
-     * Rate limit entry for tracking requests per client.
-     */
-    private static class RateLimitEntry {
-        final AtomicInteger requestCount = new AtomicInteger(0);
-        volatile long windowStart;
-
-        RateLimitEntry() {
-            this.windowStart = System.currentTimeMillis();
-        }
-
-        synchronized boolean tryAcquire(int maxRequests, long windowMs) {
-            long now = System.currentTimeMillis();
-
-            // Check if window has expired
-            if (now - windowStart >= windowMs) {
-                // Reset window
-                windowStart = now;
-                requestCount.set(1);
-                return true;
-            }
-
-            // Check if under limit
-            if (requestCount.get() < maxRequests) {
-                requestCount.incrementAndGet();
-                return true;
-            }
-
-            return false;
-        }
-
-        int getRemainingRequests(int maxRequests) {
-            return Math.max(0, maxRequests - requestCount.get());
-        }
-
-        long getResetTime(long windowMs) {
-            return windowStart + windowMs;
-        }
-    }
-
-    /**
-     * Creates rate limiting filter.
+     * Creates a rate limiting filter backed by the default in-memory store.
      *
      * @param config rate limit configuration
      */
     public RateLimitingFilter(AdharSecurityProperties.RateLimitProperties config) {
+        this(config, new InMemoryRateLimiterStore());
+    }
+
+    /**
+     * Creates a rate limiting filter backed by the supplied store.
+     *
+     * @param config rate limit configuration
+     * @param store the counter store (in-memory or distributed)
+     */
+    public RateLimitingFilter(AdharSecurityProperties.RateLimitProperties config, RateLimiterStore store) {
         this.config = config;
-        log.info("Rate limiting filter initialized: {} requests per {} seconds",
-            config.getMaxRequests(), config.getWindowSeconds());
+        this.store = store;
+        log.info("Rate limiting filter initialized: {} requests per {} seconds (store: {})",
+            config.getMaxRequests(), config.getWindowSeconds(), store.getClass().getSimpleName());
     }
 
     @Override
@@ -121,38 +91,22 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Clean up old entries periodically
-        cleanupOldEntries();
-
-        // Get client identifier (IP address)
         String clientId = getClientIdentifier(request);
-
-        // Get or create rate limit entry
-        RateLimitEntry entry = rateLimitCache.computeIfAbsent(clientId, k -> new RateLimitEntry());
-
         long windowMs = config.getWindowSeconds() * 1000L;
 
-        // Try to acquire a request slot
-        if (entry.tryAcquire(config.getMaxRequests(), windowMs)) {
-            // Add rate limit headers
-            addRateLimitHeaders(response, entry, windowMs);
+        RateLimiterStore.Decision decision = store.tryAcquire(clientId, config.getMaxRequests(), windowMs);
 
-            // Proceed with request
+        addRateLimitHeaders(response, decision);
+
+        if (decision.allowed()) {
             filterChain.doFilter(request, response);
         } else {
-            // Rate limit exceeded
             log.warn("Rate limit exceeded for client: {} ({} requests in {} seconds)",
                 clientId, config.getMaxRequests(), config.getWindowSeconds());
 
-            // Add rate limit headers
-            addRateLimitHeaders(response, entry, windowMs);
-
-            // Calculate retry-after
-            long resetTime = entry.getResetTime(windowMs);
-            long retryAfterSeconds = Math.max(1, (resetTime - System.currentTimeMillis()) / 1000);
+            long retryAfterSeconds = Math.max(1, (decision.resetTimeMillis() - System.currentTimeMillis()) / 1000);
             response.setHeader("Retry-After", String.valueOf(retryAfterSeconds));
 
-            // Send 429 response
             response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
             response.setContentType("application/json");
             response.getWriter().write(String.format(
@@ -169,7 +123,6 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     private String getClientIdentifier(HttpServletRequest request) {
         String xForwardedFor = request.getHeader("X-Forwarded-For");
         if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
-            // Take the first IP in the chain (original client)
             return xForwardedFor.split(",")[0].trim();
         }
 
@@ -184,40 +137,22 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     /**
      * Adds standard rate limit headers to the response.
      */
-    private void addRateLimitHeaders(HttpServletResponse response, RateLimitEntry entry, long windowMs) {
+    private void addRateLimitHeaders(HttpServletResponse response, RateLimiterStore.Decision decision) {
         response.setHeader("X-RateLimit-Limit", String.valueOf(config.getMaxRequests()));
-        response.setHeader("X-RateLimit-Remaining", String.valueOf(entry.getRemainingRequests(config.getMaxRequests())));
-        response.setHeader("X-RateLimit-Reset", String.valueOf(entry.getResetTime(windowMs) / 1000));
+        response.setHeader("X-RateLimit-Remaining", String.valueOf(decision.remaining()));
+        response.setHeader("X-RateLimit-Reset", String.valueOf(decision.resetTimeMillis() / 1000));
     }
 
     /**
-     * Cleans up expired rate limit entries to prevent memory leaks.
-     */
-    private void cleanupOldEntries() {
-        long now = System.currentTimeMillis();
-
-        if (now - lastCleanup.get() < CLEANUP_INTERVAL_MS) {
-            return;
-        }
-
-        if (lastCleanup.compareAndSet(lastCleanup.get(), now)) {
-            long windowMs = config.getWindowSeconds() * 1000L;
-            long expirationThreshold = now - (windowMs * 2);
-
-            rateLimitCache.entrySet().removeIf(entry ->
-                entry.getValue().windowStart < expirationThreshold
-            );
-
-            log.debug("Rate limit cache cleanup completed. Remaining entries: {}", rateLimitCache.size());
-        }
-    }
-
-    /**
-     * Gets the current cache size (for monitoring).
+     * Gets the current cache size (for monitoring). Only meaningful for the
+     * in-memory store; distributed stores report {@code -1}.
      *
-     * @return number of entries in the rate limit cache
+     * @return number of entries in an in-memory rate limit cache, or {@code -1}
      */
     public int getCacheSize() {
-        return rateLimitCache.size();
+        if (store instanceof InMemoryRateLimiterStore inMemory) {
+            return inMemory.getCacheSize();
+        }
+        return -1;
     }
 }

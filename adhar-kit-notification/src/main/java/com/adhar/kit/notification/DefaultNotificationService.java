@@ -16,7 +16,13 @@ import java.util.function.Consumer;
  * to the appropriate {@link NotificationChannel} based on the notification type.
  * <p>
  * Integrates with {@link NotificationRetryHandler} for automatic retry on failure
- * and {@link NotificationHistory} for tracking send attempts.
+ * and a {@link NotificationHistoryStore} for tracking send attempts. Before a send,
+ * the service optionally consults a {@link NotificationPreferenceStore} (recipient
+ * opt-outs are skipped silently), a {@link NotificationRateLimiter} (rate-limited
+ * sends are skipped and recorded as failures), and a
+ * {@link NotificationIdempotencyStore} (duplicate idempotency keys within the TTL
+ * are skipped silently). The idempotency key is read from the notification metadata
+ * entry {@value #IDEMPOTENCY_KEY_METADATA}.
  * </p>
  *
  * @author Adhar Platform Team
@@ -25,6 +31,9 @@ import java.util.function.Consumer;
 @Slf4j
 public class DefaultNotificationService implements NotificationService {
 
+    /** Metadata key carrying an optional idempotency key for duplicate suppression. */
+    public static final String IDEMPOTENCY_KEY_METADATA = "idempotencyKey";
+
     private static final String CLOUD_EVENT_SOURCE = "adhar-kit/notification";
     private static final String CLOUD_EVENT_TYPE_SENT = "com.adhar.notification.sent";
     private static final String CLOUD_EVENT_TYPE_FAILED = "com.adhar.notification.failed";
@@ -32,8 +41,11 @@ public class DefaultNotificationService implements NotificationService {
     private final List<NotificationChannel> channels;
     private final Executor executor;
     private final NotificationRetryHandler retryHandler;
-    private final NotificationHistory history;
+    private final NotificationHistoryStore history;
     private final Consumer<AdharCloudEvent<?>> eventPublisher;
+    private final NotificationPreferenceStore preferenceStore;
+    private final NotificationRateLimiter rateLimiter;
+    private final NotificationIdempotencyStore idempotencyStore;
 
     /**
      * Creates a new DefaultNotificationService with retry and history support.
@@ -41,10 +53,10 @@ public class DefaultNotificationService implements NotificationService {
      * @param channels     the list of available notification channels
      * @param executor     the executor for async operations
      * @param retryHandler the retry handler for failed sends (may be {@code null})
-     * @param history      the notification history recorder (may be {@code null})
+     * @param history      the notification history store (may be {@code null})
      */
     public DefaultNotificationService(List<NotificationChannel> channels, Executor executor,
-                                      NotificationRetryHandler retryHandler, NotificationHistory history) {
+                                      NotificationRetryHandler retryHandler, NotificationHistoryStore history) {
         this(channels, executor, retryHandler, history, null);
     }
 
@@ -54,17 +66,41 @@ public class DefaultNotificationService implements NotificationService {
      * @param channels       the list of available notification channels
      * @param executor       the executor for async operations
      * @param retryHandler   the retry handler for failed sends (may be {@code null})
-     * @param history        the notification history recorder (may be {@code null})
+     * @param history        the notification history store (may be {@code null})
      * @param eventPublisher optional consumer that receives CloudEvents after each send attempt (may be {@code null})
      */
     public DefaultNotificationService(List<NotificationChannel> channels, Executor executor,
-                                      NotificationRetryHandler retryHandler, NotificationHistory history,
+                                      NotificationRetryHandler retryHandler, NotificationHistoryStore history,
                                       Consumer<AdharCloudEvent<?>> eventPublisher) {
+        this(channels, executor, retryHandler, history, eventPublisher, null, null, null);
+    }
+
+    /**
+     * Creates a new DefaultNotificationService with all optional collaborators.
+     *
+     * @param channels         the list of available notification channels
+     * @param executor         the executor for async operations
+     * @param retryHandler     the retry handler for failed sends (may be {@code null})
+     * @param history          the notification history store (may be {@code null})
+     * @param eventPublisher   optional consumer that receives CloudEvents after each send attempt (may be {@code null})
+     * @param preferenceStore  optional per-recipient opt-out store consulted before sends (may be {@code null})
+     * @param rateLimiter      optional per-recipient/channel rate limiter (may be {@code null})
+     * @param idempotencyStore optional idempotency-key store for duplicate suppression (may be {@code null})
+     */
+    public DefaultNotificationService(List<NotificationChannel> channels, Executor executor,
+                                      NotificationRetryHandler retryHandler, NotificationHistoryStore history,
+                                      Consumer<AdharCloudEvent<?>> eventPublisher,
+                                      NotificationPreferenceStore preferenceStore,
+                                      NotificationRateLimiter rateLimiter,
+                                      NotificationIdempotencyStore idempotencyStore) {
         this.channels = channels;
         this.executor = executor;
         this.retryHandler = retryHandler;
         this.history = history;
         this.eventPublisher = eventPublisher;
+        this.preferenceStore = preferenceStore;
+        this.rateLimiter = rateLimiter;
+        this.idempotencyStore = idempotencyStore;
         log.info("DefaultNotificationService initialized with {} channel(s): {}, retry={}, history={}, cloudEvents={}",
                 channels.size(),
                 channels.stream()
@@ -79,6 +115,12 @@ public class DefaultNotificationService implements NotificationService {
     public void send(Notification notification) {
         var channel = findChannel(notification);
         String channelType = notification.type().name();
+
+        if (isOptedOut(notification, channelType)
+                || isRateLimited(notification, channelType)
+                || isDuplicate(notification, channelType)) {
+            return;
+        }
 
         log.debug("Routing notification [id={}, type={}] to {}",
                 notification.id(), notification.type(), channel.getClass().getSimpleName());
@@ -130,6 +172,47 @@ public class DefaultNotificationService implements NotificationService {
                         notification.id(), notification.type(), e.getMessage(), e);
             }
         }
+    }
+
+    /**
+     * Returns whether the recipient has opted out of the notification's channel, logging and
+     * skipping the send when so.
+     */
+    private boolean isOptedOut(Notification notification, String channelType) {
+        if (preferenceStore != null && preferenceStore.isOptedOut(notification.recipient(), notification.type())) {
+            log.info("Notification [id={}] skipped: recipient '{}' opted out of channel {}",
+                    notification.id(), notification.recipient(), channelType);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns whether the send is rate-limited for the recipient/channel pair, recording a
+     * failure history entry and skipping the send when so.
+     */
+    private boolean isRateLimited(Notification notification, String channelType) {
+        if (rateLimiter != null && !rateLimiter.tryAcquire(notification.recipient(), notification.type())) {
+            log.warn("Notification [id={}] rate-limited for recipient '{}' on channel {}",
+                    notification.id(), notification.recipient(), channelType);
+            recordHistory(notification, false, channelType, "Rate limit exceeded");
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns whether the notification carries an idempotency key already seen within the TTL,
+     * logging and skipping the send when so.
+     */
+    private boolean isDuplicate(Notification notification, String channelType) {
+        String key = notification.metadata().get(IDEMPOTENCY_KEY_METADATA);
+        if (idempotencyStore != null && key != null && !key.isBlank() && !idempotencyStore.register(key)) {
+            log.info("Notification [id={}] skipped on channel {}: duplicate idempotency key '{}'",
+                    notification.id(), channelType, key);
+            return true;
+        }
+        return false;
     }
 
     private NotificationChannel findChannel(Notification notification) {

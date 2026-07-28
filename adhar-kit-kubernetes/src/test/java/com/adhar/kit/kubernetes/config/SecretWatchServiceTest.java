@@ -132,6 +132,17 @@ class SecretWatchServiceTest {
     }
 
     @Test
+    void getActiveWatchCountReflectsRegisteredInformers() {
+        assertEquals(0, service.getActiveWatchCount());
+        SharedIndexInformer<Secret> informer = mock(SharedIndexInformer.class);
+        stubInform("db-secret", informer);
+
+        service.watch("db-secret", NS);
+
+        assertEquals(1, service.getActiveWatchCount());
+    }
+
+    @Test
     void watchLogsAndSkipsWhenClientUnavailable() {
         TestReflectionSupport.setField(service, "client", null);
 

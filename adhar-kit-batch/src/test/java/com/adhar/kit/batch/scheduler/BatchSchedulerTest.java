@@ -21,6 +21,7 @@ import java.util.concurrent.ScheduledFuture;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -127,6 +128,51 @@ class BatchSchedulerTest {
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> jobs.add("x"))
                 .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    @DisplayName("with a lock held elsewhere, the job is skipped on this instance")
+    void skipsWhenLockHeldElsewhere() throws Exception {
+        var lock = mock(com.adhar.kit.batch.lock.SchedulerLock.class);
+        when(lock.tryLock(eq("lockedJob"), any(java.time.Duration.class))).thenReturn(false);
+        var lockingScheduler = new BatchScheduler(taskScheduler, jobLauncher, applicationContext,
+                lock, java.time.Duration.ofMinutes(1));
+
+        lockingScheduler.runScheduled("lockedJob");
+
+        verify(applicationContext, org.mockito.Mockito.never()).getBean("lockedJob", Job.class);
+        verify(jobLauncher, org.mockito.Mockito.never()).run(any(Job.class), any(JobParameters.class));
+        verify(lock, org.mockito.Mockito.never()).unlock("lockedJob");
+    }
+
+    @Test
+    @DisplayName("with a lock acquired, the job runs and the lock is released")
+    void runsAndReleasesLockWhenAcquired() throws Exception {
+        var lock = mock(com.adhar.kit.batch.lock.SchedulerLock.class);
+        when(lock.tryLock(eq("myJob"), any(java.time.Duration.class))).thenReturn(true);
+        when(applicationContext.getBean("myJob", Job.class)).thenReturn(job);
+        var lockingScheduler = new BatchScheduler(taskScheduler, jobLauncher, applicationContext,
+                lock, java.time.Duration.ofMinutes(1));
+
+        lockingScheduler.runScheduled("myJob");
+
+        verify(jobLauncher).run(eq(job), any(JobParameters.class));
+        verify(lock).unlock("myJob");
+    }
+
+    @Test
+    @DisplayName("the lock is released even when the job launch fails")
+    void releasesLockOnFailure() {
+        var lock = mock(com.adhar.kit.batch.lock.SchedulerLock.class);
+        when(lock.tryLock(eq("badJob"), any(java.time.Duration.class))).thenReturn(true);
+        when(applicationContext.getBean("badJob", Job.class))
+                .thenThrow(new IllegalArgumentException("no such bean"));
+        var lockingScheduler = new BatchScheduler(taskScheduler, jobLauncher, applicationContext,
+                lock, java.time.Duration.ofMinutes(1));
+
+        lockingScheduler.runScheduled("badJob");
+
+        verify(lock).unlock("badJob");
     }
 
     private Runnable captureTask() {

@@ -1,11 +1,8 @@
 package com.adhar.kit.core.util;
 
-import org.slf4j.MDC;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -15,12 +12,19 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * {@link ExecutorService} decorator that propagates the SLF4J MDC (Mapped
- * Diagnostic Context) from the submitting thread to the worker thread.
+ * {@link ExecutorService} decorator that propagates thread-bound context from
+ * the submitting thread to the worker thread via a pluggable set of
+ * {@link ContextSnapshot} providers.
  *
- * <p>The MDC is snapshotted at submit time, restored in the worker thread
- * before the task runs, and cleared afterwards so pooled threads never leak
- * context between tasks.</p>
+ * <p>Each registered snapshot is captured at submit time, restored in the worker
+ * thread before the task runs, and reset afterwards so pooled threads never leak
+ * context between tasks. By default the providers come from the
+ * {@linkplain ContextSnapshotRegistry#getDefault() default registry}, which
+ * always includes the built-in SLF4J MDC snapshot ({@link MdcContextSnapshot})
+ * plus any {@link ContextSnapshot} discovered via the
+ * {@link java.util.ServiceLoader} or registered programmatically. This lets
+ * external modules (e.g. a {@code TenantContext}) propagate their own context
+ * without {@code adhar-kit-core} depending on them.</p>
  *
  * <p><b>Example:</b></p>
  * <pre>{@code
@@ -40,14 +44,31 @@ import java.util.concurrent.TimeoutException;
 public class ContextPropagatingExecutor implements ExecutorService {
 
     private final ExecutorService delegate;
+    private final List<ContextSnapshot> snapshots;
 
     /**
-     * Creates a context-propagating decorator around the given executor.
+     * Creates a context-propagating decorator around the given executor, using
+     * the snapshot providers from the default {@link ContextSnapshotRegistry}
+     * (MDC plus any registered or ServiceLoader-discovered providers).
      *
      * @param delegate the executor that actually runs the tasks
      */
     public ContextPropagatingExecutor(ExecutorService delegate) {
+        this(delegate, ContextSnapshotRegistry.getDefault().snapshots());
+    }
+
+    /**
+     * Creates a context-propagating decorator around the given executor using an
+     * explicit, fixed set of snapshot providers (bypassing the default
+     * registry). The providers are captured at construction time.
+     *
+     * @param delegate the executor that actually runs the tasks
+     * @param snapshots the snapshot providers to propagate
+     */
+    public ContextPropagatingExecutor(ExecutorService delegate, List<ContextSnapshot> snapshots) {
         this.delegate = Objects.requireNonNull(delegate, "delegate must not be null");
+        Objects.requireNonNull(snapshots, "snapshots must not be null");
+        this.snapshots = List.copyOf(snapshots);
     }
 
     /**
@@ -131,26 +152,26 @@ public class ContextPropagatingExecutor implements ExecutorService {
 
     private Runnable wrap(Runnable task) {
         Objects.requireNonNull(task, "task must not be null");
-        Map<String, String> context = MDC.getCopyOfContextMap();
+        Object[] captured = captureAll();
         return () -> {
-            applyContext(context);
+            restoreAll(captured);
             try {
                 task.run();
             } finally {
-                MDC.clear();
+                resetAll();
             }
         };
     }
 
     private <T> Callable<T> wrap(Callable<T> task) {
         Objects.requireNonNull(task, "task must not be null");
-        Map<String, String> context = MDC.getCopyOfContextMap();
+        Object[] captured = captureAll();
         return () -> {
-            applyContext(context);
+            restoreAll(captured);
             try {
                 return task.call();
             } finally {
-                MDC.clear();
+                resetAll();
             }
         };
     }
@@ -163,11 +184,23 @@ public class ContextPropagatingExecutor implements ExecutorService {
         return wrapped;
     }
 
-    private static void applyContext(Map<String, String> context) {
-        if (context != null) {
-            MDC.setContextMap(context);
-        } else {
-            MDC.clear();
+    private Object[] captureAll() {
+        Object[] tokens = new Object[snapshots.size()];
+        for (int i = 0; i < tokens.length; i++) {
+            tokens[i] = snapshots.get(i).capture();
+        }
+        return tokens;
+    }
+
+    private void restoreAll(Object[] tokens) {
+        for (int i = 0; i < snapshots.size(); i++) {
+            snapshots.get(i).restore(tokens[i]);
+        }
+    }
+
+    private void resetAll() {
+        for (ContextSnapshot snapshot : snapshots) {
+            snapshot.reset();
         }
     }
 }

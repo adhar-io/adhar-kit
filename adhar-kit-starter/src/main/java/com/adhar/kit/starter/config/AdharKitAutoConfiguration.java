@@ -5,7 +5,10 @@ import com.adhar.kit.commons.framework.FrameworkDetector;
 import com.adhar.kit.starter.AdharKitVersion;
 import com.adhar.kit.starter.AdharModuleAccess;
 import com.adhar.kit.starter.actuator.AdharKitEndpoint;
+import com.adhar.kit.starter.lifecycle.AdharGracefulShutdown;
+import com.adhar.kit.starter.lifecycle.AdharShutdownHook;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -203,6 +206,22 @@ public class AdharKitAutoConfiguration {
                 AdharModuleAccess moduleAccess,
                 ApplicationContext applicationContext) {
             return new AdharKitModuleRegistry(moduleAccess, applicationContext);
+        }
+
+        /**
+         * Creates the coordinated graceful-shutdown orchestrator. It gathers all
+         * {@link AdharShutdownHook} beans in the context (and merges in any
+         * discovered via the {@link java.util.ServiceLoader}) and, on context
+         * close, drives them through the stop-accepting-work / drain / close
+         * phases in a deliberate order.
+         *
+         * @param shutdownHooks the module shutdown hooks contributed as beans
+         * @return the graceful-shutdown lifecycle bean
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        public AdharGracefulShutdown adharGracefulShutdown(ObjectProvider<AdharShutdownHook> shutdownHooks) {
+            return new AdharGracefulShutdown(shutdownHooks.orderedStream().toList());
         }
     }
 

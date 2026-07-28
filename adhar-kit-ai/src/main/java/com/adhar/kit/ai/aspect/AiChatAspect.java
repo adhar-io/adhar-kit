@@ -3,6 +3,7 @@ package com.adhar.kit.ai.aspect;
 import com.adhar.kit.ai.annotation.AiChat;
 import com.adhar.kit.ai.model.AiChatRequest;
 import com.adhar.kit.ai.model.AiChatResponse;
+import com.adhar.kit.ai.prompt.PromptSubstitutor;
 import com.adhar.kit.ai.service.AiService;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -18,8 +19,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Aspect for processing @AiChat annotations.
@@ -62,8 +61,6 @@ import java.util.regex.Pattern;
 @Order(100)
 @Slf4j
 public class AiChatAspect {
-
-    private static final Pattern PARAM_PATTERN = Pattern.compile("\\{([^}]+)}");
 
     private final ObjectProvider<AiService> aiServiceProvider;
 
@@ -171,73 +168,12 @@ public class AiChatAspect {
     }
 
     /**
-     * Substitutes {param} placeholders in template.
+     * Substitutes {param} placeholders in template, delegating to the shared
+     * {@link PromptSubstitutor} so the annotation path and the
+     * {@link com.adhar.kit.ai.prompt.PromptTemplateRegistry} stay behaviourally
+     * identical.
      */
     private String substituteParameters(String template, Map<String, Object> params) {
-        if (template == null || template.isEmpty()) {
-            return template;
-        }
-
-        StringBuffer result = new StringBuffer();
-        Matcher matcher = PARAM_PATTERN.matcher(template);
-
-        while (matcher.find()) {
-            String paramName = matcher.group(1);
-            Object value = resolveParameter(paramName, params);
-            matcher.appendReplacement(result,
-                value != null ? Matcher.quoteReplacement(value.toString()) : "");
-        }
-        matcher.appendTail(result);
-
-        return result.toString();
-    }
-
-    /**
-     * Resolves parameter value, supporting nested properties.
-     */
-    private Object resolveParameter(String paramName, Map<String, Object> params) {
-        // Support nested properties like {product.name}
-        if (paramName.contains(".")) {
-            String[] parts = paramName.split("\\.");
-            Object current = params.get(parts[0]);
-
-            for (int i = 1; i < parts.length && current != null; i++) {
-                try {
-                    // Use reflection to get nested property
-                    Method getter = findGetter(current.getClass(), parts[i]);
-                    if (getter != null) {
-                        current = getter.invoke(current);
-                    } else {
-                        log.warn("No getter found for property: {}", parts[i]);
-                        return null;
-                    }
-                } catch (Exception e) {
-                    log.error("Error accessing nested property: {}", paramName, e);
-                    return null;
-                }
-            }
-            return current;
-        }
-
-        return params.get(paramName);
-    }
-
-    /**
-     * Finds getter method for property.
-     */
-    private Method findGetter(Class<?> clazz, String propertyName) {
-        String getterName = "get" + Character.toUpperCase(propertyName.charAt(0))
-            + propertyName.substring(1);
-        try {
-            return clazz.getMethod(getterName);
-        } catch (NoSuchMethodException e) {
-            // Try 'is' prefix for boolean
-            try {
-                return clazz.getMethod("is" + Character.toUpperCase(propertyName.charAt(0))
-                    + propertyName.substring(1));
-            } catch (NoSuchMethodException ex) {
-                return null;
-            }
-        }
+        return PromptSubstitutor.substitute(template, params);
     }
 }

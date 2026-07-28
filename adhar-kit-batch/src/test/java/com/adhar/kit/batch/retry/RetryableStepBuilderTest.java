@@ -84,6 +84,35 @@ class RetryableStepBuilderTest {
     }
 
     @Test
+    @DisplayName("defaults constructor applies the supplied retry limit when enabled")
+    void defaultsConstructorAppliesConfiguredLimit() {
+        new RetryableStepBuilder<>(simpleStepBuilder, 8, true).build();
+
+        verify(faultTolerantStepBuilder).retryLimit(8);
+    }
+
+    @Test
+    @DisplayName("defaults constructor skips retry entirely when retry disabled")
+    void defaultsConstructorDisablesRetry() {
+        new RetryableStepBuilder<String, String>(simpleStepBuilder, 5, false)
+                .retryOn(IllegalStateException.class)
+                .build();
+
+        verify(faultTolerantStepBuilder, never()).retryLimit(org.mockito.ArgumentMatchers.anyInt());
+        verify(faultTolerantStepBuilder, never()).retry(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("explicit withRetryLimit re-enables retry disabled by defaults")
+    void withRetryLimitOverridesDisabled() {
+        new RetryableStepBuilder<String, String>(simpleStepBuilder, 5, false)
+                .withRetryLimit(4)
+                .build();
+
+        verify(faultTolerantStepBuilder).retryLimit(4);
+    }
+
+    @Test
     @DisplayName("fluent setters return the same builder instance")
     void fluentReturnsSameInstance() {
         var builder = new RetryableStepBuilder<String, String>(simpleStepBuilder);

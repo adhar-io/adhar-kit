@@ -90,6 +90,16 @@ public class AdharSecurityProperties {
     private RbacProperties rbac = new RbacProperties();
 
     /**
+     * Configuration for JWKS key management and publishing.
+     */
+    private JwksProperties jwks = new JwksProperties();
+
+    /**
+     * Configuration for bearer token relay to downstream services.
+     */
+    private TokenRelayProperties tokenRelay = new TokenRelayProperties();
+
+    /**
      * Configuration properties for JWT token validation.
      */
     @Data
@@ -526,6 +536,18 @@ public class AdharSecurityProperties {
          * Time window in seconds for rate limiting.
          */
         private int windowSeconds = 60;
+
+        /**
+         * Counter store backing the rate limiter: {@code memory} (default, single node)
+         * or {@code redis} (distributed, requires spring-data-redis and a
+         * StringRedisTemplate bean).
+         */
+        private String store = "memory";
+
+        /**
+         * Redis key namespace prefix (only used when {@code store=redis}).
+         */
+        private String redisKeyPrefix = "adhar:security:ratelimit:";
     }
 
     /**
@@ -585,6 +607,61 @@ public class AdharSecurityProperties {
          * Must be at least 256 bits (32 characters) for HS256.
          */
         private String secret;
+
+        /**
+         * Store backing refresh-token families and revocations: {@code memory}
+         * (default, single node) or {@code redis} (distributed, requires
+         * spring-data-redis and a StringRedisTemplate bean).
+         */
+        private String store = "memory";
+
+        /**
+         * Redis key namespace prefix (only used when {@code store=redis}).
+         */
+        private String redisKeyPrefix = "adhar:security:refresh:";
+    }
+
+    /**
+     * Configuration properties for JWKS key management and publishing.
+     */
+    @Data
+    public static class JwksProperties {
+        /**
+         * Whether the JWKS key manager and publishing endpoint are enabled.
+         */
+        private boolean enabled = false;
+
+        /**
+         * The path at which the public JWKS is published.
+         */
+        private String path = "/.well-known/jwks.json";
+
+        /**
+         * RSA signing key size in bits.
+         */
+        private int keySize = 2048;
+
+        /**
+         * Number of previous keys to retain (in addition to the current key) so that
+         * recently-issued tokens still verify after a rotation.
+         */
+        private int retainKeys = 1;
+    }
+
+    /**
+     * Configuration properties for bearer token relay to downstream services.
+     */
+    @Data
+    public static class TokenRelayProperties {
+        /**
+         * Whether the downstream bearer-token relay interceptor is enabled.
+         */
+        private boolean enabled = false;
+
+        /**
+         * The inbound request header carrying the bearer token to relay.
+         */
+        private String headerName = "Authorization";
     }
 
     /**

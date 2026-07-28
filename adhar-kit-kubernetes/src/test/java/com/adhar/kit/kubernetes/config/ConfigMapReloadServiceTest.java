@@ -187,6 +187,17 @@ class ConfigMapReloadServiceTest {
     }
 
     @Test
+    void getActiveWatchCountReflectsRegisteredInformers() {
+        assertEquals(0, service.getActiveWatchCount());
+        SharedIndexInformer<ConfigMap> informer = mock(SharedIndexInformer.class);
+        stubInform("app-config", informer);
+
+        service.watch("app-config", NS);
+
+        assertEquals(1, service.getActiveWatchCount());
+    }
+
+    @Test
     void constructorDegradesGracefullyWithoutCluster() {
         ConfigMapReloadService realService = new ConfigMapReloadService(eventPublisher);
         // No real cluster available in this test environment - client creation must have

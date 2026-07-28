@@ -138,6 +138,13 @@
             <artifactId>adhar-kit-commons</artifactId>
             <version>0.1.0-SNAPSHOT</version>
         </dependency>
+        <!-- Metrics bridge (Optional - activated when adhar-kit-metrics is present) -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-metrics</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
+            <optional>true</optional>
+        </dependency>
 
         <!-- Utilities -->
         <dependency>

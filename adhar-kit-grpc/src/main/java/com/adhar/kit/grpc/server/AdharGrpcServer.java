@@ -3,9 +3,12 @@ package com.adhar.kit.grpc.server;
 import com.adhar.kit.grpc.config.GrpcProperties;
 import com.adhar.kit.grpc.exception.GrpcServiceConfigurationException;
 import com.adhar.kit.grpc.interceptor.AuthServerInterceptor;
+import com.adhar.kit.grpc.interceptor.ConcurrencyLimitServerInterceptor;
 import com.adhar.kit.grpc.interceptor.ExceptionHandlerInterceptor;
+import com.adhar.kit.grpc.interceptor.GrpcObserver;
 import com.adhar.kit.grpc.interceptor.LoggingInterceptor;
 import com.adhar.kit.grpc.interceptor.MetricsServerInterceptor;
+import com.adhar.kit.grpc.interceptor.TracingServerInterceptor;
 import com.adhar.kit.grpc.util.GrpcUtils;
 import io.grpc.Grpc;
 import io.grpc.Server;
@@ -69,6 +72,8 @@ public class AdharGrpcServer {
     private final HealthStatusManager healthStatusManager = new HealthStatusManager();
     private volatile MeterRegistry meterRegistry;
     private volatile GrpcAuthenticator authenticator;
+    private volatile GrpcObserver grpcObserver = GrpcObserver.NOOP;
+    private volatile ConcurrencyLimitServerInterceptor concurrencyLimitInterceptor;
     private Server server;
 
     /**
@@ -117,6 +122,33 @@ public class AdharGrpcServer {
     }
 
     /**
+     * Supplies the {@link GrpcObserver} used by {@link TracingServerInterceptor}
+     * to record spans. Optional; when never called (or called with
+     * {@code null}) the tracing interceptor still propagates the W3C
+     * {@code traceparent} header and MDC correlation, but records no spans.
+     *
+     * @param grpcObserver observer to record spans with
+     * @return this server for chaining
+     */
+    public AdharGrpcServer withGrpcObserver(GrpcObserver grpcObserver) {
+        this.grpcObserver = grpcObserver != null ? grpcObserver : GrpcObserver.NOOP;
+        return this;
+    }
+
+    /**
+     * Supplies a {@link ConcurrencyLimitServerInterceptor} to bound concurrent
+     * in-flight calls. Optional; if never called, no concurrency limiting is
+     * applied.
+     *
+     * @param concurrencyLimitInterceptor the concurrency-limit interceptor
+     * @return this server for chaining
+     */
+    public AdharGrpcServer withConcurrencyLimitInterceptor(ConcurrencyLimitServerInterceptor concurrencyLimitInterceptor) {
+        this.concurrencyLimitInterceptor = concurrencyLimitInterceptor;
+        return this;
+    }
+
+    /**
      * Number of services registered so far, exposed for testing and for
      * {@code GrpcServiceRegistrar} to report what it wired up.
      *
@@ -161,11 +193,24 @@ public class AdharGrpcServer {
         List<ServerInterceptor> interceptors = new ArrayList<>();
         interceptors.add(new ExceptionHandlerInterceptor());
         interceptors.add(new LoggingInterceptor());
+        if (properties.getObservability().isEnableTracing()) {
+            // Added after Logging so its interceptCall (and thus MDC traceId/spanId setup)
+            // runs before LoggingInterceptor's, giving log lines the trace correlation ids.
+            interceptors.add(new TracingServerInterceptor(grpcObserver));
+            log.debug("gRPC server tracing enabled");
+        }
         if (properties.getAuth().isEnabled()) {
             GrpcAuthenticator effectiveAuthenticator =
                     authenticator != null ? authenticator : new PermitAllGrpcAuthenticator();
             interceptors.add(new AuthServerInterceptor(effectiveAuthenticator));
             log.info("gRPC authentication enabled");
+        }
+        ConcurrencyLimitServerInterceptor concurrencyLimiter = this.concurrencyLimitInterceptor;
+        if (concurrencyLimiter != null) {
+            // Placed inside Metrics so a shed (RESOURCE_EXHAUSTED) call is still recorded,
+            // but outside auth/tracing so load is shed after admission checks are cheap.
+            interceptors.add(concurrencyLimiter);
+            log.info("gRPC concurrency limiting enabled");
         }
         MeterRegistry registry = this.meterRegistry;
         if (registry != null && properties.getObservability().isEnableMetrics()) {

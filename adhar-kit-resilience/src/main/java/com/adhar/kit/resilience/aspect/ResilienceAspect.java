@@ -5,6 +5,8 @@ import com.adhar.kit.resilience.annotation.CircuitBreaker;
 import com.adhar.kit.resilience.annotation.RateLimit;
 import com.adhar.kit.resilience.annotation.Retry;
 import com.adhar.kit.resilience.annotation.TimeLimiter;
+import com.adhar.kit.resilience.cache.FallbackCache;
+import com.adhar.kit.resilience.chaos.ChaosPolicy;
 import io.github.resilience4j.bulkhead.BulkheadConfig;
 import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
@@ -15,7 +17,6 @@ import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.retry.RetryRegistry;
 import io.github.resilience4j.timelimiter.TimeLimiterConfig;
 import io.github.resilience4j.timelimiter.TimeLimiterRegistry;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -27,6 +28,8 @@ import java.lang.annotation.Annotation;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -64,7 +67,6 @@ import java.util.function.Supplier;
 @Slf4j
 @Aspect
 @Component
-@RequiredArgsConstructor
 public class ResilienceAspect {
 
     private static final String RESILIENCE_POINTCUT =
@@ -102,6 +104,61 @@ public class ResilienceAspect {
             new ConcurrentHashMap<>();
     private final ConcurrentMap<String, io.github.resilience4j.timelimiter.TimeLimiter> timeLimiterCache =
             new ConcurrentHashMap<>();
+
+    /** Optional "last known good" result cache; {@code null} when the fallback cache is not configured. */
+    private final FallbackCache fallbackCache;
+    /** When {@code true}, the fallback cache applies to every annotated method regardless of annotation attributes. */
+    private final boolean globalFallbackCacheEnabled;
+    /** Optional chaos policy applied at the innermost point of the decorator chain; {@code null} when disabled. */
+    private final ChaosPolicy chaosPolicy;
+
+    /**
+     * Backward-compatible constructor without fallback cache or chaos support.
+     *
+     * @param circuitBreakerRegistry circuit breaker registry
+     * @param retryRegistry retry registry
+     * @param rateLimiterRegistry rate limiter registry
+     * @param bulkheadRegistry bulkhead registry
+     * @param timeLimiterRegistry time limiter registry
+     */
+    public ResilienceAspect(CircuitBreakerRegistry circuitBreakerRegistry,
+                            RetryRegistry retryRegistry,
+                            RateLimiterRegistry rateLimiterRegistry,
+                            BulkheadRegistry bulkheadRegistry,
+                            TimeLimiterRegistry timeLimiterRegistry) {
+        this(circuitBreakerRegistry, retryRegistry, rateLimiterRegistry, bulkheadRegistry,
+                timeLimiterRegistry, null, false, null);
+    }
+
+    /**
+     * Full constructor.
+     *
+     * @param circuitBreakerRegistry circuit breaker registry
+     * @param retryRegistry retry registry
+     * @param rateLimiterRegistry rate limiter registry
+     * @param bulkheadRegistry bulkhead registry
+     * @param timeLimiterRegistry time limiter registry
+     * @param fallbackCache optional last-known-good result cache; may be {@code null}
+     * @param globalFallbackCacheEnabled whether the cache applies to all annotated methods
+     * @param chaosPolicy optional chaos policy; may be {@code null}
+     */
+    public ResilienceAspect(CircuitBreakerRegistry circuitBreakerRegistry,
+                            RetryRegistry retryRegistry,
+                            RateLimiterRegistry rateLimiterRegistry,
+                            BulkheadRegistry bulkheadRegistry,
+                            TimeLimiterRegistry timeLimiterRegistry,
+                            FallbackCache fallbackCache,
+                            boolean globalFallbackCacheEnabled,
+                            ChaosPolicy chaosPolicy) {
+        this.circuitBreakerRegistry = circuitBreakerRegistry;
+        this.retryRegistry = retryRegistry;
+        this.rateLimiterRegistry = rateLimiterRegistry;
+        this.bulkheadRegistry = bulkheadRegistry;
+        this.timeLimiterRegistry = timeLimiterRegistry;
+        this.fallbackCache = fallbackCache;
+        this.globalFallbackCacheEnabled = globalFallbackCacheEnabled;
+        this.chaosPolicy = chaosPolicy;
+    }
 
     // ------------------------------------------------------------------
     // Unified advice
@@ -194,24 +251,85 @@ public class ResilienceAspect {
             throws Throwable {
         boolean async = method != null && CompletionStage.class.isAssignableFrom(method.getReturnType());
         String fallbackMethod = annotations.fallbackMethod();
+        boolean cacheEnabled = fallbackCache != null && annotations.fallbackCacheEnabled(globalFallbackCacheEnabled);
+        String cacheKey = cacheEnabled ? buildCacheKey(method, joinPoint) : null;
 
         if (log.isDebugEnabled()) {
-            log.debug("Applying resilience decorators {} to method '{}' (async={})",
-                    annotations.describe(), joinPoint.getSignature().getName(), async);
+            log.debug("Applying resilience decorators {} to method '{}' (async={}, fallbackCache={})",
+                    annotations.describe(), joinPoint.getSignature().getName(), async, cacheEnabled);
+        }
+
+        if (async) {
+            return executeAsyncWithFallback(joinPoint, annotations, fallbackMethod, cacheEnabled, cacheKey);
         }
 
         try {
-            return async
-                    ? executeAsync(joinPoint, annotations, fallbackMethod)
-                    : executeSync(joinPoint, annotations);
+            Object result = executeSync(joinPoint, annotations);
+            if (cacheEnabled) {
+                fallbackCache.put(cacheKey, result);
+            }
+            return result;
         } catch (Throwable t) {
             Throwable cause = unwrap(t);
             if (!fallbackMethod.isEmpty()) {
-                Object result = invokeFallback(joinPoint, fallbackMethod, cause);
-                return adaptFallbackResult(result, async);
+                return adaptFallbackResult(invokeFallback(joinPoint, fallbackMethod, cause), false);
+            }
+            if (cacheEnabled) {
+                Optional<Object> cached = fallbackCache.get(cacheKey);
+                if (cached.isPresent()) {
+                    log.warn("resilience.fallback-cache serving last known good result for '{}' after failure: {}",
+                            joinPoint.getSignature().getName(), cause.toString());
+                    return cached.get();
+                }
             }
             throw cause;
         }
+    }
+
+    /**
+     * Asynchronous execution with fallback-cache support layered on top of the async
+     * decorator chain (which already applies any {@code fallbackMethod}). Successful
+     * results are cached; when no fallback method is configured and the future fails, the
+     * last known good cached result is served instead.
+     */
+    @SuppressWarnings("unchecked")
+    private Object executeAsyncWithFallback(ProceedingJoinPoint joinPoint, ResilienceAnnotations annotations,
+                                            String fallbackMethod, boolean cacheEnabled, String cacheKey) {
+        CompletableFuture<Object> future =
+                (CompletableFuture<Object>) executeAsync(joinPoint, annotations, fallbackMethod);
+        if (!cacheEnabled) {
+            return future;
+        }
+        if (!fallbackMethod.isEmpty()) {
+            // A fallback method takes precedence; still cache successful results for later use.
+            return future.whenComplete((value, throwable) -> {
+                if (throwable == null) {
+                    fallbackCache.put(cacheKey, value);
+                }
+            });
+        }
+        String methodName = joinPoint.getSignature().getName();
+        return future
+                .thenApply(value -> {
+                    fallbackCache.put(cacheKey, value);
+                    return value;
+                })
+                .exceptionallyCompose(throwable -> {
+                    Optional<Object> cached = fallbackCache.get(cacheKey);
+                    if (cached.isPresent()) {
+                        log.warn("resilience.fallback-cache serving last known good result for '{}' after failure: {}",
+                                methodName, unwrap(throwable).toString());
+                        return CompletableFuture.completedFuture(cached.get());
+                    }
+                    return CompletableFuture.failedFuture(unwrap(throwable));
+                });
+    }
+
+    private static String buildCacheKey(Method method, ProceedingJoinPoint joinPoint) {
+        String base = method != null
+                ? method.getDeclaringClass().getName() + "#" + method.getName()
+                : joinPoint.getSignature().toLongString();
+        return base + ":" + Arrays.deepHashCode(joinPoint.getArgs());
     }
 
     /**
@@ -252,6 +370,7 @@ public class ResilienceAspect {
                                 String fallbackMethod) {
         Supplier<CompletionStage<Object>> supplier = () -> {
             try {
+                injectChaos(joinPoint);
                 Object result = joinPoint.proceed();
                 return result == null
                         ? CompletableFuture.completedFuture(null)
@@ -312,13 +431,25 @@ public class ResilienceAspect {
         };
     }
 
-    private static Object proceed(ProceedingJoinPoint joinPoint) {
+    private Object proceed(ProceedingJoinPoint joinPoint) {
         try {
+            injectChaos(joinPoint);
             return joinPoint.proceed();
         } catch (RuntimeException | Error e) {
             throw e;
         } catch (Throwable t) {
             throw new ResilienceInvocationException(t);
+        }
+    }
+
+    /**
+     * Applies the optional chaos policy at the innermost point of the decorator chain,
+     * so injected latency and errors are observed by the surrounding decorators exactly
+     * as real behaviour would be.
+     */
+    private void injectChaos(ProceedingJoinPoint joinPoint) {
+        if (chaosPolicy != null) {
+            chaosPolicy.apply(joinPoint.getSignature().getName());
         }
     }
 
@@ -559,6 +690,23 @@ public class ResilienceAspect {
         boolean isEmpty() {
             return circuitBreaker == null && retry == null && rateLimit == null
                     && bulkhead == null && timeLimiter == null;
+        }
+
+        /**
+         * Determines whether the fallback cache should be used for this method.
+         *
+         * @param global global fallback-cache enablement flag
+         * @return {@code true} when caching is enabled globally or via a
+         *         {@code fallbackCache=true} attribute on the retry / circuit breaker
+         */
+        boolean fallbackCacheEnabled(boolean global) {
+            if (global) {
+                return true;
+            }
+            if (circuitBreaker != null && circuitBreaker.fallbackCache()) {
+                return true;
+            }
+            return retry != null && retry.fallbackCache();
         }
 
         String fallbackMethod() {

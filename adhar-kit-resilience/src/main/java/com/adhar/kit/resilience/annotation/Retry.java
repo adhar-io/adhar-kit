@@ -34,6 +34,15 @@ public @interface Retry {
     String fallbackMethod() default "";
 
     /**
+     * Enables the "last known good" fallback cache for this method. When {@code true},
+     * successful results are cached and, if a later call fails after all retries are
+     * exhausted with no {@link #fallbackMethod()} configured, the most recent cached result
+     * is returned instead of propagating the failure. Requires the fallback cache bean.
+     * @return whether the fallback cache is enabled for this method
+     */
+    boolean fallbackCache() default false;
+
+    /**
      * Maximum number of attempts (including the initial call).
      * {@code -1} means use default config (3).
      * @return max attempts

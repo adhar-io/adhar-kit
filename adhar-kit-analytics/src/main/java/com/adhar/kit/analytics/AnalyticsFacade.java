@@ -1,6 +1,9 @@
 package com.adhar.kit.analytics;
 
 import com.adhar.kit.analytics.batching.BatchingEventSender;
+import com.adhar.kit.analytics.batching.JsonlSpillStore;
+import com.adhar.kit.analytics.batching.RetrySettings;
+import com.adhar.kit.analytics.batching.SpillStore;
 import com.adhar.kit.analytics.client.CaptureEvent;
 import com.adhar.kit.analytics.client.DecideResult;
 import com.adhar.kit.analytics.client.OkHttpPostHogClient;
@@ -9,12 +12,14 @@ import com.adhar.kit.analytics.config.AnalyticsProperties;
 import com.adhar.kit.analytics.consent.ConsentGateway;
 import com.adhar.kit.analytics.consent.InMemoryConsentStore;
 import com.adhar.kit.analytics.flag.FeatureFlagCache;
+import com.adhar.kit.analytics.flag.LocalFlagEvaluator;
 import com.adhar.kit.analytics.pii.PiiScrubber;
 import com.adhar.kit.commons.event.AdharCloudEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.OkHttpClient;
 
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Collections;
@@ -108,6 +113,13 @@ public class AnalyticsFacade {
      * TTL-based feature flag decision cache.
      */
     private volatile FeatureFlagCache featureFlagCache;
+
+    /**
+     * Optional local flag evaluator; when set and holding a matching definition,
+     * flags are decided in-process, falling back to the {@code /decide} cache
+     * when a flag cannot be evaluated locally.
+     */
+    private volatile LocalFlagEvaluator localFlagEvaluator;
 
     /**
      * Indicates if analytics is available and configured.
@@ -207,7 +219,9 @@ public class AnalyticsFacade {
                         postHogProps.getBatchSize(),
                         Duration.ofSeconds(postHogProps.getFlushInterval()),
                         postHogProps.getQueueCapacity(),
-                        postHogProps.getOverflowPolicy())
+                        postHogProps.getOverflowPolicy(),
+                        buildRetrySettings(postHogProps),
+                        buildSpillStore(postHogProps))
                 : null;
 
         this.featureFlagCache = new FeatureFlagCache(
@@ -474,6 +488,35 @@ public class AnalyticsFacade {
     }
 
     /**
+     * Checks if a feature flag is enabled for a user, preferring local
+     * evaluation over the {@code /decide} network path.
+     *
+     * <p>When a {@link LocalFlagEvaluator} is configured and holds a definition
+     * that can be decided from {@code personProperties} (rollout % and property
+     * conditions), the decision is made entirely in-process. Otherwise this
+     * falls back to {@link #isFeatureEnabled(String, String)} (the TTL-cached
+     * {@code /decide} path).</p>
+     *
+     * @param userId           user identifier
+     * @param featureKey       feature flag key
+     * @param personProperties person properties for local condition matching
+     * @return true if the feature is enabled
+     */
+    public boolean isFeatureEnabled(String userId, String featureKey, Map<String, Object> personProperties) {
+        if (!available) {
+            return false;
+        }
+        LocalFlagEvaluator evaluator = this.localFlagEvaluator;
+        if (evaluator != null) {
+            Optional<LocalFlagEvaluator.FlagEvaluation> local = evaluator.evaluate(featureKey, userId, personProperties);
+            if (local.isPresent()) {
+                return local.get().enabled();
+            }
+        }
+        return isFeatureEnabled(userId, featureKey);
+    }
+
+    /**
      * Gets the feature flag value (variant) for a user.
      *
      * @param userId user identifier
@@ -503,6 +546,47 @@ public class AnalyticsFacade {
             log.error("Failed to get feature flag value: " + featureKey, e);
             return null;
         }
+    }
+
+    /**
+     * Gets the feature flag value (variant) for a user, preferring local
+     * evaluation over the {@code /decide} network path.
+     *
+     * @param userId           user identifier
+     * @param featureKey       feature flag key
+     * @param personProperties person properties for local condition matching
+     * @return the flag value/variant, or null when disabled or absent
+     */
+    public String getFeatureFlag(String userId, String featureKey, Map<String, Object> personProperties) {
+        if (!available) {
+            return null;
+        }
+        LocalFlagEvaluator evaluator = this.localFlagEvaluator;
+        if (evaluator != null) {
+            Optional<LocalFlagEvaluator.FlagEvaluation> local = evaluator.evaluate(featureKey, userId, personProperties);
+            if (local.isPresent()) {
+                Object value = local.get().value();
+                return value != null ? value.toString() : null;
+            }
+        }
+        return getFeatureFlag(userId, featureKey);
+    }
+
+    /**
+     * Sets the local flag evaluator used by the {@code *WithProperties} flag
+     * methods. Wired by {@code AnalyticsAutoConfiguration} when
+     * {@code adhar.analytics.post-hog.local-evaluation-enabled=true}.
+     */
+    public void setLocalFlagEvaluator(LocalFlagEvaluator localFlagEvaluator) {
+        this.localFlagEvaluator = localFlagEvaluator;
+    }
+
+    /**
+     * Gets the local flag evaluator, so callers can load/refresh flag
+     * definitions (e.g. from PostHog's {@code /local_evaluation} endpoint).
+     */
+    public LocalFlagEvaluator getLocalFlagEvaluator() {
+        return localFlagEvaluator;
     }
 
     /**
@@ -643,6 +727,33 @@ public class AnalyticsFacade {
     // ==================== Private Methods ====================
 
     /**
+     * Builds the {@link RetrySettings} for the batch sender from bound properties.
+     */
+    private static RetrySettings buildRetrySettings(AnalyticsProperties.PostHog props) {
+        if (!props.isRetryEnabled()) {
+            return RetrySettings.disabled();
+        }
+        return new RetrySettings(
+                true,
+                props.getRetryMaxAttempts(),
+                props.getRetryInitialBackoffMillis(),
+                props.getRetryBackoffMultiplier(),
+                props.getRetryMaxBackoffMillis(),
+                props.getRetryMaxBatches());
+    }
+
+    /**
+     * Builds the optional offline {@link SpillStore} from bound properties;
+     * returns {@code null} when spill is disabled or no directory is configured.
+     */
+    private static SpillStore buildSpillStore(AnalyticsProperties.PostHog props) {
+        if (!props.isSpillEnabled() || props.getSpillDirectory() == null || props.getSpillDirectory().isBlank()) {
+            return null;
+        }
+        return new JsonlSpillStore(Path.of(props.getSpillDirectory()));
+    }
+
+    /**
      * Sends a single event either through the async batch queue or, if
      * batching is disabled, synchronously via {@code /capture/}.
      */
@@ -690,7 +801,8 @@ public class AnalyticsFacade {
                     new OkHttpClient.Builder().build(), new ObjectMapper(), apiKey, apiUrl);
             this.batchingSender = new BatchingEventSender(
                     postHogClient, DEFAULT_BATCH_SIZE, Duration.ofSeconds(DEFAULT_FLUSH_INTERVAL_SECONDS),
-                    DEFAULT_QUEUE_CAPACITY, AnalyticsProperties.OverflowPolicy.DROP_OLDEST);
+                    DEFAULT_QUEUE_CAPACITY, AnalyticsProperties.OverflowPolicy.DROP_OLDEST,
+                    RetrySettings.defaults(), null);
 
             available = true;
             log.info("PostHog initialized successfully. Host: {}", apiUrl);

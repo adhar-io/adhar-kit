@@ -2,7 +2,11 @@ package com.adhar.kit.dapr.client;
 
 import io.dapr.client.DaprClient;
 import io.dapr.client.DaprClientBuilder;
+import io.dapr.client.DaprPreviewClient;
+import io.dapr.client.domain.LockRequest;
 import io.dapr.client.domain.State;
+import io.dapr.client.domain.UnlockRequest;
+import io.dapr.client.domain.UnlockResponseStatus;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
@@ -61,21 +65,38 @@ import java.util.Optional;
 public class AdharDaprClient implements AutoCloseable {
 
     private final DaprClient daprClient;
+    private final DaprPreviewClient previewClient;
 
     /**
-     * Constructor with default Dapr client.
+     * Constructor with default Dapr client (and preview client for distributed locking).
      */
     public AdharDaprClient() {
-        this(new DaprClientBuilder().build());
+        DaprClientBuilder builder = new DaprClientBuilder();
+        this.daprClient = builder.build();
+        this.previewClient = builder.buildPreviewClient();
     }
 
     /**
-     * Constructor with custom Dapr client.
+     * Constructor with a custom Dapr client. No preview client is supplied, so the
+     * distributed-lock methods ({@link #tryLock}/{@link #unlock}) are unavailable; use
+     * {@link #AdharDaprClient(DaprClient, DaprPreviewClient)} to enable them.
      *
      * @param daprClient the Dapr client
      */
     public AdharDaprClient(DaprClient daprClient) {
+        this(daprClient, null);
+    }
+
+    /**
+     * Constructor with custom Dapr and preview clients. The preview client backs the
+     * distributed-lock building block.
+     *
+     * @param daprClient    the Dapr client
+     * @param previewClient the Dapr preview client (may be {@code null} to disable locking)
+     */
+    public AdharDaprClient(DaprClient daprClient, DaprPreviewClient previewClient) {
         this.daprClient = daprClient;
+        this.previewClient = previewClient;
     }
 
     // ==================== STATE MANAGEMENT ====================
@@ -372,22 +393,47 @@ public class AdharDaprClient implements AutoCloseable {
      * @return true if lock acquired
      */
     public boolean tryLock(String storeName, String resourceId, String lockOwner, int expiryInSeconds) {
-        throw new UnsupportedOperationException(
-            "Distributed lock API is not available in Dapr SDK 1.11.0. Please upgrade to a newer version.");
+        requirePreviewClient();
+        try {
+            Boolean acquired = previewClient.tryLock(
+                new LockRequest(storeName, resourceId, lockOwner, expiryInSeconds)).block();
+            boolean result = Boolean.TRUE.equals(acquired);
+            log.debug("tryLock: {}/{} owner={} acquired={}", storeName, resourceId, lockOwner, result);
+            return result;
+        } catch (Exception e) {
+            log.error("Failed to acquire lock: {}/{}", storeName, resourceId, e);
+            throw new RuntimeException("Failed to acquire lock", e);
+        }
     }
 
     /**
      * Releases a distributed lock.
-     * Note: This feature requires a newer version of the Dapr SDK.
      *
      * @param storeName lock store name
      * @param resourceId resource ID to unlock
      * @param lockOwner lock owner ID
-     * @return true if lock released
+     * @return true if lock released (status SUCCESS); false if it did not exist or belonged to
+     *         another owner
      */
     public boolean unlock(String storeName, String resourceId, String lockOwner) {
-        throw new UnsupportedOperationException(
-            "Distributed lock API is not available in Dapr SDK 1.11.0. Please upgrade to a newer version.");
+        requirePreviewClient();
+        try {
+            UnlockResponseStatus status = previewClient.unlock(
+                new UnlockRequest(storeName, resourceId, lockOwner)).block();
+            log.debug("unlock: {}/{} owner={} status={}", storeName, resourceId, lockOwner, status);
+            return status == UnlockResponseStatus.SUCCESS;
+        } catch (Exception e) {
+            log.error("Failed to release lock: {}/{}", storeName, resourceId, e);
+            throw new RuntimeException("Failed to release lock", e);
+        }
+    }
+
+    private void requirePreviewClient() {
+        if (previewClient == null) {
+            throw new IllegalStateException(
+                "Distributed lock requires a DaprPreviewClient. Use the default constructor or "
+                    + "new AdharDaprClient(daprClient, previewClient) to enable it.");
+        }
     }
 
     // ==================== CRYPTOGRAPHY ====================
@@ -437,13 +483,16 @@ public class AdharDaprClient implements AutoCloseable {
 
     @Override
     public void close() {
-        if (daprClient != null) {
-            try {
+        try {
+            if (daprClient != null) {
                 daprClient.close();
-                log.info("Dapr client closed");
-            } catch (Exception e) {
-                log.error("Failed to close Dapr client", e);
             }
+            if (previewClient != null) {
+                previewClient.close();
+            }
+            log.info("Dapr client closed");
+        } catch (Exception e) {
+            log.error("Failed to close Dapr client", e);
         }
     }
 }

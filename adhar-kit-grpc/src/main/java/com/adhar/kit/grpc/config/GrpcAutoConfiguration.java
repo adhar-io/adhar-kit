@@ -1,6 +1,9 @@
 package com.adhar.kit.grpc.config;
 
 import com.adhar.kit.grpc.client.AdharGrpcClientFactory;
+import com.adhar.kit.grpc.interceptor.ConcurrencyLimitServerInterceptor;
+import com.adhar.kit.grpc.interceptor.GrpcObserver;
+import com.adhar.kit.grpc.interceptor.MicrometerGrpcObserver;
 import com.adhar.kit.grpc.server.AdharGrpcServer;
 import com.adhar.kit.grpc.server.GrpcAuthenticator;
 import com.adhar.kit.grpc.server.PermitAllGrpcAuthenticator;
@@ -8,9 +11,11 @@ import com.adhar.kit.grpc.server.StaticTokenAuthenticator;
 import com.adhar.kit.grpc.spring.GrpcClientBeanPostProcessor;
 import com.adhar.kit.grpc.spring.GrpcServiceRegistrar;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.observation.ObservationRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -169,6 +174,59 @@ public class GrpcAutoConfiguration {
     }
 
     /**
+     * Creates the {@link ConcurrencyLimitServerInterceptor} that bounds
+     * concurrent in-flight calls, when {@code adhar.grpc.concurrency.enabled}
+     * is {@code true}. The interceptor is wired into the server by
+     * {@link #grpcInterceptorBinder}. Applications can override this bean to
+     * supply their own limiter.
+     *
+     * @return the concurrency-limit interceptor bean
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.grpc.concurrency", name = "enabled", havingValue = "true")
+    public ConcurrencyLimitServerInterceptor grpcConcurrencyLimitInterceptor() {
+        GrpcProperties.ConcurrencyConfig concurrency = grpcProperties.getConcurrency();
+        return new ConcurrencyLimitServerInterceptor(
+                concurrency.getGlobalLimit(), concurrency.getServiceLimits());
+    }
+
+    /**
+     * Wires the optional {@link GrpcObserver} (for tracing spans) and the
+     * optional {@link ConcurrencyLimitServerInterceptor} into the
+     * {@link AdharGrpcServer} and {@link AdharGrpcClientFactory} once all beans
+     * are constructed but before the server is started (which happens in the
+     * last {@code SmartLifecycle} phase). Both are looked up lazily via
+     * {@link ObjectProvider} so their absence is not an error - the tracing
+     * interceptors then degrade to W3C {@code traceparent} + MDC correlation
+     * only, and no concurrency limiting is applied.
+     *
+     * @param adharGrpcServer        server to wire into
+     * @param adharGrpcClientFactory client factory to wire into
+     * @param observerProvider       optional observer provider
+     * @param concurrencyProvider    optional concurrency-limit interceptor provider
+     * @return the binder bean
+     */
+    @Bean
+    public InitializingBean grpcInterceptorBinder(AdharGrpcServer adharGrpcServer,
+                                                  AdharGrpcClientFactory adharGrpcClientFactory,
+                                                  ObjectProvider<GrpcObserver> observerProvider,
+                                                  ObjectProvider<ConcurrencyLimitServerInterceptor> concurrencyProvider) {
+        return () -> {
+            GrpcObserver observer = observerProvider.getIfAvailable();
+            if (observer != null) {
+                adharGrpcServer.withGrpcObserver(observer);
+                adharGrpcClientFactory.withGrpcObserver(observer);
+                log.debug("gRPC tracing observer wired: {}", observer.getClass().getSimpleName());
+            }
+            ConcurrencyLimitServerInterceptor limiter = concurrencyProvider.getIfAvailable();
+            if (limiter != null) {
+                adharGrpcServer.withConcurrencyLimitInterceptor(limiter);
+            }
+        };
+    }
+
+    /**
      * Wires a {@link MeterRegistry} into the server and client factory when
      * micrometer-core is on the classpath, a {@code MeterRegistry} bean is
      * available, and metrics are enabled. Isolated in a nested
@@ -191,6 +249,31 @@ public class GrpcAutoConfiguration {
                 adharGrpcServer.withMeterRegistry(meterRegistry);
                 adharGrpcClientFactory.withMeterRegistry(meterRegistry);
             };
+        }
+    }
+
+    /**
+     * Provides a Micrometer-backed {@link GrpcObserver} so gRPC tracing
+     * interceptors record real spans, but only when micrometer-observation is
+     * on the classpath ({@code @ConditionalOnClass(ObservationRegistry.class)})
+     * and an {@code ObservationRegistry} bean is available. Isolated in a nested
+     * {@code @Configuration} class - which references
+     * {@code io.micrometer.observation} types - so the outer auto-configuration
+     * loads cleanly even when micrometer-observation is absent, in which case
+     * the tracing interceptors fall back to W3C {@code traceparent} + MDC
+     * correlation only.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(ObservationRegistry.class)
+    @ConditionalOnProperty(prefix = "adhar.grpc.observability", name = "enable-tracing",
+            havingValue = "true", matchIfMissing = true)
+    static class GrpcTracingConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(GrpcObserver.class)
+        @ConditionalOnBean(ObservationRegistry.class)
+        public GrpcObserver micrometerGrpcObserver(ObservationRegistry observationRegistry) {
+            return new MicrometerGrpcObserver(observationRegistry);
         }
     }
 

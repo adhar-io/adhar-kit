@@ -1,9 +1,13 @@
 package com.adhar.kit.resilience.config;
 
 import com.adhar.kit.resilience.aspect.ResilienceAspect;
+import com.adhar.kit.resilience.cache.FallbackCache;
+import com.adhar.kit.resilience.chaos.ChaosPolicy;
 import com.adhar.kit.resilience.endpoint.ResilienceEndpoint;
 import com.adhar.kit.resilience.event.ResilienceEventListeners;
 import com.adhar.kit.resilience.event.ResilienceEventRecorder;
+import com.adhar.kit.resilience.health.CircuitBreakerHealthIndicator;
+import com.adhar.kit.resilience.metrics.ResiliencePlatformMetricsBridge;
 import com.adhar.kit.resilience.service.ResilienceMetricsService;
 import io.github.resilience4j.bulkhead.Bulkhead;
 import io.github.resilience4j.bulkhead.BulkheadConfig;
@@ -43,6 +47,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 
 import java.time.Duration;
+import java.util.HashSet;
 
 /**
  * Auto-configuration for Adhar Resilience module.
@@ -266,6 +271,35 @@ public class ResilienceAutoConfiguration {
         return registry;
     }
 
+    /**
+     * Bounded "last known good" fallback cache. Always registered so methods can opt in via
+     * {@code fallbackCache=true} on their annotation even when the global flag is off.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public FallbackCache resilienceFallbackCache(ResilienceProperties properties) {
+        ResilienceProperties.FallbackCacheConfig config = properties.getFallbackCache();
+        log.info("Initializing resilience FallbackCache (maxSize={}, ttl={}, globalEnabled={})",
+                config.getMaxSize(), config.getTtl(), config.isEnabled());
+        return new FallbackCache(config.getMaxSize(), config.getTtl());
+    }
+
+    /**
+     * Chaos policy for resilience testing. Only registered when
+     * {@code adhar.resilience.chaos.enabled=true}; disabled (absent) by default.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "adhar.resilience.chaos", name = "enabled", havingValue = "true")
+    public ChaosPolicy resilienceChaosPolicy(ResilienceProperties properties) {
+        ResilienceProperties.ChaosConfig config = properties.getChaos();
+        log.warn("Initializing resilience ChaosPolicy (latency={}, error={}) - FOR TESTING ONLY",
+                config.isLatencyEnabled(), config.isErrorEnabled());
+        return new ChaosPolicy(config.isEnabled(), config.isLatencyEnabled(),
+                config.getMinLatencyMs(), config.getMaxLatencyMs(),
+                config.isErrorEnabled(), config.getErrorProbability(), config.getIncludedMethods());
+    }
+
     @Bean
     @ConditionalOnMissingBean
     public ResilienceAspect resilienceAspect(
@@ -273,10 +307,16 @@ public class ResilienceAutoConfiguration {
             RetryRegistry retryRegistry,
             RateLimiterRegistry rateLimiterRegistry,
             BulkheadRegistry bulkheadRegistry,
-            TimeLimiterRegistry timeLimiterRegistry) {
+            TimeLimiterRegistry timeLimiterRegistry,
+            ResilienceProperties properties,
+            ObjectProvider<FallbackCache> fallbackCache,
+            ObjectProvider<ChaosPolicy> chaosPolicy) {
         log.info("Initializing ResilienceAspect");
         return new ResilienceAspect(circuitBreakerRegistry, retryRegistry,
-                                   rateLimiterRegistry, bulkheadRegistry, timeLimiterRegistry);
+                rateLimiterRegistry, bulkheadRegistry, timeLimiterRegistry,
+                fallbackCache.getIfAvailable(),
+                properties.getFallbackCache().isEnabled(),
+                chaosPolicy.getIfAvailable());
     }
 
     @Bean
@@ -387,6 +427,57 @@ public class ResilienceAutoConfiguration {
                 MeterRegistry meterRegistry) {
             log.info("Registering Bulkhead metrics");
             return TaggedBulkheadMetrics.ofBulkheadRegistry(bulkheadRegistry);
+        }
+    }
+
+    /**
+     * Bridges Resilience4j events to the metrics module's {@code PlatformMetrics}.
+     *
+     * <p>Only active when {@code adhar-kit-metrics} is on the classpath and a
+     * {@code PlatformMetrics} bean is present, so the module compiles and runs unchanged
+     * when the optional dependency is absent.</p>
+     */
+    @Configuration
+    @ConditionalOnClass(com.adhar.kit.metrics.auto.PlatformMetrics.class)
+    @ConditionalOnProperty(prefix = "adhar.resilience.metrics", name = "bridge-to-platform-metrics", havingValue = "true", matchIfMissing = true)
+    public static class ResiliencePlatformMetricsConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnBean(com.adhar.kit.metrics.auto.PlatformMetrics.class)
+        public ResiliencePlatformMetricsBridge resiliencePlatformMetricsBridge(
+                CircuitBreakerRegistry circuitBreakerRegistry,
+                RetryRegistry retryRegistry,
+                RateLimiterRegistry rateLimiterRegistry,
+                BulkheadRegistry bulkheadRegistry,
+                TimeLimiterRegistry timeLimiterRegistry,
+                com.adhar.kit.metrics.auto.PlatformMetrics platformMetrics) {
+            log.info("Initializing Resilience -> PlatformMetrics bridge");
+            ResiliencePlatformMetricsBridge bridge = new ResiliencePlatformMetricsBridge(
+                    circuitBreakerRegistry, retryRegistry, rateLimiterRegistry,
+                    bulkheadRegistry, timeLimiterRegistry, platformMetrics);
+            bridge.register();
+            return bridge;
+        }
+    }
+
+    /**
+     * Registers the circuit breaker health contributor when Spring Boot Actuator's health
+     * API is on the classpath.
+     */
+    @Configuration
+    @ConditionalOnClass(org.springframework.boot.health.contributor.HealthIndicator.class)
+    public static class ResilienceHealthConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnProperty(prefix = "adhar.resilience.health", name = "enabled", havingValue = "true", matchIfMissing = true)
+        public CircuitBreakerHealthIndicator resilienceCircuitBreakers(
+                CircuitBreakerRegistry circuitBreakerRegistry,
+                ResilienceProperties properties) {
+            log.info("Initializing circuit breaker health contributor");
+            return new CircuitBreakerHealthIndicator(circuitBreakerRegistry,
+                    new HashSet<>(properties.getHealth().getCriticalCircuitBreakers()));
         }
     }
 }

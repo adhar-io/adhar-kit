@@ -128,6 +128,21 @@ public class AdharHealthProperties {
     private HistoryConfig history = new HistoryConfig();
 
     /**
+     * Weighted aggregation configuration.
+     */
+    private WeightedConfig weighted = new WeightedConfig();
+
+    /**
+     * Circuit-breaker health check configuration.
+     */
+    private CircuitBreakerConfig circuitBreaker = new CircuitBreakerConfig();
+
+    /**
+     * Health transition event stream configuration.
+     */
+    private EventsConfig events = new EventsConfig();
+
+    /**
      * Custom health indicators.
      */
     private Map<String, IndicatorConfig> custom = new HashMap<>();
@@ -258,6 +273,50 @@ public class AdharHealthProperties {
         private int flappingThreshold = 5;
         /** Flapping detection window in milliseconds. */
         private long flappingWindow = 60_000;
+    }
+
+    /**
+     * Weighted aggregation configuration.
+     *
+     * <p>When {@code weights} assigns a positive weight to any indicator, a group's
+     * status is derived from a weighted health score rather than the classic
+     * critical/non-critical rule. Score {@code s} in {@code [0..1]}:
+     * {@code s >= upThreshold} &rarr; UP, {@code s <= downThreshold} &rarr; DOWN,
+     * otherwise the degraded band (OUT_OF_SERVICE).</p>
+     */
+    @Data
+    public static class WeightedConfig {
+        /** Score at or above which a group is UP. */
+        private double upThreshold = 1.0;
+        /** Score at or below which a group is DOWN. */
+        private double downThreshold = 0.0;
+        /** Per-indicator weights, keyed by indicator name (0 or absent = unweighted). */
+        private Map<String, Double> weights = new HashMap<>();
+    }
+
+    /**
+     * Circuit-breaker health configuration.
+     */
+    @Data
+    public static class CircuitBreakerConfig {
+        private boolean enabled = true;
+        /** Treat HALF_OPEN breakers as degraded (OUT_OF_SERVICE) rather than UP. */
+        private boolean treatHalfOpenAsDegraded = true;
+    }
+
+    /**
+     * Health transition event stream configuration.
+     */
+    @Data
+    public static class EventsConfig {
+        /** Publish a Spring ApplicationEvent on each transition. */
+        private boolean enabled = true;
+        /** Expose the Server-Sent Events stream (requires Spring Web MVC). */
+        private boolean sseEnabled = true;
+        /** SSE endpoint path. */
+        private String ssePath = "/health/events";
+        /** SSE connection timeout in milliseconds (0 = container default / no timeout). */
+        private long sseTimeout = 0;
     }
 
     /**

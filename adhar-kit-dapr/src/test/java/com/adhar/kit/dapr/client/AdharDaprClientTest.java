@@ -342,11 +342,12 @@ class AdharDaprClientTest {
     // ==================== Unsupported operations ====================
 
     @Test
-    void distributedLockOperationsAreUnsupported() {
+    void distributedLockRequiresPreviewClient() {
+        // This client was constructed without a preview client, so locking is unavailable.
         assertThatThrownBy(() -> dapr.tryLock("store", "res", "owner", 30))
-            .isInstanceOf(UnsupportedOperationException.class);
+            .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> dapr.unlock("store", "res", "owner"))
-            .isInstanceOf(UnsupportedOperationException.class);
+            .isInstanceOf(IllegalStateException.class);
     }
 
     @Test

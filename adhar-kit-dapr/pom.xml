@@ -31,10 +31,23 @@
             <version>${dapr-sdk.version}</version>
         </dependency>
 
+        <!-- Dapr Actors SDK (optional) - actor runtime registration + typed actor proxies.
+             Optional so that consumers not using actors don't pull it transitively; it is
+             still present on this module's own compile/test classpath. -->
         <dependency>
             <groupId>io.dapr</groupId>
             <artifactId>dapr-sdk-actors</artifactId>
             <version>${dapr-sdk.version}</version>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Dapr Workflows SDK (optional) - start/terminate/status/raise-event facade.
+             Optional for the same reason as the actors SDK above. -->
+        <dependency>
+            <groupId>io.dapr</groupId>
+            <artifactId>dapr-sdk-workflows</artifactId>
+            <version>${dapr-sdk.version}</version>
+            <optional>true</optional>
         </dependency>
 
         <!-- Adhar Kit Commons -->
