@@ -143,6 +143,14 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Dapr Dependencies (Optional) - state-store-backed distributed L2 cache -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-dapr</artifactId>
+            <version>0.1.0</version>
+            <optional>true</optional>
+        </dependency>
+
         <!-- AOP (Optional) - runtime support for the caching annotations/aspects -->
         <dependency>
             <groupId>org.aspectj</groupId>

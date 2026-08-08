@@ -48,6 +48,15 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Dapr (Optional) - powers the Dapr pub/sub event bus and state-store event store.
+             Gated at runtime by @ConditionalOnClass(DaprFacade) and adhar.dapr.enabled=true. -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-dapr</artifactId>
+            <version>0.1.0</version>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Jackson -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Universal Configuration facade for application configuration.
@@ -73,7 +74,14 @@ import java.util.Optional;
 public class ConfigFacade implements ConfigService {
 
     private static volatile ConfigFacade instance;
-    private final Map<String, String> properties = new HashMap<>();
+
+    /**
+     * Standalone-mode fallback properties, seeded from system properties and
+     * environment variables (env keys normalized the same way
+     * {@code EnvironmentConfigSource} does: {@code DATABASE_URL -> database.url})
+     * so lookups work even without a backing {@link ConfigManager}.
+     */
+    private final Map<String, String> properties = new ConcurrentHashMap<>();
 
     /**
      * Optional backing ConfigManager (delegation mode when non-null).
@@ -81,7 +89,22 @@ public class ConfigFacade implements ConfigService {
     private volatile ConfigManager configManager;
 
     private ConfigFacade() {
-        log.info("Initialized ConfigFacade");
+        seedStandaloneProperties();
+        log.info("Initialized ConfigFacade with {} standalone fallback properties", properties.size());
+    }
+
+    private void seedStandaloneProperties() {
+        System.getenv().forEach((key, value) -> {
+            if (key != null && value != null) {
+                properties.put(key.toLowerCase().replace('_', '.'), value);
+            }
+        });
+        // System properties win over environment variables, matching Spring's ordering.
+        System.getProperties().forEach((key, value) -> {
+            if (key != null && value != null) {
+                properties.put(String.valueOf(key), String.valueOf(value));
+            }
+        });
     }
 
     public static ConfigFacade getInstance() {

@@ -132,12 +132,13 @@ class EventSourcingFacadeTest {
     }
 
     @Test
-    @DisplayName("saveEvents is no-op when disabled")
-    void saveEventsIsNoOpWhenDisabled() {
+    @DisplayName("saveEvents fails loudly when disabled instead of dropping events")
+    void saveEventsThrowsWhenDisabled() {
         EventSourcingFacade disabledFacade = new EventSourcingFacade(null, null, null);
         List<DomainEvent> events = List.of(createEvent("order-1", 1, "OrderCreated"));
 
-        disabledFacade.saveEvents("order-1", events, 0);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> disabledFacade.saveEvents("order-1", events, 0));
 
         verifyNoInteractions(eventStore);
     }
@@ -153,12 +154,13 @@ class EventSourcingFacadeTest {
     }
 
     @Test
-    @DisplayName("publish is no-op when disabled")
-    void publishIsNoOpWhenDisabled() {
+    @DisplayName("publish fails loudly when disabled instead of dropping the event")
+    void publishThrowsWhenDisabled() {
         EventSourcingFacade disabledFacade = new EventSourcingFacade(null, null, null);
         DomainEvent event = createEvent("order-1", 1, "OrderCreated");
 
-        disabledFacade.publish(event);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> disabledFacade.publish(event));
 
         verifyNoInteractions(eventBus);
     }

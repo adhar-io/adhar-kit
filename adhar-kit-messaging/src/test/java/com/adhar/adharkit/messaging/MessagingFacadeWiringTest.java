@@ -1,6 +1,7 @@
 package com.adhar.adharkit.messaging;
 
 import com.adhar.kit.messaging.MessagingFacade;
+import com.adhar.kit.messaging.exception.MessagingException;
 import com.adhar.kit.messaging.core.MessageListener;
 import com.adhar.kit.messaging.core.MessagePublisher;
 import com.adhar.kit.messaging.metrics.MessagingMetrics;
@@ -67,11 +68,11 @@ class MessagingFacadeWiringTest {
     }
 
     @Test
-    void publishWithoutPublisherLogsAndDoesNotThrow() {
+    void publishWithoutPublisherThrows() {
         MessagingFacade facade = new MessagingFacade(null, messageListener, properties, null);
 
-        assertDoesNotThrow(() -> facade.publish("order-events", "payload"));
-        assertDoesNotThrow(() -> facade.publish("order-events", "key", "payload"));
+        assertThrows(MessagingException.class, () -> facade.publish("order-events", "payload"));
+        assertThrows(MessagingException.class, () -> facade.publish("order-events", "key", "payload"));
     }
 
     @Test

@@ -35,6 +35,24 @@ public class CircuitBreakerFacade implements CircuitBreakerService {
     }
 
     /**
+     * Creates a facade around an explicit {@link CircuitBreakerService} delegate.
+     * This is how DI containers (e.g. the Spring starter, which injects a
+     * {@code SpringCircuitBreakerAdapter}) construct a working facade - the
+     * no-arg singleton path cannot build framework adapters that themselves need
+     * injected infrastructure like a {@code CircuitBreakerRegistry}.
+     *
+     * @param delegate the circuit-breaker implementation to delegate to
+     */
+    public CircuitBreakerFacade(CircuitBreakerService delegate) {
+        if (delegate == null) {
+            throw new IllegalArgumentException("delegate must not be null");
+        }
+        this.delegate = delegate;
+        log.info("Initialized CircuitBreakerFacade with injected {} delegate",
+                delegate.getClass().getSimpleName());
+    }
+
+    /**
      * Get singleton instance.
      *
      * @return facade instance

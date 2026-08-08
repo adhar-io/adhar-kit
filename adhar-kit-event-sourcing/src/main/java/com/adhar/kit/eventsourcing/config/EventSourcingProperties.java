@@ -35,7 +35,7 @@ public class EventSourcingProperties {
     private int snapshotInterval = 100;
 
     /**
-     * The type of event store to use. Supported values: "jpa", "in-memory".
+     * The type of event store to use. Supported values: "jpa", "in-memory", "dapr".
      */
     private String eventStoreType = "jpa";
 
@@ -50,6 +50,12 @@ public class EventSourcingProperties {
      * {@link Kafka#isEnabled() enabled}.
      */
     private final Kafka kafka = new Kafka();
+
+    /**
+     * Dapr event bus / event store settings. Only relevant when the optional
+     * {@code adhar-kit-dapr} module is on the classpath and {@code adhar.dapr.enabled=true}.
+     */
+    private final Dapr dapr = new Dapr();
 
     /**
      * Settings for the Kafka-backed {@link com.adhar.kit.eventsourcing.bus.EventBus}.
@@ -73,5 +79,35 @@ public class EventSourcingProperties {
          * The consumer group id used by the event bus listener.
          */
         private String groupId = "adhar-event-sourcing";
+    }
+
+    /**
+     * Settings for the Dapr-backed {@link com.adhar.kit.eventsourcing.bus.DaprEventBus}
+     * and {@link com.adhar.kit.eventsourcing.store.DaprEventStore}.
+     */
+    @Getter
+    @Setter
+    public static class Dapr {
+
+        /**
+         * Whether the Dapr event bus should be used in place of the in-process bus
+         * (in addition to the Dapr module's own {@code adhar.dapr.enabled} switch).
+         */
+        private boolean enabled = true;
+
+        /**
+         * The Dapr pub/sub component domain events are published through.
+         */
+        private String pubsubName = "pubsub";
+
+        /**
+         * The topic domain events are published to.
+         */
+        private String topic = "adhar.event-sourcing.events";
+
+        /**
+         * The Dapr state store component used by the "dapr" event-store-type.
+         */
+        private String stateStore = "statestore";
     }
 }

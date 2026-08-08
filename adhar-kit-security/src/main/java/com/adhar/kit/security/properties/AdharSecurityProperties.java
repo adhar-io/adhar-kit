@@ -95,6 +95,13 @@ public class AdharSecurityProperties {
     private JwksProperties jwks = new JwksProperties();
 
     /**
+     * Configuration for Dapr secret-store integration ({@code adhar.security.dapr.*}).
+     * Only relevant when the optional {@code adhar-kit-dapr} module is on the
+     * classpath and {@code adhar.dapr.enabled=true}.
+     */
+    private DaprProperties dapr = new DaprProperties();
+
+    /**
      * Configuration for bearer token relay to downstream services.
      */
     private TokenRelayProperties tokenRelay = new TokenRelayProperties();
@@ -716,5 +723,23 @@ public class AdharSecurityProperties {
          * @RequiresPermission is enabled.
          */
         private boolean enabled = true;
+    }
+
+    /**
+     * Dapr secret-store integration settings.
+     */
+    @Data
+    public static class DaprProperties {
+        /**
+         * Dapr secret store component name.
+         */
+        private String secretStore = "secretstore";
+
+        /**
+         * Name of the secret holding the JWT/token-refresh signing key. When
+         * set (and Dapr is enabled), the signing key is resolved from the Dapr
+         * secret store and overrides {@code adhar.security.token-refresh.secret}.
+         */
+        private String jwtSecretName;
     }
 }

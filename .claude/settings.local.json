@@ -105,7 +105,11 @@
       "Bash(javap -classpath . 'org.springframework.ai.model.tool.ToolCallingChatOptions$Builder' org.springframework.ai.model.tool.DefaultToolCallingChatOptions org.springframework.ai.model.tool.ToolCallingManager org.springframework.ai.model.tool.ToolExecutionResult 'org.springframework.ai.chat.messages.ToolResponseMessage$Builder' 'org.springframework.ai.chat.messages.AssistantMessage$Builder')",
       "Bash(unzip -l ~/.m2/repository/org/springframework/boot/spring-boot-restclient/4.0.0/spring-boot-restclient-4.0.0.jar)",
       "Bash(mvn -q -pl adhar-kit-security dependency:tree)",
-      "Bash(unzip -o -q /Users/tapas-pc/.m2/repository/org/springframework/batch/spring-batch-core/6.0.4/spring-batch-core-6.0.4-sources.jar \"org/springframework/batch/core/step/StepExecution.java\")"
+      "Bash(unzip -o -q /Users/tapas-pc/.m2/repository/org/springframework/batch/spring-batch-core/6.0.4/spring-batch-core-6.0.4-sources.jar \"org/springframework/batch/core/step/StepExecution.java\")",
+      "Bash(grep -vE \"^[0-9]+:\\\\s*$\")",
+      "Bash(grep -vE \"^\\\\s*$\")",
+      "Bash(git mv *)",
+      "Bash(grep -v \"^$\")"
     ]
   }
 }

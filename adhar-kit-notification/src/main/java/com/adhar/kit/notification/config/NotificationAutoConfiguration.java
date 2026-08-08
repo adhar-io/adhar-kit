@@ -11,6 +11,7 @@ import com.adhar.kit.notification.NotificationRateLimiter;
 import com.adhar.kit.notification.NotificationRetryHandler;
 import com.adhar.kit.notification.NotificationService;
 import com.adhar.kit.notification.TemplateNotificationService;
+import com.adhar.kit.notification.channel.DaprBindingNotificationChannel;
 import com.adhar.kit.notification.channel.EmailNotificationChannel;
 import com.adhar.kit.notification.channel.InAppNotificationChannel;
 import com.adhar.kit.notification.channel.NotificationChannel;
@@ -20,12 +21,14 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.MessageSource;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -104,6 +107,32 @@ public class NotificationAutoConfiguration {
     public SmsNotificationChannel smsNotificationChannel() {
         log.info("Registering SmsNotificationChannel");
         return new SmsNotificationChannel();
+    }
+
+    /**
+     * Registers the Dapr output-binding channel, letting notifications deliver
+     * through the sidecar's binding components (SMTP, Twilio, HTTP, ...) with no
+     * provider SDK on the classpath. Declared after the native channels, so a
+     * configured JavaMailSender/WebClient/SMS gateway wins for its type
+     * (channel dispatch is first-match in registration order).
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "com.adhar.kit.dapr.DaprFacade")
+    @ConditionalOnProperty(prefix = "adhar.dapr", name = "enabled", havingValue = "true")
+    public static class DaprNotificationConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(DaprBindingNotificationChannel.class)
+        @ConditionalOnBean(com.adhar.kit.dapr.DaprFacade.class)
+        @ConditionalOnProperty(prefix = "adhar.notification.dapr", name = "enabled",
+                havingValue = "true", matchIfMissing = true)
+        public DaprBindingNotificationChannel daprBindingNotificationChannel(
+                com.adhar.kit.dapr.DaprFacade daprFacade, NotificationProperties properties) {
+            log.info("Registering DaprBindingNotificationChannel (email='{}', sms='{}', http='{}')",
+                    properties.getDapr().getEmailBinding(), properties.getDapr().getSmsBinding(),
+                    properties.getDapr().getHttpBinding());
+            return new DaprBindingNotificationChannel(daprFacade, properties.getDapr());
+        }
     }
 
     /**

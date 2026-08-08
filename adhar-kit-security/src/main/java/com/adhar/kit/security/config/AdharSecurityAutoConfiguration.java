@@ -20,6 +20,8 @@ import com.adhar.kit.security.spring.SpringSecurityAdapter;
 import com.adhar.kit.security.util.JwtUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -336,9 +338,39 @@ public class AdharSecurityAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnProperty(prefix = "adhar.security.token-refresh", name = "enabled", havingValue = "true")
-    public TokenRefreshService tokenRefreshService(RefreshTokenStore refreshTokenStore) {
+    public TokenRefreshService tokenRefreshService(RefreshTokenStore refreshTokenStore,
+            org.springframework.beans.factory.ObjectProvider<com.adhar.kit.security.dapr.DaprSecretKeyProvider> daprSecretKeyProvider) {
         log.info("Configuring token refresh service");
+        // When a Dapr secret provider is wired, the externally managed signing key
+        // takes precedence over any adhar.security.token-refresh.secret property.
+        daprSecretKeyProvider.ifAvailable(provider ->
+                properties.getTokenRefresh().setSecret(provider.resolve()));
         return new TokenRefreshService(properties.getTokenRefresh(), refreshTokenStore);
+    }
+
+    /**
+     * Dapr secret-store backed JWT signing-key provider, wired only when the
+     * optional {@code adhar-kit-dapr} module is on the classpath, Dapr is
+     * explicitly enabled ({@code adhar.dapr.enabled=true}), and a secret name
+     * is configured via {@code adhar.security.dapr.jwt-secret-name}.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "com.adhar.kit.dapr.DaprFacade")
+    @ConditionalOnProperty(prefix = "adhar.dapr", name = "enabled", havingValue = "true")
+    public static class DaprSecuritySecretsConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnBean(com.adhar.kit.dapr.DaprFacade.class)
+        @ConditionalOnProperty(prefix = "adhar.security.dapr", name = "jwt-secret-name")
+        public com.adhar.kit.security.dapr.DaprSecretKeyProvider daprSecretKeyProvider(
+                com.adhar.kit.dapr.DaprFacade daprFacade, AdharSecurityProperties properties) {
+            AdharSecurityProperties.DaprProperties dapr = properties.getDapr();
+            log.info("Configuring Dapr secret-store JWT signing-key provider (store '{}')",
+                    dapr.getSecretStore());
+            return new com.adhar.kit.security.dapr.DaprSecretKeyProvider(
+                    daprFacade, dapr.getSecretStore(), dapr.getJwtSecretName());
+        }
     }
 
     /**

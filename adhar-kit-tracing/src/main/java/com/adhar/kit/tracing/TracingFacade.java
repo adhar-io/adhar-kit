@@ -24,6 +24,23 @@ public class TracingFacade implements TracingService {
         log.info("Initialized TracingFacade with {} adapter", FrameworkDetector.detect());
     }
 
+    /**
+     * Creates a facade around an explicit {@link TracingService} delegate. This is
+     * how DI containers (e.g. the Spring starter, which injects a
+     * {@link SpringTracingAdapter}) construct a working facade - the no-arg
+     * singleton path cannot build framework adapters that themselves need
+     * injected infrastructure like a {@code Tracer}.
+     *
+     * @param delegate the tracing implementation to delegate to
+     */
+    public TracingFacade(TracingService delegate) {
+        if (delegate == null) {
+            throw new IllegalArgumentException("delegate must not be null");
+        }
+        this.delegate = delegate;
+        log.info("Initialized TracingFacade with injected {} delegate", delegate.getClass().getSimpleName());
+    }
+
     public static TracingFacade getInstance() {
         if (instance == null) {
             synchronized (TracingFacade.class) {

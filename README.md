@@ -1,6 +1,5 @@
 # 🏆 Adhar Kit - Enterprise Microservices Toolkit
 
----
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/adhar-platform/adhar-kit)
 [![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.0-green.svg)](https://spring.io/projects/spring-boot)

@@ -1,6 +1,7 @@
 package com.adhar.adharkit.messaging;
 
 import com.adhar.kit.messaging.MessagingFacade;
+import com.adhar.kit.messaging.exception.MessagingException;
 import org.junit.jupiter.api.Test;
 
 import java.util.function.Consumer;
@@ -26,12 +27,12 @@ class MessagingFacadeTest {
     }
 
     @Test
-    void testPublishDoesNotThrow() {
+    void testPublishWithoutPublisherFailsLoudly() {
         MessagingFacade facade = MessagingFacade.getInstance();
 
-        // The default facade is a stub; publishing must be a no-op that completes normally.
-        assertDoesNotThrow(() -> facade.publish("order-events", "payload"));
-        assertDoesNotThrow(() -> facade.publish("order-events", "customer-1", "payload"));
+        // A facade with no publisher must never silently drop messages.
+        assertThrows(MessagingException.class, () -> facade.publish("order-events", "payload"));
+        assertThrows(MessagingException.class, () -> facade.publish("order-events", "customer-1", "payload"));
     }
 
     @Test
@@ -89,7 +90,7 @@ class MessagingFacadeTest {
     }
 
     @Test
-    void testIsConnectedReturnsTrue() {
-        assertTrue(MessagingFacade.getInstance().isConnected());
+    void testIsConnectedReflectsMissingPublisher() {
+        assertFalse(MessagingFacade.getInstance().isConnected());
     }
 }

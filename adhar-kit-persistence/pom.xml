@@ -43,6 +43,16 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Dapr Dependencies (Optional) - powers the Dapr state-store backed
+             DaprStateRepository. Gated at runtime by @ConditionalOnClass(DaprFacade)
+             and the explicit opt-in property adhar.dapr.enabled=true. -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-dapr</artifactId>
+            <version>0.1.0</version>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>

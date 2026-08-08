@@ -493,9 +493,9 @@ public class MessagingFacade implements MessagingService {
     public <T> void publish(String topic, T message) {
         log.debug("Publishing message to topic: {}", topic);
         if (messagePublisher == null) {
-            log.warn("MessagingFacade publish not fully implemented - no MessagePublisher bean registered; "
-                    + "message to topic {} was dropped (using stub)", topic);
-            return;
+            throw new MessagingException("No MessagePublisher configured - cannot publish to topic '"
+                    + topic + "'. Configure a broker (Kafka, RabbitMQ) or enable Dapr pub/sub "
+                    + "(adhar.dapr.enabled=true).");
         }
         boolean published = messagePublisher.publish(topic, message);
         recordPublishMetric(topic, published);
@@ -581,9 +581,9 @@ public class MessagingFacade implements MessagingService {
     public <T> void publish(String topic, String key, T message) {
         log.debug("Publishing message with key {} to topic: {}", key, topic);
         if (messagePublisher == null) {
-            log.warn("MessagingFacade publish not fully implemented - no MessagePublisher bean registered; "
-                    + "message with key {} to topic {} was dropped (using stub)", key, topic);
-            return;
+            throw new MessagingException("No MessagePublisher configured - cannot publish to topic '"
+                    + topic + "'. Configure a broker (Kafka, RabbitMQ) or enable Dapr pub/sub "
+                    + "(adhar.dapr.enabled=true).");
         }
         boolean published = messagePublisher.publish(topic, key, message);
         recordPublishMetric(topic, published);
@@ -1176,8 +1176,8 @@ public class MessagingFacade implements MessagingService {
 
     @Override
     public boolean isConnected() {
-        // Framework-specific implementation will provide actual status
-        return true;
+        // A facade with no publisher cannot deliver anything - report it honestly.
+        return messagePublisher != null;
     }
 
     @Override

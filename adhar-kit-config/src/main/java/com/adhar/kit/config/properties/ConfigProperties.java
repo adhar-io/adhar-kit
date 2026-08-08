@@ -69,6 +69,13 @@ public class ConfigProperties {
     private Map<String, SourceConfig> sources = new HashMap<>();
 
     /**
+     * Dapr configuration/secret source settings ({@code adhar.config.dapr.*}).
+     * The sources only activate when the Dapr module is on the classpath and
+     * {@code adhar.dapr.enabled=true}.
+     */
+    private DaprConfig dapr = new DaprConfig();
+
+    /**
      * Refresh configuration.
      */
     private RefreshConfig refresh = new RefreshConfig();
@@ -315,6 +322,54 @@ public class ConfigProperties {
          * Enable the {@code adharconfig} actuator endpoint.
          */
         private boolean enabled = true;
+    }
+
+    /**
+     * Dapr configuration/secret source settings.
+     */
+    @Data
+    public static class DaprConfig {
+        /**
+         * Enable the Dapr configuration-store source (in addition to the Dapr
+         * module's own {@code adhar.dapr.enabled} switch).
+         */
+        private boolean configEnabled = true;
+
+        /**
+         * Enable the Dapr secret-store source.
+         */
+        private boolean secretsEnabled = true;
+
+        /**
+         * Dapr configuration store component name.
+         */
+        private String configStore = "configstore";
+
+        /**
+         * Dapr secret store component name.
+         */
+        private String secretStore = "secretstore";
+
+        /**
+         * Keys to load/subscribe to from the configuration store. Empty loads
+         * whatever the store returns for an unrestricted query.
+         */
+        private List<String> keys = new ArrayList<>();
+
+        /**
+         * Subscribe to configuration changes (requires a non-empty key list).
+         */
+        private boolean subscribe = true;
+
+        /**
+         * Priority of the configuration-store source (higher overrides lower).
+         */
+        private int configPriority = 150;
+
+        /**
+         * Priority of the secret-store source (higher overrides lower).
+         */
+        private int secretPriority = 160;
     }
 }
 

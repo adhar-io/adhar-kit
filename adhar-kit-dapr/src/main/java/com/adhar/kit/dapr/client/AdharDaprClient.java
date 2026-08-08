@@ -130,9 +130,7 @@ public class AdharDaprClient implements AutoCloseable {
      */
     public <T> void saveState(String storeName, String key, T value, Map<String, String> metadata) {
         try {
-            // Note: In Dapr SDK 1.11.0, metadata is typically passed via state options
-            // For now, we'll save without metadata support
-            daprClient.saveState(storeName, key, value).block();
+            daprClient.saveState(storeName, key, null, value, metadata, null).block();
             log.debug("Saved state with metadata: {} = {}", key, value);
         } catch (Exception e) {
             log.error("Failed to save state: {}", key, e);

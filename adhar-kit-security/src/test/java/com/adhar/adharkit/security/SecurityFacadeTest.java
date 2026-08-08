@@ -71,15 +71,16 @@ class SecurityFacadeTest {
     }
 
     @Test
-    void generateTokenWithRolesDelegatesToClaimsOverload() {
-        String token = facade.generateToken("user-1", Set.of("USER"));
-        assertThat(token).isEqualTo("token-user-1");
+    void generateTokenWithoutDelegateFailsLoudly() {
+        // Never fabricate a forgeable "token-<userId>" string.
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> facade.generateToken("user-1", Set.of("USER")));
     }
 
     @Test
-    void generateTokenWithClaimsReturnsStubToken() {
-        String token = facade.generateToken("user-2", Set.of("USER"), Map.of("k", "v"));
-        assertThat(token).isEqualTo("token-user-2");
+    void generateTokenWithClaimsWithoutDelegateFailsLoudly() {
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> facade.generateToken("user-2", Set.of("USER"), Map.of("k", "v")));
     }
 
     @Test
@@ -89,8 +90,10 @@ class SecurityFacadeTest {
     }
 
     @Test
-    void passwordHelpersReturnDefaults() {
-        assertThat(facade.encodePassword("secret")).isEqualTo("encoded-secret");
+    void passwordHelpersFailClosedWithoutDelegate() {
+        // Never fake password hashing - it would store the plaintext.
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> facade.encodePassword("secret"));
         assertThat(facade.verifyPassword("secret", "encoded-secret")).isFalse();
     }
 

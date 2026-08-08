@@ -125,8 +125,9 @@ public class EventSourcingFacade {
      */
     public void saveEvents(String aggregateId, List<DomainEvent> events, int expectedVersion) {
         if (!enabled) {
-            log.warn("Event sourcing not enabled, skipping saveEvents for aggregate: {}", aggregateId);
-            return;
+            throw new IllegalStateException("Event sourcing is disabled "
+                    + "(adhar.event-sourcing.enabled=false) - refusing to silently drop events "
+                    + "for aggregate '" + aggregateId + "'");
         }
 
         try {
@@ -188,8 +189,9 @@ public class EventSourcingFacade {
      */
     public void publish(DomainEvent event) {
         if (!enabled) {
-            log.warn("Event sourcing not enabled, skipping publish for event: {}", event.eventType());
-            return;
+            throw new IllegalStateException("Event sourcing is disabled "
+                    + "(adhar.event-sourcing.enabled=false) - refusing to silently drop event '"
+                    + event.eventType() + "'");
         }
 
         try {

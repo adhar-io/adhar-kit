@@ -357,7 +357,7 @@ public class DaprFacade {
             log.debug("Saved state with ETag: store={}, key={}", storeName, key);
             return true;
         } catch (Exception e) {
-            if (e.getMessage() != null && e.getMessage().contains("ETag mismatch")) {
+            if (isEtagConflict(e)) {
                 log.warn("ETag mismatch for state: store={}, key={}", storeName, key);
                 return false;
             }
@@ -368,9 +368,13 @@ public class DaprFacade {
 
     public <T> void saveStateWithTTL(String storeName, String key, T value, Duration ttl) {
         try {
-            // Note: TTL is typically handled via state store configuration in Dapr
-            // For now, we save without metadata as SDK 1.11 doesn't support metadata directly
-            daprClient.saveState(storeName, key, value).block();
+            if (ttl == null || ttl.isZero() || ttl.isNegative()) {
+                daprClient.saveState(storeName, key, value).block();
+            } else {
+                Map<String, String> metadata =
+                        Map.of("ttlInSeconds", String.valueOf(Math.max(1L, ttl.toSeconds())));
+                daprClient.saveState(storeName, key, null, value, metadata, null).block();
+            }
             log.debug("Saved state with TTL: store={}, key={}, ttl={}", storeName, key, ttl);
         } catch (Exception e) {
             log.error("Failed to save state with TTL: store={}, key={}", storeName, key, e);
@@ -435,7 +439,7 @@ public class DaprFacade {
             log.debug("Deleted state with ETag: store={}, key={}", storeName, key);
             return true;
         } catch (Exception e) {
-            if (e.getMessage() != null && e.getMessage().contains("ETag mismatch")) {
+            if (isEtagConflict(e)) {
                 log.warn("ETag mismatch for delete: store={}, key={}", storeName, key);
                 return false;
             }
@@ -603,17 +607,37 @@ public class DaprFacade {
             Map<String, Map<String, String>> secrets = daprClient.getBulkSecret(secretStoreName).block();
             log.debug("Retrieved bulk secrets: store={}, count={}",
                 secretStoreName, secrets != null ? secrets.size() : 0);
-            // Flatten the nested map - take the first value from each secret
             if (secrets == null) {
                 return Collections.emptyMap();
             }
+            // Flatten losslessly: a single-entry secret keeps its name, a
+            // multi-entry secret contributes one "name.key" entry per value.
             Map<String, String> result = new HashMap<>();
-            secrets.forEach((key, valueMap) -> {
-                if (valueMap != null && !valueMap.isEmpty()) {
-                    result.put(key, valueMap.values().iterator().next());
+            secrets.forEach((name, valueMap) -> {
+                if (valueMap == null || valueMap.isEmpty()) {
+                    return;
+                }
+                if (valueMap.size() == 1) {
+                    result.put(name, valueMap.values().iterator().next());
+                } else {
+                    valueMap.forEach((k, v) -> result.put(name + "." + k, v));
                 }
             });
             return result;
+        } catch (Exception e) {
+            log.error("Failed to get bulk secrets: store={}", secretStoreName, e);
+            throw new DaprException("Failed to get bulk secrets", e);
+        }
+    }
+
+    /**
+     * Returns every secret in the store with its full key/value map, without
+     * any flattening.
+     */
+    public Map<String, Map<String, String>> getBulkSecretsNested(String secretStoreName) {
+        try {
+            Map<String, Map<String, String>> secrets = daprClient.getBulkSecret(secretStoreName).block();
+            return secrets != null ? secrets : Collections.emptyMap();
         } catch (Exception e) {
             log.error("Failed to get bulk secrets: store={}", secretStoreName, e);
             throw new DaprException("Failed to get bulk secrets", e);
@@ -782,17 +806,48 @@ public class DaprFacade {
     }
 
     public void shutdown() {
+        available = false;
         try {
             if (daprClient != null) {
                 daprClient.close();
                 log.info("Dapr client shut down successfully");
             }
+        } catch (Exception e) {
+            log.error("Error shutting down Dapr client", e);
+        }
+        try {
             if (previewClient != null) {
                 previewClient.close();
             }
         } catch (Exception e) {
-            log.error("Error shutting down Dapr client", e);
+            log.error("Error shutting down Dapr preview client", e);
         }
+        // Never hand a closed singleton to the next getInstance() caller.
+        synchronized (DaprFacade.class) {
+            if (instance == this) {
+                instance = null;
+            }
+        }
+    }
+
+    /**
+     * Detects an optimistic-concurrency (ETag) conflict anywhere in the cause chain.
+     * The sidecar reports these as gRPC ABORTED with a lowercase "etag mismatch"
+     * message, so match on error code or a case-insensitive "etag" mention rather
+     * than an exact string.
+     */
+    private static boolean isEtagConflict(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof io.dapr.exceptions.DaprException daprEx
+                    && "ABORTED".equalsIgnoreCase(daprEx.getErrorCode())) {
+                return true;
+            }
+            String msg = t.getMessage();
+            if (msg != null && msg.toLowerCase(Locale.ROOT).contains("etag")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

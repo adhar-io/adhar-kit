@@ -87,6 +87,11 @@ public class NotificationProperties {
     private DigestProperties digest = new DigestProperties();
 
     /**
+     * Configuration for the Dapr output-binding channel.
+     */
+    private DaprProperties dapr = new DaprProperties();
+
+    /**
      * Email notification properties.
      */
     @Data
@@ -192,6 +197,52 @@ public class NotificationProperties {
          * Timeout in milliseconds for SMS gateway HTTP calls.
          */
         private int timeoutMs = 5000;
+    }
+
+    /**
+     * Dapr output-binding channel configuration ({@code adhar.notification.dapr.*}).
+     * Only relevant when the optional {@code adhar-kit-dapr} module is on the
+     * classpath and {@code adhar.dapr.enabled=true}.
+     */
+    @Data
+    public static class DaprProperties {
+
+        /**
+         * Whether the Dapr binding channel is registered at all (in addition to
+         * the Dapr module's own {@code adhar.dapr.enabled} switch).
+         */
+        private boolean enabled = true;
+
+        /**
+         * Dapr output binding used for EMAIL notifications (e.g. an SMTP or
+         * SendGrid component).
+         */
+        private String emailBinding = "smtp";
+
+        /**
+         * Whether EMAIL delivery through Dapr is enabled.
+         */
+        private boolean emailEnabled = true;
+
+        /**
+         * Dapr output binding used for SMS notifications (e.g. a Twilio component).
+         */
+        private String smsBinding = "sms";
+
+        /**
+         * Whether SMS delivery through Dapr is enabled.
+         */
+        private boolean smsEnabled = true;
+
+        /**
+         * Dapr HTTP output binding used for WEBHOOK notifications.
+         */
+        private String httpBinding = "webhook";
+
+        /**
+         * Whether WEBHOOK delivery through Dapr is enabled.
+         */
+        private boolean webhookEnabled = true;
     }
 
     /**

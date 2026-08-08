@@ -208,8 +208,11 @@ public class SecurityFacade implements SecurityService {
         if (current != null) {
             return current.generateToken(userId, roles, claims);
         }
-        log.debug("Generating token for user: {} (no delegate registered)", userId);
-        return "token-" + userId;
+        // Never fabricate a token: an unsigned "token-<userId>" string would be
+        // trivially forgeable if anything downstream accepted it.
+        throw new IllegalStateException("No SecurityService configured - refusing to generate "
+                + "an unsigned fake token for user '" + userId + "'. Configure the security "
+                + "module (JWT settings) so a real token service is wired.");
     }
 
     @Override
@@ -238,8 +241,10 @@ public class SecurityFacade implements SecurityService {
         if (current != null) {
             return current.encodePassword(rawPassword);
         }
-        log.debug("Encoding password (no delegate registered)");
-        return "encoded-" + rawPassword;
+        // Never fake password hashing: "encoded-<raw>" stores the plaintext.
+        throw new IllegalStateException("No SecurityService configured - refusing to fake "
+                + "password encoding (it would store the password in plaintext). Configure the "
+                + "security module so a real PasswordEncoder is wired.");
     }
 
     @Override

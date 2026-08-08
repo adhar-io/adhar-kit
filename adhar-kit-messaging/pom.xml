@@ -54,6 +54,17 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Dapr Dependencies (Optional) - powers the Dapr pub/sub backed MessagePublisher
+             (DaprMessagePublisher). Gated at runtime by @ConditionalOnClass(DaprFacade.class)
+             and the explicit opt-in property adhar.dapr.enabled=true in
+             MessagingAutoConfiguration so the module works fine without it on the classpath. -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-dapr</artifactId>
+            <version>0.1.0</version>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Spring JDBC (Optional) - powers the JDBC-backed transactional outbox store
              (JdbcOutboxStore). Gated at runtime by @ConditionalOnClass(JdbcTemplate.class)
              in MessagingAutoConfiguration so the module works fine without it on the

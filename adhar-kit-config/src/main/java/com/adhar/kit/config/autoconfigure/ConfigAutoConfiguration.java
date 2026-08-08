@@ -79,7 +79,7 @@ import java.util.Map;
  * @since 1.0.0
  */
 @Slf4j
-@AutoConfiguration
+@AutoConfiguration(afterName = "com.adhar.kit.dapr.config.DaprAutoConfiguration")
 @EnableConfigurationProperties(ConfigProperties.class)
 @ConditionalOnProperty(prefix = "adhar.config", name = "enabled", havingValue = "true", matchIfMissing = true)
 @Import({ConfigAutoConfiguration.RefreshConfiguration.class, ConfigAutoConfiguration.EncryptionConfiguration.class})
@@ -109,7 +109,8 @@ public class ConfigAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean
-    public ConfigManager configManager(ObjectProvider<PropertyEncryptor> encryptorProvider) {
+    public ConfigManager configManager(ObjectProvider<PropertyEncryptor> encryptorProvider,
+                                       ObjectProvider<com.adhar.kit.config.source.ConfigSource> contributedSources) {
         ConfigManager manager = new ConfigManager();
 
         // Add environment variable source (highest priority by default)
@@ -125,6 +126,14 @@ public class ConfigAutoConfiguration {
                 }
             });
         }
+
+        // Add sources contributed as beans (e.g. the Dapr configuration/secret
+        // sources, or application-defined custom sources)
+        contributedSources.orderedStream().forEach(source -> {
+            manager.addSource(source);
+            log.debug("Added contributed {} config source with priority {}",
+                    source.getType(), source.getPriority());
+        });
 
         // Attach encryptor for transparent decryption when encryption is enabled
         encryptorProvider.ifAvailable(encryptor -> {
@@ -430,6 +439,45 @@ public class ConfigAutoConfiguration {
             }
 
             return null;
+        }
+    }
+
+    /**
+     * Dapr configuration/secret sources, contributed as {@code ConfigSource}
+     * beans and picked up by {@link #configManager}. Active only when the
+     * optional {@code adhar-kit-dapr} module is on the classpath and Dapr is
+     * explicitly enabled ({@code adhar.dapr.enabled=true}); each source can be
+     * individually disabled via {@code adhar.config.dapr.*}.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "com.adhar.kit.dapr.DaprFacade")
+    @ConditionalOnProperty(prefix = "adhar.dapr", name = "enabled", havingValue = "true")
+    static class DaprConfigSourcesConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(name = "daprConfigSource")
+        @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(com.adhar.kit.dapr.DaprFacade.class)
+        @ConditionalOnProperty(prefix = "adhar.config.dapr", name = "config-enabled",
+                havingValue = "true", matchIfMissing = true)
+        public com.adhar.kit.config.source.ConfigSource daprConfigSource(
+                com.adhar.kit.dapr.DaprFacade daprFacade, ConfigProperties properties) {
+            ConfigProperties.DaprConfig dapr = properties.getDapr();
+            log.info("Adding Dapr configuration source (store '{}')", dapr.getConfigStore());
+            return new com.adhar.kit.config.source.impl.DaprConfigSource(daprFacade,
+                    dapr.getConfigStore(), dapr.getKeys(), dapr.getConfigPriority(), dapr.isSubscribe());
+        }
+
+        @Bean
+        @ConditionalOnMissingBean(name = "daprSecretConfigSource")
+        @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(com.adhar.kit.dapr.DaprFacade.class)
+        @ConditionalOnProperty(prefix = "adhar.config.dapr", name = "secrets-enabled",
+                havingValue = "true", matchIfMissing = true)
+        public com.adhar.kit.config.source.ConfigSource daprSecretConfigSource(
+                com.adhar.kit.dapr.DaprFacade daprFacade, ConfigProperties properties) {
+            ConfigProperties.DaprConfig dapr = properties.getDapr();
+            log.info("Adding Dapr secret source (store '{}')", dapr.getSecretStore());
+            return new com.adhar.kit.config.source.impl.DaprSecretConfigSource(daprFacade,
+                    dapr.getSecretStore(), dapr.getSecretPriority());
         }
     }
 

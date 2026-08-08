@@ -14,9 +14,16 @@ import java.util.function.Supplier;
 /**
  * Universal Persistence facade for data access.
  *
- * <p>Provides a singleton entry-point with stub implementations.
- * In a Spring Boot environment the {@link com.adhar.kit.persistence.spring.SpringPersistenceAdapter}
- * is the real implementation wired by auto-configuration.</p>
+ * <p>The facade is a thin delegator: all operations forward to the
+ * {@link PersistenceService} set via {@link #setDelegate}. In a Spring Boot
+ * environment the {@link com.adhar.kit.persistence.spring.SpringPersistenceAdapter}
+ * (a real JPA implementation) is wired in by auto-configuration.</p>
+ *
+ * <p><b>No configured delegate = loud failure.</b> Every operation throws
+ * {@link IllegalStateException} when no {@link PersistenceService} has been
+ * configured, rather than pretending to succeed. Earlier versions silently
+ * no-opped ({@code save()} returned the entity unpersisted), which is silent
+ * data loss - an unacceptable failure mode for a persistence API.</p>
  *
  * @author Adhar Platform Team
  * @since 1.1.0
@@ -26,8 +33,10 @@ public class PersistenceFacade implements PersistenceService {
 
     private static volatile PersistenceFacade instance;
 
+    private volatile PersistenceService delegate;
+
     private PersistenceFacade() {
-        log.info("Initialized PersistenceFacade");
+        log.info("Initialized PersistenceFacade (no delegate yet - operations fail until one is set)");
     }
 
     public static PersistenceFacade getInstance() {
@@ -41,185 +50,199 @@ public class PersistenceFacade implements PersistenceService {
         return instance;
     }
 
-    // ---- Basic CRUD (stub implementations) ----
+    /**
+     * Sets the backing {@link PersistenceService} implementation (e.g. the
+     * Spring JPA adapter). Passing {@code null} reverts the facade to its
+     * unconfigured, fail-loud state.
+     *
+     * @param delegate the persistence implementation, or {@code null}
+     */
+    public void setDelegate(PersistenceService delegate) {
+        this.delegate = delegate;
+        log.info("PersistenceFacade delegate {}", delegate != null
+                ? "set to " + delegate.getClass().getSimpleName() : "cleared");
+    }
+
+    /**
+     * Whether a real {@link PersistenceService} is configured.
+     *
+     * @return true if operations will be delegated
+     */
+    public boolean isConfigured() {
+        return delegate != null;
+    }
+
+    private PersistenceService required() {
+        PersistenceService current = delegate;
+        if (current == null) {
+            throw new IllegalStateException("No PersistenceService configured - refusing to fake "
+                    + "persistence operations. On Spring Boot ensure a JPA EntityManagerFactory is "
+                    + "configured so the SpringPersistenceAdapter is auto-wired, or call "
+                    + "PersistenceFacade.setDelegate(...) with your implementation.");
+        }
+        return current;
+    }
+
+    // ---- Basic CRUD ----
 
     @Override
     public <T> T save(T entity) {
-        log.debug("Saving entity: {}", entity.getClass().getSimpleName());
-        return entity;
+        return required().save(entity);
     }
 
     @Override
     public <T> List<T> saveAll(Iterable<T> entities) {
-        log.debug("Saving multiple entities");
-        return List.of();
+        return required().saveAll(entities);
     }
 
     @Override
     public <T, ID> Optional<T> findById(Class<T> entityClass, ID id) {
-        log.debug("Finding {} by ID: {}", entityClass.getSimpleName(), id);
-        return Optional.empty();
+        return required().findById(entityClass, id);
     }
 
     @Override
     public <T> List<T> findAll(Class<T> entityClass) {
-        log.debug("Finding all {}", entityClass.getSimpleName());
-        return List.of();
+        return required().findAll(entityClass);
     }
 
     @Override
     public <T> List<T> query(Class<T> entityClass, String query) {
-        log.debug("Executing query for {}: {}", entityClass.getSimpleName(), query);
-        return List.of();
+        return required().query(entityClass, query);
     }
 
     @Override
     public <T> List<T> query(Class<T> entityClass, String query, Object... params) {
-        log.debug("Executing parameterized query for {}", entityClass.getSimpleName());
-        return List.of();
+        return required().query(entityClass, query, params);
     }
 
     @Override
     public <T> void delete(T entity) {
-        log.debug("Deleting entity: {}", entity.getClass().getSimpleName());
+        required().delete(entity);
     }
 
     @Override
     public <T, ID> void deleteById(Class<T> entityClass, ID id) {
-        log.debug("Deleting {} by ID: {}", entityClass.getSimpleName(), id);
+        required().deleteById(entityClass, id);
     }
 
     @Override
     public <T, ID> boolean existsById(Class<T> entityClass, ID id) {
-        log.debug("Checking existence of {} with ID: {}", entityClass.getSimpleName(), id);
-        return false;
+        return required().existsById(entityClass, id);
     }
 
     @Override
     public <T> long count(Class<T> entityClass) {
-        log.debug("Counting {}", entityClass.getSimpleName());
-        return 0;
+        return required().count(entityClass);
     }
 
     @Override
     public <T> T executeInTransaction(Supplier<T> operation) {
-        log.debug("Executing in transaction");
-        return operation.get();
+        return required().executeInTransaction(operation);
     }
 
     @Override
     public void flush() {
-        log.debug("Flushing persistence context");
+        required().flush();
     }
 
     // ---- Pagination ----
 
     @Override
     public <T> Page<T> findAll(Class<T> entityClass, int page, int size) {
-        log.debug("Finding {} with pagination: page={}, size={}", entityClass.getSimpleName(), page, size);
-        return Page.empty();
+        return required().findAll(entityClass, page, size);
     }
 
     @Override
     public <T> Page<T> findAll(Class<T> entityClass, int page, int size, String sortBy, boolean ascending) {
-        log.debug("Finding {} with pagination and sort: page={}, size={}, sortBy={}", entityClass.getSimpleName(), page, size, sortBy);
-        return Page.empty();
+        return required().findAll(entityClass, page, size, sortBy, ascending);
     }
 
     // ---- Specification queries ----
 
     @Override
     public <T> List<T> findAll(Class<T> entityClass, Specification<T> spec) {
-        log.debug("Finding {} with specification", entityClass.getSimpleName());
-        return List.of();
+        return required().findAll(entityClass, spec);
     }
 
     @Override
     public <T> Page<T> findAll(Class<T> entityClass, Specification<T> spec, Pageable pageable) {
-        log.debug("Finding {} with specification and pagination", entityClass.getSimpleName());
-        return Page.empty();
+        return required().findAll(entityClass, spec, pageable);
     }
 
     @Override
     public <T> long count(Class<T> entityClass, Specification<T> spec) {
-        log.debug("Counting {} with specification", entityClass.getSimpleName());
-        return 0;
+        return required().count(entityClass, spec);
     }
 
     // ---- Bulk operations ----
 
     @Override
     public <T> List<T> saveAllInBatch(List<T> entities, int batchSize) {
-        log.debug("Batch saving {} entities with batchSize={}", entities.size(), batchSize);
-        return List.of();
+        return required().saveAllInBatch(entities, batchSize);
     }
 
     @Override
     public <T> int bulkUpdate(Class<T> entityClass, String jpql, Object... params) {
-        log.debug("Bulk update for {}", entityClass.getSimpleName());
-        return 0;
+        return required().bulkUpdate(entityClass, jpql, params);
     }
 
     @Override
     public <T> int bulkDelete(Class<T> entityClass, String jpql, Object... params) {
-        log.debug("Bulk delete for {}", entityClass.getSimpleName());
-        return 0;
+        return required().bulkDelete(entityClass, jpql, params);
     }
 
     // ---- Transaction control ----
 
     @Override
     public <T> T executeInTransaction(Supplier<T> operation, int isolationLevel) {
-        log.debug("Executing in transaction with isolation level {}", isolationLevel);
-        return operation.get();
+        return required().executeInTransaction(operation, isolationLevel);
     }
 
     @Override
     public <T> T executeReadOnly(Supplier<T> operation) {
-        log.debug("Executing read-only operation");
-        return operation.get();
+        return required().executeReadOnly(operation);
     }
 
     @Override
     public void executeInNewTransaction(Runnable operation) {
-        log.debug("Executing in new transaction");
-        operation.run();
+        required().executeInNewTransaction(operation);
     }
 
     // ---- Metrics and tracing ----
 
     @Override
     public QueryStats getQueryStats() {
-        return QueryStats.empty();
+        PersistenceService current = delegate;
+        return current != null ? current.getQueryStats() : QueryStats.empty();
     }
 
     @Override
     public void resetQueryStats() {
-        log.debug("Resetting query stats");
+        PersistenceService current = delegate;
+        if (current != null) {
+            current.resetQueryStats();
+        }
     }
 
     // ---- Entity utilities ----
 
     @Override
     public <T> T refresh(T entity) {
-        log.debug("Refreshing entity: {}", entity.getClass().getSimpleName());
-        return entity;
+        return required().refresh(entity);
     }
 
     @Override
     public <T> T merge(T entity) {
-        log.debug("Merging entity: {}", entity.getClass().getSimpleName());
-        return entity;
+        return required().merge(entity);
     }
 
     @Override
     public void detach(Object entity) {
-        log.debug("Detaching entity: {}", entity.getClass().getSimpleName());
+        required().detach(entity);
     }
 
     @Override
     public boolean isManaged(Object entity) {
-        log.debug("Checking if entity is managed: {}", entity.getClass().getSimpleName());
-        return false;
+        return required().isManaged(entity);
     }
 }

@@ -12,6 +12,7 @@ import com.adhar.kit.dapr.pubsub.DaprEventDispatcher;
 import com.adhar.kit.dapr.pubsub.DaprSubscriptionController;
 import com.adhar.kit.dapr.pubsub.DaprSubscriptionRegistrar;
 import com.adhar.kit.dapr.resilience.DaprInvocationResilience;
+import com.adhar.kit.dapr.resilience.ResilienceSettings;
 import com.adhar.kit.dapr.workflow.DaprWorkflowFacade;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -70,8 +71,16 @@ public class DaprAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public DaprInvocationResilience daprInvocationResilience() {
-        return new DaprInvocationResilience();
+    public DaprInvocationResilience daprInvocationResilience(DaprProperties properties) {
+        DaprProperties.ServiceInvocationConfig invocation = properties.getServiceInvocation();
+        ResilienceSettings defaults = ResilienceSettings.defaults();
+        ResilienceSettings settings = new ResilienceSettings(
+                Math.max(1, invocation.getRetries()),
+                defaults.retryBackoff(),
+                java.time.Duration.ofMillis(invocation.getTimeout()),
+                defaults.failureThreshold(),
+                defaults.openStateDuration());
+        return new DaprInvocationResilience(settings);
     }
 
     @Bean

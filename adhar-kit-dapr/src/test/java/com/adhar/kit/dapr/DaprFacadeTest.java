@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -90,6 +91,30 @@ class DaprFacadeTest {
     }
 
     @Test
+    void saveStateWithETagReturnsFalseOnRealSidecarEtagMessage() {
+        // Real sidecar errors are gRPC ABORTED with a lowercase message, e.g.
+        // "possible etag mismatch. error from state store: ..."
+        when(client.saveState(anyString(), anyString(), any(), any(), any()))
+            .thenThrow(new RuntimeException(
+                "ABORTED: possible etag mismatch. error from state store: ERR Error running script"));
+
+        boolean saved = facade.saveStateWithETag("store", "key", "value", "etag");
+
+        assertThat(saved).isFalse();
+    }
+
+    @Test
+    void saveStateWithETagDetectsConflictInCauseChain() {
+        when(client.saveState(anyString(), anyString(), any(), any(), any()))
+            .thenThrow(new RuntimeException("save failed",
+                new RuntimeException("possible etag mismatch")));
+
+        boolean saved = facade.saveStateWithETag("store", "key", "value", "etag");
+
+        assertThat(saved).isFalse();
+    }
+
+    @Test
     void saveStateWithETagThrowsOnOtherFailure() {
         when(client.saveState(anyString(), anyString(), any(), any(), any()))
             .thenThrow(new RuntimeException("network down"));
@@ -99,17 +124,37 @@ class DaprFacadeTest {
     }
 
     @Test
-    void saveStateWithTtlDelegatesToClient() {
-        when(client.saveState(anyString(), anyString(), any())).thenReturn(Mono.empty());
+    void saveStateWithTtlPassesTtlMetadata() {
+        when(client.saveState(anyString(), anyString(), isNull(), any(), anyMap(), isNull()))
+            .thenReturn(Mono.empty());
 
         facade.saveStateWithTTL("store", "key", "value", Duration.ofSeconds(30));
+
+        verify(client).saveState("store", "key", null, "value", Map.of("ttlInSeconds", "30"), null);
+    }
+
+    @Test
+    void saveStateWithNonPositiveTtlSavesWithoutMetadata() {
+        when(client.saveState(anyString(), anyString(), any())).thenReturn(Mono.empty());
+
+        facade.saveStateWithTTL("store", "key", "value", Duration.ZERO);
 
         verify(client).saveState("store", "key", "value");
     }
 
     @Test
+    void saveStateWithSubSecondTtlRoundsUpToOneSecond() {
+        when(client.saveState(anyString(), anyString(), isNull(), any(), anyMap(), isNull()))
+            .thenReturn(Mono.empty());
+
+        facade.saveStateWithTTL("store", "key", "value", Duration.ofMillis(200));
+
+        verify(client).saveState("store", "key", null, "value", Map.of("ttlInSeconds", "1"), null);
+    }
+
+    @Test
     void saveStateWithTtlWrapsException() {
-        when(client.saveState(anyString(), anyString(), any()))
+        when(client.saveState(anyString(), anyString(), isNull(), any(), anyMap(), isNull()))
             .thenThrow(new RuntimeException("boom"));
 
         assertThatThrownBy(() -> facade.saveStateWithTTL("store", "key", "value", Duration.ofSeconds(1)))
@@ -407,6 +452,29 @@ class DaprFacadeTest {
         Map<String, String> result = facade.getBulkSecrets("store");
 
         assertThat(result).containsEntry("db", "p").doesNotContainKey("empty");
+    }
+
+    @Test
+    void getBulkSecretsQualifiesMultiKeySecrets() {
+        when(client.getBulkSecret("store")).thenReturn(Mono.just(Map.of(
+            "db", Map.of("username", "u", "password", "p"))));
+
+        Map<String, String> result = facade.getBulkSecrets("store");
+
+        assertThat(result)
+            .containsEntry("db.username", "u")
+            .containsEntry("db.password", "p")
+            .hasSize(2);
+    }
+
+    @Test
+    void getBulkSecretsNestedReturnsFullMaps() {
+        when(client.getBulkSecret("store")).thenReturn(Mono.just(Map.of(
+            "db", Map.of("username", "u", "password", "p"))));
+
+        Map<String, Map<String, String>> result = facade.getBulkSecretsNested("store");
+
+        assertThat(result).containsEntry("db", Map.of("username", "u", "password", "p"));
     }
 
     @Test

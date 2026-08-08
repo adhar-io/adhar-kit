@@ -34,6 +34,11 @@ public class AdharMessagingProperties {
     private final RabbitMQProperties rabbitmq = new RabbitMQProperties();
 
     /**
+     * Configuration for Dapr pub/sub messaging.
+     */
+    private final DaprProperties dapr = new DaprProperties();
+
+    /**
      * Configuration for common messaging properties.
      */
     private final CommonProperties common = new CommonProperties();
@@ -58,6 +63,10 @@ public class AdharMessagingProperties {
 
     public RabbitMQProperties getRabbitmq() {
         return rabbitmq;
+    }
+
+    public DaprProperties getDapr() {
+        return dapr;
     }
 
     public CommonProperties getCommon() {
@@ -638,6 +647,55 @@ public class AdharMessagingProperties {
             public void setProperties(Map<String, String> properties) {
                 this.properties = properties;
             }
+        }
+    }
+
+    /**
+     * Properties for Dapr pub/sub messaging ({@code adhar.messaging.dapr.*}).
+     * <p>
+     * The Dapr backend itself is activated by the Dapr module's own opt-in property
+     * {@code adhar.dapr.enabled=true}; the properties here only configure how the
+     * messaging module publishes through Dapr once that backend is active.
+     */
+    public static class DaprProperties {
+        /**
+         * Whether to enable the Dapr-backed messaging adapter (in addition to the
+         * Dapr module's own {@code adhar.dapr.enabled} switch).
+         */
+        private boolean enabled = true;
+
+        /**
+         * Name of the Dapr pub/sub component to publish through.
+         */
+        private String pubsubName = "pubsub";
+
+        /**
+         * Default topic to use when one is not specified.
+         */
+        private String defaultTopic = "default-topic";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getPubsubName() {
+            return pubsubName;
+        }
+
+        public void setPubsubName(String pubsubName) {
+            this.pubsubName = pubsubName;
+        }
+
+        public String getDefaultTopic() {
+            return defaultTopic;
+        }
+
+        public void setDefaultTopic(String defaultTopic) {
+            this.defaultTopic = defaultTopic;
         }
     }
 

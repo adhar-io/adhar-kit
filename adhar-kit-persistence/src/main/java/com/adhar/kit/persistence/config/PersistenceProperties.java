@@ -45,6 +45,7 @@ public class PersistenceProperties {
     private Multitenancy multitenancy = new Multitenancy();
     private Envers envers = new Envers();
     private Diagnostics diagnostics = new Diagnostics();
+    private Dapr dapr = new Dapr();
 
     public enum MultiTenancyStrategy {
         SCHEMA, DATABASE, DISCRIMINATOR
@@ -167,5 +168,23 @@ public class PersistenceProperties {
     public static class Multitenancy {
         private boolean enabled = false;
         private MultiTenancyStrategy strategy = MultiTenancyStrategy.SCHEMA;
+    }
+
+    /**
+     * Dapr state-store repository settings ({@code adhar.persistence.dapr.*}).
+     * The repository only activates when the Dapr module is on the classpath
+     * and {@code adhar.dapr.enabled=true}.
+     */
+    @Data
+    public static class Dapr {
+        /**
+         * Enable the Dapr state-store backed key-value repository.
+         */
+        private boolean enabled = true;
+
+        /**
+         * Dapr state store component name used by {@code DaprStateRepository}.
+         */
+        private String stateStore = "statestore";
     }
 }

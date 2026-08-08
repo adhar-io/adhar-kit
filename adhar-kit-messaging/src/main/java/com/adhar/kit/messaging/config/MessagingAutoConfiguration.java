@@ -24,6 +24,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.amqp.support.converter.SimpleMessageConverter;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -61,6 +62,7 @@ import org.springframework.kafka.core.KafkaTemplate;
  * every {@code @Bean} method here is guarded with {@code @ConditionalOnMissingBean}.
  */
 @Configuration(proxyBeanMethods = false)
+@AutoConfigureAfter(name = "com.adhar.kit.dapr.config.DaprAutoConfiguration")
 @EnableConfigurationProperties(AdharMessagingProperties.class)
 @ConditionalOnProperty(prefix = "adhar.messaging", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class MessagingAutoConfiguration {
@@ -176,6 +178,35 @@ public class MessagingAutoConfiguration {
             log.debug("Registering RabbitMQ-backed RequestReplyClient");
             return new RabbitRequestReplyClient(rabbitTemplate, properties,
                     objectMapperProvider.getIfAvailable(ObjectMapper::new));
+        }
+    }
+
+    /**
+     * Registers the Dapr-backed {@link MessagePublisher}, letting the facade publish
+     * through the Dapr pub/sub building block (any broker the sidecar is configured
+     * with). Active only when the optional {@code adhar-kit-dapr} module is on the
+     * classpath, Dapr is explicitly enabled ({@code adhar.dapr.enabled=true}), and
+     * {@code adhar.messaging.dapr.enabled} is not {@code false}. Declared after the
+     * Kafka/RabbitMQ configurations and guarded by {@code @ConditionalOnMissingBean},
+     * so an explicitly configured broker always wins.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "com.adhar.kit.dapr.DaprFacade")
+    @ConditionalOnProperty(prefix = "adhar.dapr", name = "enabled", havingValue = "true")
+    public static class DaprMessagingConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(MessagePublisher.class)
+        @ConditionalOnBean(com.adhar.kit.dapr.DaprFacade.class)
+        @ConditionalOnProperty(prefix = "adhar.messaging.dapr", name = "enabled",
+                havingValue = "true", matchIfMissing = true)
+        public MessagePublisher daprMessagePublisher(com.adhar.kit.dapr.DaprFacade daprFacade,
+                                                     AdharMessagingProperties properties) {
+            AdharMessagingProperties.DaprProperties dapr = properties.getDapr();
+            log.debug("Registering Dapr-backed MessagePublisher (pubsub component '{}')",
+                    dapr.getPubsubName());
+            return new com.adhar.kit.messaging.dapr.DaprMessagePublisher(
+                    daprFacade, dapr.getPubsubName(), dapr.getDefaultTopic());
         }
     }
 

@@ -60,6 +60,14 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Dapr (optional - enables Dapr configuration-store and secret-store sources) -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-dapr</artifactId>
+            <version>0.1.0</version>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Config Encryption -->
         <dependency>
             <groupId>com.github.ulisesbocchio</groupId>

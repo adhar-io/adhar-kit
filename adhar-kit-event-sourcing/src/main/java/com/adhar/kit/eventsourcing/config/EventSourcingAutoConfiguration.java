@@ -90,6 +90,30 @@ public class EventSourcingAutoConfiguration {
         return new KafkaEventBus(kafkaTemplate, serde, properties.getKafka().getTopic());
     }
 
+    /**
+     * Dapr-backed {@link EventBus}, used in place of the in-process bus when the optional
+     * {@code adhar-kit-dapr} module is on the classpath, a {@code DaprFacade} bean exists,
+     * and Dapr is explicitly enabled ({@code adhar.dapr.enabled=true}). A Kafka bus
+     * explicitly enabled via {@code adhar.event-sourcing.kafka.enabled=true} wins (it is
+     * declared first), and {@code adhar.event-sourcing.dapr.enabled=false} opts out.
+     */
+    @Bean
+    @ConditionalOnClass(name = "com.adhar.kit.dapr.DaprFacade")
+    @ConditionalOnBean(com.adhar.kit.dapr.DaprFacade.class)
+    @ConditionalOnMissingBean(EventBus.class)
+    @ConditionalOnProperty(prefix = "adhar.dapr", name = "enabled", havingValue = "true")
+    public EventBus daprEventBus(com.adhar.kit.dapr.DaprFacade daprFacade, DomainEventKafkaSerde serde,
+                                 EventSourcingProperties properties) {
+        if (!properties.getDapr().isEnabled()) {
+            log.info("Dapr event bus disabled via adhar.event-sourcing.dapr.enabled=false");
+            return new SimpleEventBus();
+        }
+        log.info("Using Dapr-backed event bus (pubsub '{}', topic '{}')",
+                properties.getDapr().getPubsubName(), properties.getDapr().getTopic());
+        return new com.adhar.kit.eventsourcing.bus.DaprEventBus(daprFacade, serde,
+                properties.getDapr().getPubsubName(), properties.getDapr().getTopic());
+    }
+
     @Bean
     @ConditionalOnMissingBean(EventBus.class)
     public EventBus eventBus() {
@@ -182,6 +206,52 @@ public class EventSourcingAutoConfiguration {
         public SagaStateStore sagaStateStore(SagaInstanceEntryRepository repository, ObjectMapper objectMapper) {
             log.info("Using JPA-backed saga state store");
             return new JpaSagaStateStore(repository, objectMapper);
+        }
+    }
+
+    /**
+     * Dapr state-store configuration, activated when event-store-type is "dapr" and the
+     * optional {@code adhar-kit-dapr} module is on the classpath with a {@code DaprFacade}
+     * bean. Snapshot/checkpoint/saga stores fall back to the in-memory variants unless the
+     * application provides its own beans - only the event stream itself is durable in Dapr.
+     */
+    @Configuration
+    @ConditionalOnClass(name = "com.adhar.kit.dapr.DaprFacade")
+    @ConditionalOnProperty(prefix = "adhar.event-sourcing", name = "event-store-type", havingValue = "dapr")
+    static class DaprEventStoreConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnBean(com.adhar.kit.dapr.DaprFacade.class)
+        public EventStore eventStore(com.adhar.kit.dapr.DaprFacade daprFacade,
+                                     DomainEventKafkaSerde serde,
+                                     UpcasterChain upcasterChain,
+                                     EventSourcingProperties properties) {
+            log.info("Using Dapr state-store-backed event store (store '{}')",
+                    properties.getDapr().getStateStore());
+            return new com.adhar.kit.eventsourcing.store.DaprEventStore(daprFacade,
+                    properties.getDapr().getStateStore(), serde, upcasterChain);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        public SnapshotStore snapshotStore() {
+            log.info("Using in-memory snapshot store alongside the Dapr event store");
+            return new InMemorySnapshotStore();
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        public ProjectionCheckpointStore projectionCheckpointStore() {
+            log.info("Using in-memory projection checkpoint store alongside the Dapr event store");
+            return new InMemoryProjectionCheckpointStore();
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        public SagaStateStore sagaStateStore() {
+            log.info("Using in-memory saga state store alongside the Dapr event store");
+            return new InMemorySagaStateStore();
         }
     }
 

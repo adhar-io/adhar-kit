@@ -1,6 +1,9 @@
 package com.adhar.kit.persistence.config;
 
+import com.adhar.kit.persistence.PersistenceFacade;
+import com.adhar.kit.persistence.api.PersistenceService;
 import com.adhar.kit.persistence.auditing.AuditorAwareImpl;
+import com.adhar.kit.persistence.spring.SpringPersistenceAdapter;
 import com.adhar.kit.persistence.diagnostics.NPlusOneDetector;
 import com.adhar.kit.persistence.envers.RevisionHistoryReader;
 import com.adhar.kit.persistence.metrics.PersistenceMetricsCollector;
@@ -40,6 +43,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.orm.jpa.SharedEntityManagerCreator;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 import javax.sql.DataSource;
@@ -85,6 +89,66 @@ public class PersistenceAutoConfiguration {
             log.info("Persistence metrics enabled without Micrometer (slowQueryThresholdMs={})", threshold);
         }
         return new PersistenceMetricsCollector(registry, threshold);
+    }
+
+    /**
+     * The real JPA-backed {@link PersistenceService}. Registered whenever JPA
+     * infrastructure (an {@link EntityManagerFactory} and a transaction manager)
+     * is present, so the facade delegates to a live {@code EntityManager} instead
+     * of failing.
+     */
+    @Bean
+    @ConditionalOnMissingBean(PersistenceService.class)
+    @ConditionalOnBean({EntityManagerFactory.class, PlatformTransactionManager.class})
+    public SpringPersistenceAdapter springPersistenceAdapter(
+            PersistenceMetricsCollector persistenceMetricsCollector,
+            PlatformTransactionManager transactionManager,
+            PersistenceProperties properties) {
+        log.info("Registering SpringPersistenceAdapter as the PersistenceService implementation");
+        return new SpringPersistenceAdapter(persistenceMetricsCollector, transactionManager, properties);
+    }
+
+    /**
+     * Dapr state-store backed key-value repository, wired only when the optional
+     * {@code adhar-kit-dapr} module is on the classpath and Dapr is explicitly
+     * enabled ({@code adhar.dapr.enabled=true}).
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "com.adhar.kit.dapr.DaprFacade")
+    @ConditionalOnProperty(prefix = "adhar.dapr", name = "enabled", havingValue = "true")
+    public static class DaprStateRepositoryConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnBean(com.adhar.kit.dapr.DaprFacade.class)
+        @ConditionalOnProperty(prefix = "adhar.persistence.dapr", name = "enabled",
+                havingValue = "true", matchIfMissing = true)
+        public com.adhar.kit.persistence.dapr.DaprStateRepository daprStateRepository(
+                com.adhar.kit.dapr.DaprFacade daprFacade, PersistenceProperties properties) {
+            log.info("Registering Dapr state-store repository (store '{}')",
+                    properties.getDapr().getStateStore());
+            return new com.adhar.kit.persistence.dapr.DaprStateRepository(
+                    daprFacade, properties.getDapr().getStateStore());
+        }
+    }
+
+    /**
+     * The {@link PersistenceFacade} singleton, linked to the
+     * {@link PersistenceService} implementation when one is available. Without a
+     * delegate the facade fails loudly on use instead of faking success.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public PersistenceFacade persistenceFacade(ObjectProvider<PersistenceService> serviceProvider) {
+        PersistenceFacade facade = PersistenceFacade.getInstance();
+        PersistenceService service = serviceProvider.getIfAvailable();
+        if (service != null) {
+            facade.setDelegate(service);
+        } else {
+            log.warn("No PersistenceService available - PersistenceFacade operations will throw "
+                    + "until a delegate is configured");
+        }
+        return facade;
     }
 
     @Slf4j

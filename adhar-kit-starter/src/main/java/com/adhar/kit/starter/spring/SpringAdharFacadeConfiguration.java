@@ -31,9 +31,23 @@ public class SpringAdharFacadeConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public AdharFacade adharFacade(ObjectProvider<AdharModuleAccess> moduleAccessProvider,
-                                    ObjectProvider<AdharFacadeCustomizer> customizers) {
+                                    ObjectProvider<AdharFacadeCustomizer> customizers,
+                                    ObjectProvider<io.micrometer.tracing.Tracer> tracerProvider,
+                                    ObjectProvider<io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry> circuitBreakerRegistryProvider) {
         AdharModuleAccess moduleAccess = moduleAccessProvider.getIfAvailable(() -> AdharModuleAccess.ALL_ENABLED);
         AdharFacade facade = AdharFacade.getInstance(moduleAccess);
+
+        // On Spring Boot the tracing/resilience singleton factories cannot build
+        // their framework adapters (those need injected infrastructure), so wire
+        // the Spring adapters here - otherwise getTracing()/getResilience() and
+        // the traced()/resilient()/safe() shortcuts would throw.
+        tracerProvider.ifAvailable(tracer -> facade.setTracing(
+                new com.adhar.kit.tracing.TracingFacade(
+                        new com.adhar.kit.tracing.spring.SpringTracingAdapter(tracer))));
+        circuitBreakerRegistryProvider.ifAvailable(registry -> facade.setResilience(
+                new com.adhar.kit.resilience.CircuitBreakerFacade(
+                        new com.adhar.kit.resilience.spring.SpringCircuitBreakerAdapter(registry))));
+
         customizers.orderedStream().forEach(customizer -> customizer.customize(facade));
         return facade;
     }

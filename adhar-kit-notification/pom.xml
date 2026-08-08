@@ -26,6 +26,15 @@
             <version>0.1.0</version>
         </dependency>
 
+        <!-- Dapr (Optional) - powers the Dapr output-binding notification channel.
+             Gated at runtime by @ConditionalOnClass(DaprFacade) and adhar.dapr.enabled=true. -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-dapr</artifactId>
+            <version>0.1.0</version>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Spring Boot Starters (Optional) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

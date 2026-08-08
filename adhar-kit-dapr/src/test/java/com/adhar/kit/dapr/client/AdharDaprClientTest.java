@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -60,19 +61,20 @@ class AdharDaprClientTest {
 
     @Test
     void saveStateWithMetadataDelegatesToClient() {
-        when(client.saveState(anyString(), anyString(), any())).thenReturn(Mono.empty());
+        when(client.saveState(anyString(), anyString(), isNull(), any(), anyMap(), isNull()))
+            .thenReturn(Mono.empty());
 
-        dapr.saveState("store", "key", "value", Map.of("ttl", "60"));
+        dapr.saveState("store", "key", "value", Map.of("ttlInSeconds", "60"));
 
-        verify(client).saveState("store", "key", "value");
+        verify(client).saveState("store", "key", null, "value", Map.of("ttlInSeconds", "60"), null);
     }
 
     @Test
     void saveStateWithMetadataWrapsException() {
-        when(client.saveState(anyString(), anyString(), any()))
+        when(client.saveState(anyString(), anyString(), isNull(), any(), anyMap(), isNull()))
             .thenThrow(new RuntimeException("boom"));
 
-        assertThatThrownBy(() -> dapr.saveState("store", "key", "value", Map.of("ttl", "60")))
+        assertThatThrownBy(() -> dapr.saveState("store", "key", "value", Map.of("ttlInSeconds", "60")))
             .isInstanceOf(RuntimeException.class);
     }
 
