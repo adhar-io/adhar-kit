@@ -1,6 +1,7 @@
 package com.adhar.kit.kubernetes.config;
 
 import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * Configuration properties for Adhar Kubernetes module.
@@ -30,6 +31,7 @@ import lombok.Data;
  * @since 1.0.0
  */
 @Data
+@ConfigurationProperties(prefix = "adhar.kubernetes")
 public class KubernetesProperties {
 
     /**

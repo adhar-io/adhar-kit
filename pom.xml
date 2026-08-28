@@ -9,7 +9,8 @@
     <version>0.1.0</version>
     <packaging>pom</packaging>
     <name>Adhar Kit</name>
-    <description>Enterprise-grade microservices platform toolkit with comprehensive support for resilience, observability, and cloud-native patterns</description>
+    <description>Enterprise-grade microservices platform toolkit with comprehensive
+        support for resilience, observability, and cloud-native patterns</description>
 
     <organization>
         <name>Adhar Platform</name>
@@ -23,19 +24,6 @@
             <distribution>repo</distribution>
         </license>
     </licenses>
-
-    <developers>
-        <developer>
-            <id>adhar-team</id>
-            <name>Adhar Platform</name>
-            <email>contact@adhar.io</email>
-            <organization>Adhar Platform</organization>
-            <roles>
-                <role>architect</role>
-                <role>developer</role>
-            </roles>
-        </developer>
-    </developers>
 
     <scm>
         <connection>scm:git:git://github.com/adhar-io/adhar-kit.git</connection>

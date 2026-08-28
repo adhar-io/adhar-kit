@@ -28,6 +28,7 @@ import io.micrometer.core.instrument.binder.system.DiskSpaceMetrics;
 import io.micrometer.core.instrument.config.MeterFilter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -456,14 +457,21 @@ public class AdharMetricsAutoConfiguration {
 
     /**
      * Applies all MeterRegistryPostProcessor beans to the MeterRegistry.
+     *
+     * <p>Runs as a {@link SmartInitializingSingleton} (after all singletons are created) and pulls
+     * the registry through an {@link ObjectProvider} rather than injecting it into a method on this
+     * auto-configuration bean. Injecting the {@code MeterRegistry} directly created a circular
+     * reference: the SimpleMeterRegistry is still in creation when this config bean initialises.</p>
      */
-    @Autowired(required = false)
-    public void configureMeterRegistry(MeterRegistry meterRegistry,
-                                      List<MeterRegistryPostProcessor> postProcessors) {
-        if (postProcessors != null && !postProcessors.isEmpty()) {
-            for (MeterRegistryPostProcessor postProcessor : postProcessors) {
-                postProcessor.process(meterRegistry);
+    @Bean
+    public SmartInitializingSingleton adharMeterRegistryPostProcessorApplier(
+            ObjectProvider<MeterRegistry> meterRegistryProvider,
+            ObjectProvider<MeterRegistryPostProcessor> postProcessors) {
+        return () -> {
+            MeterRegistry registry = meterRegistryProvider.getIfAvailable();
+            if (registry != null) {
+                postProcessors.orderedStream().forEach(pp -> pp.process(registry));
             }
-        }
+        };
     }
 }

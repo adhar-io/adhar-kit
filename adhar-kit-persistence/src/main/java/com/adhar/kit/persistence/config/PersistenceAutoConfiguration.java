@@ -27,6 +27,7 @@ import org.hibernate.cfg.AvailableSettings;
 import org.hibernate.cfg.MultiTenancySettings;
 import org.hibernate.envers.AuditReader;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -61,7 +62,10 @@ import javax.sql.DataSource;
 @Slf4j
 @AutoConfiguration
 @EnableTransactionManagement
-@EnableJpaRepositories(basePackages = "com.adhar", repositoryBaseClass = SoftDeleteRepositoryImpl.class)
+// No class-level @EnableJpaRepositories: a global scan (originally "com.adhar") eagerly instantiated
+// repositories across every kit module — even this module's own optional outbox repo — whose entities
+// aren't in a consuming app's EntityManager ("Not a managed type"). Applications enable their own
+// repositories via @EnableJpaRepositories; feature repos (outbox) are enabled by their own gated config.
 @EnableConfigurationProperties(PersistenceProperties.class)
 @ConditionalOnProperty(prefix = "adhar.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
 @ConditionalOnClass(name = "jakarta.persistence.EntityManager")
@@ -139,16 +143,25 @@ public class PersistenceAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean
-    public PersistenceFacade persistenceFacade(ObjectProvider<PersistenceService> serviceProvider) {
-        PersistenceFacade facade = PersistenceFacade.getInstance();
-        PersistenceService service = serviceProvider.getIfAvailable();
-        if (service != null) {
-            facade.setDelegate(service);
-        } else {
-            log.warn("No PersistenceService available - PersistenceFacade operations will throw "
-                    + "until a delegate is configured");
-        }
-        return facade;
+    public PersistenceFacade persistenceFacade() {
+        // Return the singleton facade WITHOUT resolving PersistenceService here — doing so inside the
+        // factory created a self-referential cycle ("persistenceFacade currently in creation"). The
+        // delegate is wired after all singletons exist (below).
+        return PersistenceFacade.getInstance();
+    }
+
+    @Bean
+    public SmartInitializingSingleton persistenceFacadeDelegateInitializer(
+            PersistenceFacade facade, ObjectProvider<PersistenceService> serviceProvider) {
+        return () -> {
+            PersistenceService service = serviceProvider.getIfAvailable();
+            if (service != null) {
+                facade.setDelegate(service);
+            } else {
+                log.warn("No PersistenceService available - PersistenceFacade operations will throw "
+                        + "until a delegate is configured");
+            }
+        };
     }
 
     @Slf4j

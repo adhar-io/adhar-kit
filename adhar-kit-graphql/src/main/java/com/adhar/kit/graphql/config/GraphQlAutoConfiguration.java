@@ -72,7 +72,12 @@ import org.springframework.graphql.execution.RuntimeWiringConfigurer;
 @Slf4j
 @AutoConfiguration
 @EnableConfigurationProperties(GraphQlProperties.class)
-@ConditionalOnClass(graphql.GraphQL.class)
+// Require BOTH graphql-java (graphql.GraphQL) AND spring-graphql (RuntimeWiringConfigurer). Bean
+// methods here take spring-graphql types (BatchLoaderRegistry, RuntimeWiringConfigurer, ...); when
+// spring-graphql is absent, reflecting over those signatures during condition evaluation throws
+// NoClassDefFoundError and aborts the whole context. Guarding on the name (ASM-read, never loaded)
+// makes the entire auto-configuration back off cleanly instead.
+@ConditionalOnClass(name = {"graphql.GraphQL", "org.springframework.graphql.execution.RuntimeWiringConfigurer"})
 @ConditionalOnProperty(prefix = "adhar.graphql", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class GraphQlAutoConfiguration {
 

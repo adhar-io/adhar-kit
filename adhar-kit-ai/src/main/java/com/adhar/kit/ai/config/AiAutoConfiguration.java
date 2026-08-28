@@ -142,7 +142,9 @@ public class AiAutoConfiguration {
                                        AiProperties aiProperties) {
         log.info("Enabling @AiCache annotation support");
         AiProperties.Caching.Semantic semantic = aiProperties.getCaching().getSemantic();
-        EmbeddingModel embeddingModel = embeddingModelProvider.getIfAvailable();
+        // getIfUnique (not getIfAvailable) tolerates multiple EmbeddingModels (Ollama + OpenAI both on
+        // the classpath) instead of throwing NoUniqueBeanDefinitionException; semantic cache stays off.
+        EmbeddingModel embeddingModel = embeddingModelProvider.getIfUnique();
         if (semantic.isEnabled() && embeddingModel != null) {
             log.info("Semantic (embedding-similarity) response cache enabled (threshold={})",
                     semantic.getSimilarityThreshold());

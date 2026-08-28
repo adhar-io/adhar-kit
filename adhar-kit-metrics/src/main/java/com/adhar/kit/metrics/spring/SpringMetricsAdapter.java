@@ -336,6 +336,11 @@ public class SpringMetricsAdapter implements FrameworkAdapter<MetricsService>, M
         Timer timer = timer(name);
         try {
             return timer.recordCallable(operation::get);
+        } catch (RuntimeException e) {
+            // Preserve the operation's own exception type (a Supplier only throws unchecked) so callers
+            // can catch domain exceptions through adhar.traced(...); don't mask it as a generic error.
+            log.debug("Timed operation threw: {}", name);
+            throw e;
         } catch (Exception e) {
             log.error("Error during timed operation: {}", name, e);
             throw new RuntimeException("Timed operation failed: " + name, e);

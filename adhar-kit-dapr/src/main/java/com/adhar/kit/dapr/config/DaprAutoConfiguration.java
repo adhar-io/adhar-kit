@@ -17,6 +17,7 @@ import com.adhar.kit.dapr.workflow.DaprWorkflowFacade;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationContext;
@@ -115,8 +116,11 @@ public class DaprAutoConfiguration {
             return new DaprEventDispatcher();
         }
 
+        // Back off when the Dapr SDK's own io.dapr.springboot.DaprController is on the classpath — it
+        // already maps GET /dapr/subscribe, and registering both is an ambiguous-mapping failure.
         @Bean
         @ConditionalOnMissingBean
+        @ConditionalOnMissingClass("io.dapr.springboot.DaprController")
         public DaprSubscriptionController daprSubscriptionController(DaprSubscriptionRegistrar registrar,
                                                                        DaprEventDispatcher dispatcher) {
             return new DaprSubscriptionController(registrar, dispatcher);

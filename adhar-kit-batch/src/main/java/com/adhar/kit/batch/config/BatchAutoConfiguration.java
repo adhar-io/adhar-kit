@@ -27,6 +27,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
@@ -181,7 +182,10 @@ public class BatchAutoConfiguration {
      * @return the async job launcher
      * @throws Exception if the job launcher cannot be initialized
      */
+    // @Primary: Spring Batch 5.2's auto-configured jobOperator also implements JobLauncher, so
+    // injections of JobLauncher (e.g. batchScheduler) would otherwise be ambiguous.
     @Bean
+    @Primary
     @ConditionalOnMissingBean(JobLauncher.class)
     public TaskExecutorJobLauncher adharJobLauncher(
             JobRepository jobRepository,

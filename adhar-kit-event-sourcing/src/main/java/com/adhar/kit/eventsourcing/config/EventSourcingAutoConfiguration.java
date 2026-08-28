@@ -74,23 +74,6 @@ public class EventSourcingAutoConfiguration {
     }
 
     /**
-     * Kafka-backed {@link EventBus}, used in place of the in-process bus when {@code spring-kafka}
-     * is on the classpath, a {@link KafkaTemplate} bean exists, and
-     * {@code adhar.event-sourcing.kafka.enabled=true}. Declared before {@link #eventBus()} so its
-     * presence backs off the default in-process bus via {@code @ConditionalOnMissingBean}.
-     */
-    @Bean
-    @ConditionalOnClass(name = "org.springframework.kafka.core.KafkaTemplate")
-    @ConditionalOnBean(KafkaTemplate.class)
-    @ConditionalOnMissingBean(EventBus.class)
-    @ConditionalOnProperty(prefix = "adhar.event-sourcing.kafka", name = "enabled", havingValue = "true")
-    public EventBus kafkaEventBus(KafkaTemplate<String, String> kafkaTemplate, DomainEventKafkaSerde serde,
-                                  EventSourcingProperties properties) {
-        log.info("Using Kafka-backed event bus (topic '{}')", properties.getKafka().getTopic());
-        return new KafkaEventBus(kafkaTemplate, serde, properties.getKafka().getTopic());
-    }
-
-    /**
      * Dapr-backed {@link EventBus}, used in place of the in-process bus when the optional
      * {@code adhar-kit-dapr} module is on the classpath, a {@code DaprFacade} bean exists,
      * and Dapr is explicitly enabled ({@code adhar.dapr.enabled=true}). A Kafka bus
@@ -118,6 +101,33 @@ public class EventSourcingAutoConfiguration {
     @ConditionalOnMissingBean(EventBus.class)
     public EventBus eventBus() {
         return new SimpleEventBus();
+    }
+
+    /**
+     * Kafka-backed {@link EventBus}, used in place of the in-process bus when {@code spring-kafka}
+     * is on the classpath, a {@link KafkaTemplate} bean exists, and
+     * {@code adhar.event-sourcing.kafka.enabled=true}.
+     *
+     * <p>Isolated in a nested {@code @ConditionalOnClass} configuration so the outer
+     * auto-configuration never references {@link KafkaTemplate} in a bean signature: without
+     * spring-kafka on the classpath, reflecting over an outer method that takes a
+     * {@code KafkaTemplate} parameter throws {@link NoClassDefFoundError} during condition
+     * evaluation and aborts the whole context. The nested class's bean methods are only
+     * introspected once its class-level {@code @ConditionalOnClass} passes.</p>
+     */
+    @Configuration
+    @ConditionalOnClass(name = "org.springframework.kafka.core.KafkaTemplate")
+    static class KafkaEventBusConfiguration {
+
+        @Bean
+        @ConditionalOnBean(KafkaTemplate.class)
+        @ConditionalOnMissingBean(EventBus.class)
+        @ConditionalOnProperty(prefix = "adhar.event-sourcing.kafka", name = "enabled", havingValue = "true")
+        public EventBus kafkaEventBus(KafkaTemplate<String, String> kafkaTemplate, DomainEventKafkaSerde serde,
+                                      EventSourcingProperties properties) {
+            log.info("Using Kafka-backed event bus (topic '{}')", properties.getKafka().getTopic());
+            return new KafkaEventBus(kafkaTemplate, serde, properties.getKafka().getTopic());
+        }
     }
 
     @Bean

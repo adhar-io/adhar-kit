@@ -66,10 +66,12 @@ public class TracingFacade implements TracingService {
     }
 
     private TracingService createSpringAdapter() {
-        // Spring adapter should be obtained via dependency injection, not through facade
-        throw new UnsupportedOperationException(
-                "Spring adapter should be injected via @Autowired SpringTracingAdapter, not accessed through TracingFacade"
-        );
+        // The real SpringTracingAdapter needs an injected Tracer, so the no-arg singleton path can't
+        // build it. Rather than throw (which breaks every adhar.traced(...) call reached statically),
+        // fall back to a no-op that still runs the wrapped operation. A Spring app that wants real
+        // spans injects a SpringTracingAdapter and constructs TracingFacade(delegate) itself.
+        log.debug("No injected SpringTracingAdapter on the static TracingFacade; using no-op tracing");
+        return new NoOpTracingService();
     }
 
     private TracingService createQuarkusAdapter() {

@@ -75,22 +75,13 @@
     <springProperty scope="context" name="PROD_HIBERNATE_LEVEL" source="adhar.logging.levels.production.hibernate" defaultValue="WARN"/>
     <springProperty scope="context" name="PROD_ADHAR_LEVEL" source="adhar.logging.levels.production.adhar" defaultValue="INFO"/>
 
-    <!-- JSON encoder with masking -->
-    <encoder class="com.adhar.adharkit.logging.encoder.MaskingJsonEncoder" name="JSON_MASKING_ENCODER">
-        <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${SPRING_PROFILES_ACTIVE:-default}"}</customFields>
-        <includeMdc>${JSON_INCLUDE_MDC}</includeMdc>
-        <fieldNames>
-            <timestamp>${JSON_TIMESTAMP_FIELD}</timestamp>
-            <level>${JSON_LEVEL_FIELD}</level>
-            <logger>${JSON_LOGGER_FIELD}</logger>
-            <thread>${JSON_THREAD_FIELD}</thread>
-            <message>${JSON_MESSAGE_FIELD}</message>
-            <stackTrace>${JSON_STACKTRACE_FIELD}</stackTrace>
-            <version>[ignore]</version>
-            <levelValue>[ignore]</levelValue>
-        </fieldNames>
-        <start>true</start>
-    </encoder>
+    <!-- JSON masking encoder.
+         NOTE: Logback has no registry for referencing encoders by name (only appenders support
+         `ref`, via the appender bag). A top-level <encoder name="..."> + <encoder ref="..."> does
+         NOT resolve — the appender ends up with an unconfigured encoder and logback fails the whole
+         configuration with "PatternLayout - Empty or null pattern", aborting the Spring context.
+         So the masking encoder is defined inline in each JSON appender below. Keep the blocks in
+         sync (or refactor to an <include>d fragment). -->
 
     <!-- Console appender -->
     <if condition='property("CONSOLE_ENABLED").equalsIgnoreCase("true")'>
@@ -98,8 +89,20 @@
             <if condition='property("CONSOLE_JSON").equalsIgnoreCase("true")'>
                 <then>
                     <appender name="CONSOLE_JSON" class="ch.qos.logback.core.ConsoleAppender">
-                        <encoder ref="JSON_MASKING_ENCODER" />
-                        <includeCallerData>${CONSOLE_CALLER_DATA}</includeCallerData>
+                        <encoder class="com.adhar.adharkit.logging.encoder.MaskingJsonEncoder">
+                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${SPRING_PROFILES_ACTIVE:-default}"}</customFields>
+                            <includeMdc>${JSON_INCLUDE_MDC}</includeMdc>
+                            <fieldNames>
+                                <timestamp>${JSON_TIMESTAMP_FIELD}</timestamp>
+                                <level>${JSON_LEVEL_FIELD}</level>
+                                <logger>${JSON_LOGGER_FIELD}</logger>
+                                <thread>${JSON_THREAD_FIELD}</thread>
+                                <message>${JSON_MESSAGE_FIELD}</message>
+                                <stackTrace>${JSON_STACKTRACE_FIELD}</stackTrace>
+                                <version>[ignore]</version>
+                                <levelValue>[ignore]</levelValue>
+                            </fieldNames>
+                        </encoder>
                     </appender>
                 </then>
                 <else>
@@ -128,8 +131,20 @@
                             <totalSizeCap>${FILE_TOTAL_SIZE_CAP}</totalSizeCap>
                             <cleanHistoryOnStart>${FILE_CLEAN_HISTORY}</cleanHistoryOnStart>
                         </rollingPolicy>
-                        <encoder ref="JSON_MASKING_ENCODER" />
-                        <includeCallerData>${FILE_CALLER_DATA}</includeCallerData>
+                        <encoder class="com.adhar.adharkit.logging.encoder.MaskingJsonEncoder">
+                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${SPRING_PROFILES_ACTIVE:-default}"}</customFields>
+                            <includeMdc>${JSON_INCLUDE_MDC}</includeMdc>
+                            <fieldNames>
+                                <timestamp>${JSON_TIMESTAMP_FIELD}</timestamp>
+                                <level>${JSON_LEVEL_FIELD}</level>
+                                <logger>${JSON_LOGGER_FIELD}</logger>
+                                <thread>${JSON_THREAD_FIELD}</thread>
+                                <message>${JSON_MESSAGE_FIELD}</message>
+                                <stackTrace>${JSON_STACKTRACE_FIELD}</stackTrace>
+                                <version>[ignore]</version>
+                                <levelValue>[ignore]</levelValue>
+                            </fieldNames>
+                        </encoder>
                     </appender>
 
                     <!-- Async file appender (JSON) -->
@@ -179,7 +194,20 @@
                         <destination>${LOGSTASH_HOST}:${LOGSTASH_PORT}</destination>
                         <connectionTimeout>${LOGSTASH_CONNECTION_TIMEOUT}</connectionTimeout>
                         <keepAliveDuration>5 minutes</keepAliveDuration>
-                        <encoder ref="JSON_MASKING_ENCODER" />
+                        <encoder class="com.adhar.adharkit.logging.encoder.MaskingJsonEncoder">
+                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${SPRING_PROFILES_ACTIVE:-default}"}</customFields>
+                            <includeMdc>${JSON_INCLUDE_MDC}</includeMdc>
+                            <fieldNames>
+                                <timestamp>${JSON_TIMESTAMP_FIELD}</timestamp>
+                                <level>${JSON_LEVEL_FIELD}</level>
+                                <logger>${JSON_LOGGER_FIELD}</logger>
+                                <thread>${JSON_THREAD_FIELD}</thread>
+                                <message>${JSON_MESSAGE_FIELD}</message>
+                                <stackTrace>${JSON_STACKTRACE_FIELD}</stackTrace>
+                                <version>[ignore]</version>
+                                <levelValue>[ignore]</levelValue>
+                            </fieldNames>
+                        </encoder>
                         <queueSize>${LOGSTASH_QUEUE_SIZE}</queueSize>
                     </appender>
                 </then>
@@ -187,7 +215,20 @@
                     <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashSocketAppender">
                         <host>${LOGSTASH_HOST}</host>
                         <port>${LOGSTASH_PORT}</port>
-                        <encoder ref="JSON_MASKING_ENCODER" />
+                        <encoder class="com.adhar.adharkit.logging.encoder.MaskingJsonEncoder">
+                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${SPRING_PROFILES_ACTIVE:-default}"}</customFields>
+                            <includeMdc>${JSON_INCLUDE_MDC}</includeMdc>
+                            <fieldNames>
+                                <timestamp>${JSON_TIMESTAMP_FIELD}</timestamp>
+                                <level>${JSON_LEVEL_FIELD}</level>
+                                <logger>${JSON_LOGGER_FIELD}</logger>
+                                <thread>${JSON_THREAD_FIELD}</thread>
+                                <message>${JSON_MESSAGE_FIELD}</message>
+                                <stackTrace>${JSON_STACKTRACE_FIELD}</stackTrace>
+                                <version>[ignore]</version>
+                                <levelValue>[ignore]</levelValue>
+                            </fieldNames>
+                        </encoder>
                         <queueSize>${LOGSTASH_QUEUE_SIZE}</queueSize>
                     </appender>
                 </else>

@@ -10,7 +10,8 @@
     </parent>
     <artifactId>adhar-kit-starter</artifactId>
     <name>adhar-kit-starter</name>
-    <description>Single-dependency entry point for Adhar Kit on Spring Boot, Quarkus, Micronaut, Helidon and Vert.x</description>
+    <description>Single-dependency entry point for Adhar Kit on
+        Spring Boot, Quarkus, Micronaut, Helidon and Vert.x</description>
 
     <properties>
         <quarkus.version>3.37.0</quarkus.version>
