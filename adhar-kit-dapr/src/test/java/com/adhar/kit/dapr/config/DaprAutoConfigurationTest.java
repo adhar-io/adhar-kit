@@ -11,6 +11,7 @@ import com.adhar.kit.dapr.resilience.DaprInvocationResilience;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.util.ClassUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -38,7 +39,17 @@ class DaprAutoConfigurationTest {
             assertThat(context).hasSingleBean(DaprPublishAspect.class);
             assertThat(context).hasSingleBean(DaprSubscriptionRegistrar.class);
             assertThat(context).hasSingleBean(DaprEventDispatcher.class);
-            assertThat(context).hasSingleBean(DaprSubscriptionController.class);
+            // The subscription controller is @ConditionalOnMissingClass("io.dapr.springboot.DaprController"):
+            // when the Dapr Spring Boot SDK is on the classpath (it is a dependency of this module),
+            // Dapr's own controller serves the subscription endpoints and ours must NOT be registered.
+            // Mirror that condition here instead of asserting the bean unconditionally.
+            boolean daprControllerPresent = ClassUtils.isPresent(
+                    "io.dapr.springboot.DaprController", getClass().getClassLoader());
+            if (daprControllerPresent) {
+                assertThat(context).doesNotHaveBean(DaprSubscriptionController.class);
+            } else {
+                assertThat(context).hasSingleBean(DaprSubscriptionController.class);
+            }
         });
     }
 
