@@ -56,11 +56,14 @@ class SpringMetricsAdapterTest {
     }
 
     @Test
-    void recordTimeWrapsExceptions() {
+    void recordTimePreservesTheOperationsOwnException() {
+        // recordTime deliberately rethrows a RuntimeException from the operation unchanged so
+        // callers can catch their domain exceptions through adhar.traced(...); only checked
+        // exceptions (impossible from a Supplier) are wrapped as "Timed operation failed".
         assertThatThrownBy(() -> adapter.recordTime("op.fail", () -> {
             throw new IllegalStateException("boom");
-        })).isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Timed operation failed");
+        })).isInstanceOf(IllegalStateException.class)
+                .hasMessage("boom");
     }
 
     @Test

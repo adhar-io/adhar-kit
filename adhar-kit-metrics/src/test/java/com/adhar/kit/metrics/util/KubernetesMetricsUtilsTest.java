@@ -4,6 +4,7 @@ import com.adhar.kit.metrics.properties.AdharMetricsProperties;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,8 +43,21 @@ class KubernetesMetricsUtilsTest {
 
     // ==================== Kubernetes Environment Detection Tests ====================
 
+    /**
+     * The platform's CI runs these tests inside a Kubernetes pod (service-account files and
+     * KUBERNETES_SERVICE_HOST present), where the "not in Kubernetes" expectations are simply
+     * false. Skip those cases there instead of failing; they still run on developer machines.
+     */
+    private static void assumeNotInsideKubernetes() {
+        Assumptions.assumeFalse(
+                System.getenv("KUBERNETES_SERVICE_HOST") != null
+                        || new java.io.File("/var/run/secrets/kubernetes.io/serviceaccount/token").exists(),
+                "running inside a Kubernetes pod — 'outside Kubernetes' expectations do not apply");
+    }
+
     @Test
     void isRunningInKubernetes_WithoutKubernetesEnvironment_ReturnsFalse() {
+        assumeNotInsideKubernetes();
         // In test environment, Kubernetes files and env vars won't exist
         boolean result = kubernetesMetricsUtils.isRunningInKubernetes();
 
@@ -73,6 +87,7 @@ class KubernetesMetricsUtilsTest {
 
     @Test
     void getNamespace_WithoutKubernetesFiles_ReturnsDefault() {
+        assumeNotInsideKubernetes();
         String namespace = kubernetesMetricsUtils.getNamespace();
 
         // Should return "default" when no Kubernetes namespace file exists
@@ -239,8 +254,10 @@ class KubernetesMetricsUtilsTest {
         assertThat(metadata).containsKey("nodeName");
         assertThat(metadata).containsKey("inKubernetes");
 
-        // Verify the inKubernetes flag is properly set
-        assertThat(metadata.get("inKubernetes")).isEqualTo("false");
+        // Verify the inKubernetes flag reflects the detected environment (false on a developer
+        // machine, true when the suite runs inside a pod on the platform's CI).
+        assertThat(metadata.get("inKubernetes"))
+                .isEqualTo(String.valueOf(kubernetesMetricsUtils.isRunningInKubernetes()));
     }
 
     @Test
