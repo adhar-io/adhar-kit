@@ -95,18 +95,19 @@ class TracingFacadeTest {
     }
 
     @Test
-    void getInstanceFailsForSpringBecauseAdapterMustBeInjected() {
-        // On the Spring Boot test classpath the facade refuses to build a Spring adapter.
-        assertThatThrownBy(TracingFacade::getInstance)
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Spring adapter");
+    void getInstanceOnSpringClasspathFallsBackToNoOpTracing() {
+        // On the Spring Boot test classpath the static facade cannot build the real
+        // SpringTracingAdapter (it needs an injected Tracer). Rather than throw — which broke
+        // every static adhar.traced(...) call — it now falls back to no-op tracing that still
+        // runs the wrapped operation. A Spring app wanting real spans injects the adapter.
+        assertThat(TracingFacade.getInstance()).isNotNull();
     }
 
     @Test
-    void createSpringAdapterThrowsUnsupported() {
-        assertThatThrownBy(() -> invoke("createSpringAdapter"))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Spring adapter");
+    void createSpringAdapterReturnsNoOpService() throws Exception {
+        Method m = TracingFacade.class.getDeclaredMethod("createSpringAdapter");
+        m.setAccessible(true);
+        assertThat(m.invoke(facade)).isInstanceOf(NoOpTracingService.class);
     }
 
     @Test
