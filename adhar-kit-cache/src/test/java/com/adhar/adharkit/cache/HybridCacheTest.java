@@ -38,7 +38,7 @@ import static org.awaitility.Awaitility.await;
 // do not linger and reconnect-storm against the stopped containers, which would
 // otherwise destabilize the shared Netty event loop used by sibling tests.
 @SpringBootTest
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @EnableCaching
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public class HybridCacheTest {

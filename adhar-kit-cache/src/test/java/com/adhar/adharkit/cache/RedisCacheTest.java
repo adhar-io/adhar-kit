@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 // container, which otherwise destabilizes the shared Netty event loop and
 // causes intermittent command loss in sibling container-backed tests.
 @SpringBootTest
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @EnableCaching
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public class RedisCacheTest {

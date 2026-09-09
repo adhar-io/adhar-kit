@@ -44,7 +44,7 @@ import static org.awaitility.Awaitility.await;
 // class so they do not linger against the stopped Kafka container and disturb
 // sibling container-backed tests sharing Docker and Netty resources.
 @SpringBootTest
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @EnableCaching
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public class KafkaCacheTest {

@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Integration tests for Kafka messaging using test containers.
  */
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @EmbeddedKafka(partitions = 1, topics = {"test-topic"})
 class KafkaIntegrationTest {
 
