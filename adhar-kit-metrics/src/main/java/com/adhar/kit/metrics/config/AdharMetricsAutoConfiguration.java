@@ -54,6 +54,98 @@ import java.util.Map;
 @Configuration
 @EnableConfigurationProperties(AdharMetricsProperties.class)
 @ConditionalOnProperty(prefix = "adhar.metrics", name = "enabled", havingValue = "true", matchIfMissing = true)
+/*
+ * Bean names here are PREFIXED with ADHAR — Open Cloud-Native Foundation · v0.1.5
+🚀 Welcome to Adhar Platform!
+
+Adhar Platform is a comprehensive Internal Developer Platform (IDP) that provides
+unified Kubernetes-native approach for the entire software development lifecycle.
+
+ 📋 Platform Lifecycle
+  • up       - Create and start the Adhar platform (local or cloud)
+  • down     - Stop and destroy the Adhar platform
+  • status   - Check platform health and status
+
+ 🔍 Resource Management
+  • get      - Display platform resources (apps, secrets, clusters, etc.)
+  • apps     - Manage application lifecycle and deployments
+  • cluster  - Manage Kubernetes clusters and configurations
+  • config   - Manage platform configuration and settings
+  • env      - Manage platform environments (dev, staging, prod)
+
+ ⚡ Operations & Monitoring
+  • health   - Check platform health, services, and dependencies
+  • logs     - View centralized platform logs and events
+  • metrics  - Access platform metrics and performance data
+  • traces   - View distributed tracing information
+
+ 🔒 Security & Compliance
+  • security - Security scanning, vulnerability management, and policies
+  • auth     - Authentication, authorization, and user management
+  • secrets  - Manage secrets, certificates, and sensitive data
+  • policy   - Platform policy management and governance
+
+ 🔄 GitOps & DevOps
+  • gitops   - GitOps operations, ArgoCD management, and workflows
+  • pipeline - CI/CD pipeline creation, execution, and management
+  • webhook  - Webhook management and integration endpoints
+
+ 🏗️ Infrastructure & Data
+  • network - Network diagnostics, policies, and connectivity testing
+  • db      - Database management, operations, and monitoring
+  • storage - Storage management, volumes, and data persistence
+  • service - Service management, load balancing, and API endpoints
+
+ 📊 Resource Management & Optimization
+  • scale   - Resource scaling, auto-scaling, and optimization
+  • backup  - Platform backup creation and management
+  • restore - Platform restoration from backups
+
+ 🛠️ Utilities
+  • help     - Get help about commands (this command)
+  • version  - Show version information and build details
+
+ 🚀 Quick Start Examples
+  • adhar up                    - Create local development platform
+  • adhar up -f config.yaml   - Deploy production platform
+  • adhar get status          - Check platform health
+  • adhar get secrets         - View platform credentials
+  • adhar down                - Clean up local platform
+
+ 📚 Getting More Help
+  • Command-specific help: adhar help <command>
+  • Detailed documentation: https://docs.adhar.io
+  • Community support: https://github.com/adhar-io/adhar
+
+ 💡 Pro Tips
+  • Use --dry-run flag to preview changes without applying them
+  • Use --verbose flag for detailed output and debugging
+  • Use --no-color flag to disable colored output
+  • Use --kubeconfig to specify custom kubeconfig path
+
+
+  Adhar • Built with ❤️ for developers! on purpose.
+ *
+ * Spring Boot's own JvmMetricsAutoConfiguration and SystemMetricsAutoConfiguration
+ * register beans called jvmMemoryMetrics, jvmGcMetrics, jvmThreadMetrics,
+ * classLoaderMetrics, processorMetrics, fileDescriptorMetrics, uptimeMetrics and
+ * diskSpaceMetrics. Declaring the same NAMES here made every application built on
+ * adhar-kit fail to start:
+ *
+ *   The bean 'diskSpaceMetrics', defined in SystemMetricsAutoConfiguration, could
+ *   not be registered. A bean with that name has already been defined in
+ *   AdharMetricsAutoConfiguration and overriding is disabled.
+ *
+ * @ConditionalOnMissingBean does not prevent this. It is evaluated against beans
+ * registered SO FAR, so whichever autoconfiguration runs first wins the name and
+ * the second one fails outright at definition-registration time — a name clash,
+ * not a type clash.
+ *
+ * With distinct names the type-based @ConditionalOnMissingBean does its job: if
+ * Spring Boot registered the metric already, ours backs off, and vice versa. So
+ * there is exactly one of each meter and no startup failure. Do not "simplify"
+ * these back to the upstream names.
+ */
 public class AdharMetricsAutoConfiguration {
 
     private final AdharMetricsProperties properties;
@@ -127,7 +219,7 @@ public class AdharMetricsAutoConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "adhar.metrics.jvm", name = "memory", havingValue = "true", matchIfMissing = true)
     @ConditionalOnMissingBean
-    public JvmMemoryMetrics jvmMemoryMetrics() {
+    public JvmMemoryMetrics adharJvmMemoryMetrics() {
         log.debug("Registering JVM memory metrics");
         return new JvmMemoryMetrics();
     }
@@ -138,7 +230,7 @@ public class AdharMetricsAutoConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "adhar.metrics.jvm", name = "gc", havingValue = "true", matchIfMissing = true)
     @ConditionalOnMissingBean
-    public JvmGcMetrics jvmGcMetrics() {
+    public JvmGcMetrics adharJvmGcMetrics() {
         log.debug("Registering JVM GC metrics");
         return new JvmGcMetrics();
     }
@@ -149,7 +241,7 @@ public class AdharMetricsAutoConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "adhar.metrics.jvm", name = "threads", havingValue = "true", matchIfMissing = true)
     @ConditionalOnMissingBean
-    public JvmThreadMetrics jvmThreadMetrics() {
+    public JvmThreadMetrics adharJvmThreadMetrics() {
         log.debug("Registering JVM thread metrics");
         return new JvmThreadMetrics();
     }
@@ -160,7 +252,7 @@ public class AdharMetricsAutoConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "adhar.metrics.jvm", name = "classLoader", havingValue = "true", matchIfMissing = true)
     @ConditionalOnMissingBean
-    public ClassLoaderMetrics classLoaderMetrics() {
+    public ClassLoaderMetrics adharClassLoaderMetrics() {
         log.debug("Registering JVM class loader metrics");
         return new ClassLoaderMetrics();
     }
@@ -171,7 +263,7 @@ public class AdharMetricsAutoConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "adhar.metrics.system", name = "processor", havingValue = "true", matchIfMissing = true)
     @ConditionalOnMissingBean
-    public ProcessorMetrics processorMetrics() {
+    public ProcessorMetrics adharProcessorMetrics() {
         log.debug("Registering processor metrics");
         return new ProcessorMetrics();
     }
@@ -182,7 +274,7 @@ public class AdharMetricsAutoConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "adhar.metrics.system", name = "fileDescriptor", havingValue = "true", matchIfMissing = true)
     @ConditionalOnMissingBean
-    public FileDescriptorMetrics fileDescriptorMetrics() {
+    public FileDescriptorMetrics adharFileDescriptorMetrics() {
         log.debug("Registering file descriptor metrics");
         return new FileDescriptorMetrics();
     }
@@ -193,7 +285,7 @@ public class AdharMetricsAutoConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "adhar.metrics.system", name = "uptime", havingValue = "true", matchIfMissing = true)
     @ConditionalOnMissingBean
-    public UptimeMetrics uptimeMetrics() {
+    public UptimeMetrics adharUptimeMetrics() {
         log.debug("Registering uptime metrics");
         return new UptimeMetrics();
     }
@@ -204,7 +296,7 @@ public class AdharMetricsAutoConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "adhar.metrics.system", name = "diskSpace", havingValue = "true", matchIfMissing = true)
     @ConditionalOnMissingBean
-    public DiskSpaceMetrics diskSpaceMetrics() {
+    public DiskSpaceMetrics adharDiskSpaceMetrics() {
         log.debug("Registering disk space metrics");
         return new DiskSpaceMetrics(new File("."));
     }
