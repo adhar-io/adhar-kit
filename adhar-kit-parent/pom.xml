@@ -149,6 +149,103 @@
     <dependencyManagement>
         <dependencies>
             <!-- ================================================================= -->
+            <!-- Security floors — CVE remediation above the Spring Boot BOM       -->
+            <!-- ================================================================= -->
+            <!-- Every app built on this parent inherited 29 HIGH/CRITICAL findings
+                 from the Spring Boot 4.1.0 BOM, which the supply-chain image scan
+                 gate (trivy at severity HIGH,CRITICAL with exit-code 1) correctly
+                 refuses. Measured on a scaffolded service image: 20 HIGH + 9
+                 CRITICAL in the `Java (jar)` target, which dwarfed everything else
+                 in the image.
+
+                 Pinned as explicit dependencyManagement rather than version
+                 PROPERTIES on purpose: a property name that the BOM does not
+                 actually use (they differ per artifact, and Jackson 3 /
+                 BouncyCastle do not follow the obvious pattern) is silently
+                 ignored, and the build then looks fixed while shipping the same
+                 jars. An explicit managed version always wins over an imported
+                 BOM, so these are verifiable by `mvn dependency:tree`.
+
+                 Versions are the FIXED versions the scanner reported, not
+                 guesses. Remove an entry once the inherited BOM moves past it;
+                 `mvn dependency:tree` showing the same version with and without
+                 the pin is the signal it is redundant. -->
+
+            <!-- CRITICAL CVE-2026-47884 / CVE-2026-47890 / CVE-2026-47892:
+                 Spring Framework remote code execution and header handling. -->
+            <dependency>
+                <groupId>org.springframework</groupId>
+                <artifactId>spring-framework-bom</artifactId>
+                <version>7.0.9</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- CRITICAL CVE-2026-65182 (security-constraint bypass),
+                 CVE-2026-65905 (authentication bypass), CVE-2026-68525. -->
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-core</artifactId>
+                <version>11.0.25</version>
+            </dependency>
+
+            <!-- CRITICAL CVE-2026-75595: SNI routing bypass in netty-handler.
+                 The rest of Netty needs 4.2.16 for the DoS set (CVE-2026-55831,
+                 -55833, -56745, -56816, -56819, -59901); 4.2.17 covers both, so
+                 the whole BOM moves together rather than splitting the versions. -->
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>4.2.17.Final</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- HIGH CVE-2026-89407 / -89425 / -68497 / -91776 / -91777.
+                 BOTH Jackson lines are on the classpath here: 2.x under
+                 com.fasterxml.jackson and 3.x under tools.jackson. -->
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>2.21.7</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>tools.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>3.1.7</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- HIGH CVE-2026-54399 / CVE-2026-54428: Apache HttpCore 5. -->
+            <dependency>
+                <groupId>org.apache.httpcomponents.core5</groupId>
+                <artifactId>httpcore5</artifactId>
+                <version>5.4.3</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.httpcomponents.core5</groupId>
+                <artifactId>httpcore5-h2</artifactId>
+                <version>5.4.3</version>
+            </dependency>
+
+            <!-- HIGH CVE-2026-8763 / CVE-2026-13506: BouncyCastle DoS. -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>1.85</version>
+            </dependency>
+
+            <!-- HIGH CVE-2026-54291: scram-client, reached through the driver. -->
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>42.7.12</version>
+            </dependency>
+
+            <!-- ================================================================= -->
             <!-- Adhar Kit BOM                                                     -->
             <!-- ================================================================= -->
             <!-- Centralized version management for all Adhar Kit modules          -->
