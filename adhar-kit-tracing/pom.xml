@@ -162,11 +162,6 @@
             <optional>true</optional>
         </dependency>
         <dependency>
-            <groupId>io.opentelemetry.semconv</groupId>
-            <artifactId>opentelemetry-semconv</artifactId>
-            <version>1.25.0-alpha</version>
-        </dependency>
-        <dependency>
             <groupId>io.opentelemetry.instrumentation</groupId>
             <artifactId>opentelemetry-instrumentation-annotations</artifactId>
             <version>${opentelemetry-instrumentation.version}</version>

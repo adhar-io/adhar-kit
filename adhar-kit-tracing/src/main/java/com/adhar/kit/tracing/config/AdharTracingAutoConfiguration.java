@@ -22,6 +22,7 @@ import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
 import io.opentelemetry.exporter.zipkin.ZipkinSpanExporter;
 import io.opentelemetry.extension.trace.propagation.B3Propagator;
 import io.opentelemetry.extension.trace.propagation.JaegerPropagator;
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.OpenTelemetrySdkBuilder;
 import io.opentelemetry.sdk.resources.Resource;
@@ -31,7 +32,6 @@ import io.opentelemetry.sdk.trace.SpanProcessor;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
 import io.opentelemetry.sdk.trace.samplers.Sampler;
-import io.opentelemetry.semconv.ResourceAttributes;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -230,17 +230,28 @@ public class AdharTracingAutoConfiguration {
     /**
      * Create resource attributes for the service.
      */
+    // Resource keys declared here rather than read from semconv's ResourceAttributes:
+    // that class was removed from opentelemetry-semconv (1.26+), and the consuming
+    // application's Spring Boot BOM manages semconv to a current version — so the
+    // kit compiled against 1.25 and then failed every service at startup with
+    // NoClassDefFoundError: io/opentelemetry/semconv/ResourceAttributes. The key
+    // names are part of the stable OpenTelemetry specification.
+    private static final AttributeKey<String> SERVICE_NAME = AttributeKey.stringKey("service.name");
+    private static final AttributeKey<String> SERVICE_VERSION = AttributeKey.stringKey("service.version");
+    private static final AttributeKey<String> SERVICE_NAMESPACE = AttributeKey.stringKey("service.namespace");
+    private static final AttributeKey<String> SERVICE_INSTANCE_ID = AttributeKey.stringKey("service.instance.id");
+
     private Resource createResource() {
         io.opentelemetry.sdk.resources.ResourceBuilder resourceBuilder = Resource.getDefault().toBuilder();
 
         // Service information
         String serviceName = environment.resolvePlaceholders(properties.getResource().getServiceName());
-        resourceBuilder.put(ResourceAttributes.SERVICE_NAME, serviceName);
-        resourceBuilder.put(ResourceAttributes.SERVICE_VERSION, properties.getResource().getServiceVersion());
-        resourceBuilder.put(ResourceAttributes.SERVICE_NAMESPACE, properties.getResource().getServiceNamespace());
+        resourceBuilder.put(SERVICE_NAME, serviceName);
+        resourceBuilder.put(SERVICE_VERSION, properties.getResource().getServiceVersion());
+        resourceBuilder.put(SERVICE_NAMESPACE, properties.getResource().getServiceNamespace());
 
         String instanceId = environment.resolvePlaceholders(properties.getResource().getServiceInstanceId());
-        resourceBuilder.put(ResourceAttributes.SERVICE_INSTANCE_ID, instanceId);
+        resourceBuilder.put(SERVICE_INSTANCE_ID, instanceId);
 
         // Additional custom attributes
         for (Map.Entry<String, String> entry : properties.getResource().getAttributes().entrySet()) {

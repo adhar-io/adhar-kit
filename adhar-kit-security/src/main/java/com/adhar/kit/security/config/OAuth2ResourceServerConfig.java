@@ -3,6 +3,7 @@ package com.adhar.kit.security.config;
 import com.adhar.kit.security.properties.AdharSecurityProperties;
 import com.adhar.kit.security.util.JwtUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -55,6 +56,9 @@ public class OAuth2ResourceServerConfig {
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnProperty(prefix = "adhar.security.jwt", name = "enabled", havingValue = "true", matchIfMissing = true)
+    // Only with an endpoint to validate against: unconditionally, this threw at
+    // startup for every service that had not configured JWT yet.
+    @ConditionalOnExpression("'${adhar.security.jwt.issuer-uri:}' != '' or '${adhar.security.jwt.jwk-set-uri:}' != ''")
     public JwtDecoder jwtDecoder() {
         if (properties.getJwt().getJwkSetUri() != null && !properties.getJwt().getJwkSetUri().isEmpty()) {
             log.debug("Configuring JWT decoder with JWK set URI: {}", properties.getJwt().getJwkSetUri());
@@ -95,8 +99,12 @@ public class OAuth2ResourceServerConfig {
      * @return the configured SecurityFilterChain
      * @throws Exception if an error occurs during configuration
      */
-    @Bean
-    @ConditionalOnMissingBean(name = "oauth2SecurityFilterChain")
+    // Not a @Bean. Registered, it was a second chain matching every request beside
+    // AdharSecurityAutoConfiguration#securityFilterChain — and, being imported, it
+    // registered first, so that chain's @ConditionalOnMissingBean dropped the main
+    // one (authorization, CORS, CSRF) entirely. The main chain already enables the
+    // resource server when JWT is configured. Kept for applications that build their
+    // own chain from it.
     public SecurityFilterChain oauth2SecurityFilterChain(HttpSecurity http) throws Exception {
         log.debug("Configuring OAuth2 resource server security filter chain");
         

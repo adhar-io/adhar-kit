@@ -35,9 +35,14 @@ public class EventSourcingProperties {
     private int snapshotInterval = 100;
 
     /**
-     * The type of event store to use. Supported values: "jpa", "in-memory", "dapr".
+     * The type of event store to use. Supported values: "in-memory", "jpa", "dapr".
+     * <p>
+     * Defaults to "in-memory"; durable stores are chosen explicitly. "jpa" used to be
+     * the default, which — with JPA on every adhar-kit-starter classpath — put event
+     * store tables into every service that had a database, whether or not it used
+     * event sourcing.
      */
-    private String eventStoreType = "jpa";
+    private String eventStoreType = "in-memory";
 
     /**
      * Maximum number of attempts {@code RetryingAggregateRepository} makes when a save

@@ -133,7 +133,7 @@
 
             <!-- Caching -->
             <dependency>
-                <groupId>com.adhar.adharkit</groupId>
+                <groupId>com.adhar.kit</groupId>
                 <artifactId>adhar-kit-cache</artifactId>
                 <version>${adhar-kit.version}</version>
             </dependency>

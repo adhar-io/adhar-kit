@@ -8,77 +8,86 @@ import org.springframework.cache.CacheManager;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager.RedisCacheManagerBuilder;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.GenericJacksonJsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
+import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
+import org.springframework.util.ClassUtils;
 
-import java.time.Duration;
 import java.util.Collection;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * A cache manager implementation that uses Redis for distributed cache storage.
+ * A cache manager that stores entries in Redis (or Valkey), shared by every
+ * instance of the application.
  * <p>
- * This cache manager wraps Spring's RedisCacheManager and provides additional
- * functionality for configuring Redis caches with sensible defaults and custom
- * serialization.
+ * Wraps Spring Data Redis' {@code RedisCacheManager} with the module's defaults:
+ * {@code adhar.cache.time-to-live} as the entry TTL, {@code adhar.cache.redis.key-prefix}
+ * in front of every key, and {@code adhar.cache.allow-null-values}.
  * <p>
- * The cache manager uses Jackson for serialization/deserialization of cache values,
- * which allows for storing complex objects in the cache.
+ * Values are stored as JSON carrying their type, so a cache hit returns the same
+ * class that was cached — records and {@code java.time} values included — and the
+ * entries stay readable with {@code redis-cli}. The type information is trusted on
+ * read: anything able to write to this Redis can choose the class a cache read
+ * deserializes into, so the store must be one the application alone writes to.
+ * Without Jackson 3 on the classpath, values fall back to JDK serialization and
+ * must be {@link java.io.Serializable}.
  */
 @Slf4j
 public class RedisCacheManager implements CacheManager {
 
+    private static final boolean JACKSON_3_PRESENT =
+            ClassUtils.isPresent("tools.jackson.databind.json.JsonMapper", RedisCacheManager.class.getClassLoader());
+
     private final org.springframework.data.redis.cache.RedisCacheManager internalCacheManager;
-    private final AdharCacheProperties properties;
-    private final ObjectMapper objectMapper;
-    private final Map<String, Cache> caches = new ConcurrentHashMap<>();
 
     /**
      * Creates a new RedisCacheManager.
      *
      * @param connectionFactory the Redis connection factory
      * @param properties        the cache properties
-     * @param objectMapper      the object mapper for serialization/deserialization
      */
-    public RedisCacheManager(
-            RedisConnectionFactory connectionFactory,
-            AdharCacheProperties properties,
-            ObjectMapper objectMapper) {
-        this.properties = properties;
-        this.objectMapper = objectMapper;
-
-        // Create a JSON serializer for cache values
-        GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer(objectMapper);
-
-        // Create the default cache configuration
+    public RedisCacheManager(RedisConnectionFactory connectionFactory, AdharCacheProperties properties) {
         RedisCacheConfiguration defaultCacheConfig = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(properties.getTimeToLive())
                 .prefixCacheNameWith(properties.getRedis().getKeyPrefix())
                 .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(new StringRedisSerializer()))
-                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(jsonSerializer));
+                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(valueSerializer()));
 
-        // Configure null value handling
         if (!properties.isAllowNullValues()) {
             defaultCacheConfig = defaultCacheConfig.disableCachingNullValues();
         }
 
-        // Create the internal cache manager
+        // Spring's RedisCacheManager is an InitializingBean; built here rather than
+        // registered, so initialize it explicitly.
         this.internalCacheManager = RedisCacheManagerBuilder.fromConnectionFactory(connectionFactory)
                 .cacheDefaults(defaultCacheConfig)
                 .build();
+        this.internalCacheManager.afterPropertiesSet();
 
-        log.info("Initialized RedisCacheManager with Redis at {}:{}", 
-                properties.getRedis().getHost(), properties.getRedis().getPort());
+        log.info("Initialized RedisCacheManager (ttl={}, keyPrefix='{}', serializer={})",
+                properties.getTimeToLive(), properties.getRedis().getKeyPrefix(),
+                JACKSON_3_PRESENT ? "json" : "jdk");
+    }
+
+    /**
+     * Creates a new RedisCacheManager.
+     *
+     * @param connectionFactory the Redis connection factory
+     * @param properties        the cache properties
+     * @param objectMapper      ignored
+     * @deprecated the object mapper was used without type information, so a cache
+     *     hit came back as a {@code LinkedHashMap} instead of the cached class. Use
+     *     {@link #RedisCacheManager(RedisConnectionFactory, AdharCacheProperties)}.
+     */
+    @Deprecated(since = "0.1.1", forRemoval = true)
+    public RedisCacheManager(RedisConnectionFactory connectionFactory, AdharCacheProperties properties,
+                             ObjectMapper objectMapper) {
+        this(connectionFactory, properties);
     }
 
     @Override
     public Cache getCache(String name) {
-        return caches.computeIfAbsent(name, cacheName -> {
-            org.springframework.cache.Cache internalCache = internalCacheManager.getCache(cacheName);
-            return new RedisCache(internalCache, cacheName);
-        });
+        return internalCacheManager.getCache(name);
     }
 
     @Override
@@ -86,94 +95,17 @@ public class RedisCacheManager implements CacheManager {
         return internalCacheManager.getCacheNames();
     }
 
-    /**
-     * A cache implementation that wraps a Redis cache.
-     */
-    private class RedisCache implements Cache {
-        private final Cache internalCache;
-        private final String name;
+    private static RedisSerializer<Object> valueSerializer() {
+        return JACKSON_3_PRESENT ? JsonValues.serializer() : RedisSerializer.java();
+    }
 
-        /**
-         * Creates a new RedisCache.
-         *
-         * @param internalCache the internal cache
-         * @param name          the cache name
-         */
-        public RedisCache(Cache internalCache, String name) {
-            this.internalCache = internalCache;
-            this.name = name;
-        }
-
-        @Override
-        public String getName() {
-            return name;
-        }
-
-        @Override
-        public Object getNativeCache() {
-            return internalCache.getNativeCache();
-        }
-
-        @Override
-        public ValueWrapper get(Object key) {
-            return internalCache.get(key);
-        }
-
-        @Override
-        public <T> T get(Object key, Class<T> type) {
-            return internalCache.get(key, type);
-        }
-
-        @Override
-        public <T> T get(Object key, java.util.concurrent.Callable<T> valueLoader) {
-            return internalCache.get(key, valueLoader);
-        }
-
-        @Override
-        public void put(Object key, Object value) {
-            internalCache.put(key, value);
-        }
-
-        @Override
-        public void evict(Object key) {
-            internalCache.evict(key);
-        }
-
-        @Override
-        public void clear() {
-            internalCache.clear();
-        }
-
-        /**
-         * Puts a value in the cache with a custom time-to-live.
-         *
-         * @param key        the key
-         * @param value      the value
-         * @param timeToLive the time-to-live
-         */
-        public void put(Object key, Object value, Duration timeToLive) {
-            // For Redis, we need to create a new cache with the custom TTL
-            if (internalCache instanceof org.springframework.data.redis.cache.RedisCache) {
-                org.springframework.data.redis.cache.RedisCache redisCache = 
-                        (org.springframework.data.redis.cache.RedisCache) internalCache;
-
-                // Get the current configuration and update the TTL
-                RedisCacheConfiguration config = redisCache.getCacheConfiguration().entryTtl(timeToLive);
-
-                // Create a new cache with the custom configuration
-                org.springframework.data.redis.cache.RedisCache customCache = 
-                        (org.springframework.data.redis.cache.RedisCache) internalCacheManager.getCache(name + ":" + timeToLive.toMillis());
-
-                if (customCache != null) {
-                    customCache.put(key, value);
-                } else {
-                    // Fall back to the default cache
-                    internalCache.put(key, value);
-                }
-            } else {
-                // Fall back to the default cache
-                internalCache.put(key, value);
-            }
+    /** Isolated so Jackson 3 types are loaded only when Jackson 3 is present. */
+    private static final class JsonValues {
+        static RedisSerializer<Object> serializer() {
+            return GenericJacksonJsonRedisSerializer.builder()
+                    .enableSpringCacheNullValueSupport()
+                    .enableUnsafeDefaultTyping()
+                    .build();
         }
     }
 }

@@ -1,0 +1,2 @@
+org.springframework.boot.EnvironmentPostProcessor=\
+com.adhar.kit.persistence.config.NoDatabaseEnvironmentPostProcessor

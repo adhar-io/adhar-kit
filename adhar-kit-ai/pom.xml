@@ -50,21 +50,33 @@
         </dependency>
 
         <!-- Spring AI 2.0 (versions managed by spring-ai-bom via adhar-kit-bom) -->
+        <!-- The model API the kit codes against (ChatModel, EmbeddingModel, tools). -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-model</artifactId>
+        </dependency>
+        <!-- Model providers are OPTIONAL: an application adds the one it uses, with
+             its credentials. As compile dependencies (and adhar-kit-starter includes
+             this module) every service got OpenAI, Ollama and Anthropic
+             auto-configuration, and OpenAI's refuses to start without an API key:
+             "At least one credential source must be specified". -->
         <!-- OpenAI models (chat, embedding, image, audio) -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-openai</artifactId>
+            <optional>true</optional>
         </dependency>
         <!-- Ollama for local/self-hosted models -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-ollama</artifactId>
+            <optional>true</optional>
         </dependency>
-        <!-- Anthropic (Claude) models - enterprise default for the latest models.
-             Replaces the Azure OpenAI starter removed in Spring AI 2.0. -->
+        <!-- Anthropic (Claude) models -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-anthropic</artifactId>
+            <optional>true</optional>
         </dependency>
         <!-- Core vector store abstraction (optional) -->
         <dependency>

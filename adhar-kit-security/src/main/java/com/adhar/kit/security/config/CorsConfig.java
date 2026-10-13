@@ -71,9 +71,13 @@ public class CorsConfig {
             log.debug("CORS exposed headers: {}", properties.getCors().getExposedHeaders());
         }
         
-        // Configure allow credentials
-        configuration.setAllowCredentials(properties.getCors().isAllowCredentials());
-        log.debug("CORS allow credentials: {}", properties.getCors().isAllowCredentials());
+        // Credentials only with explicit origins. Spring rejects allowCredentials
+        // together with the "*" origin used when none are configured — at request
+        // time, so every cross-origin call failed with a 500 rather than at startup.
+        boolean allowCredentials = properties.getCors().isAllowCredentials()
+                && !properties.getCors().getAllowedOrigins().isEmpty();
+        configuration.setAllowCredentials(allowCredentials);
+        log.debug("CORS allow credentials: {}", allowCredentials);
         
         // Configure max age
         configuration.setMaxAge(properties.getCors().getMaxAge());

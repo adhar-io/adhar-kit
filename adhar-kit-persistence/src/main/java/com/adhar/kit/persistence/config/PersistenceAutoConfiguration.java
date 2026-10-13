@@ -37,6 +37,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.hibernate.autoconfigure.HibernatePropertiesCustomizer;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.domain.AuditorAware;
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
@@ -102,6 +103,7 @@ public class PersistenceAutoConfiguration {
      * of failing.
      */
     @Bean
+    @Primary // the facade is also a PersistenceService; injecting the type means this one
     @ConditionalOnMissingBean(PersistenceService.class)
     @ConditionalOnBean({EntityManagerFactory.class, PlatformTransactionManager.class})
     public SpringPersistenceAdapter springPersistenceAdapter(
@@ -154,7 +156,13 @@ public class PersistenceAutoConfiguration {
     public SmartInitializingSingleton persistenceFacadeDelegateInitializer(
             PersistenceFacade facade, ObjectProvider<PersistenceService> serviceProvider) {
         return () -> {
-            PersistenceService service = serviceProvider.getIfAvailable();
+            // The facade is itself a PersistenceService bean, so "the" service is the
+            // one that is not the facade. getIfAvailable() saw two candidates and threw
+            // NoUniqueBeanDefinitionException, failing every service with a database.
+            PersistenceService service = serviceProvider.orderedStream()
+                    .filter(candidate -> candidate != facade)
+                    .findFirst()
+                    .orElse(null);
             if (service != null) {
                 facade.setDelegate(service);
             } else {

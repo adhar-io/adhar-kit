@@ -40,6 +40,13 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.type.AnnotationMetadata;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.ImportBeanDefinitionRegistrar;
+import org.springframework.beans.factory.support.BeanDefinitionRegistry;
+import org.springframework.boot.autoconfigure.AutoConfigurationPackages;
+import org.springframework.context.annotation.Conditional;
+import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
 import java.util.List;
@@ -57,7 +64,7 @@ import java.util.List;
  * @since 1.0.0
  */
 @Slf4j
-@AutoConfiguration
+@AutoConfiguration(afterName = "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration")
 @EnableConfigurationProperties(EventSourcingProperties.class)
 @ConditionalOnProperty(prefix = "adhar.event-sourcing", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class EventSourcingAutoConfiguration {
@@ -181,13 +188,20 @@ public class EventSourcingAutoConfiguration {
     }
 
     /**
-     * JPA-based store configuration, activated when JPA is on the classpath and
-     * event-store-type is "jpa".
+     * JPA-based store configuration, activated when event-store-type is "jpa" and the
+     * application has a JPA EntityManagerFactory. The module's entities are added to
+     * the packages Spring Boot scans, so they are managed beside the application's
+     * own — without that, startup failed with "Not a managed type: EventEntry".
      */
     @Configuration
     @ConditionalOnClass(name = "jakarta.persistence.EntityManager")
-    @ConditionalOnProperty(prefix = "adhar.event-sourcing", name = "event-store-type", havingValue = "jpa", matchIfMissing = true)
+    @ConditionalOnProperty(prefix = "adhar.event-sourcing", name = "event-store-type", havingValue = "jpa")
+    // JPA on the classpath is not a database: adhar-kit-starter puts it on every
+    // service's classpath. Without an EntityManagerFactory the repositories below
+    // cannot be created, so fall through to the in-memory stores instead.
+    @ConditionalOnBean(type = "jakarta.persistence.EntityManagerFactory")
     @EnableJpaRepositories(basePackages = "com.adhar.kit.eventsourcing")
+    @Import(EventSourcingEntityPackage.class)
     static class JpaEventStoreConfiguration {
 
         @Bean
@@ -266,10 +280,13 @@ public class EventSourcingAutoConfiguration {
     }
 
     /**
-     * In-memory store configuration, activated when event-store-type is "in-memory".
+     * In-memory store configuration: the default, and the fallback when "jpa" is
+     * chosen but there is no JPA EntityManagerFactory.
+     * Without that fallback a service with no database got no {@link EventStore} at
+     * all, and failed to start on {@code aggregateRepository}'s missing dependency.
      */
     @Configuration
-    @ConditionalOnProperty(prefix = "adhar.event-sourcing", name = "event-store-type", havingValue = "in-memory")
+    @Conditional(InMemoryEventStoreCondition.class)
     static class InMemoryEventStoreConfiguration {
 
         @Bean
@@ -298,6 +315,31 @@ public class EventSourcingAutoConfiguration {
         public SagaStateStore sagaStateStore() {
             log.info("Using in-memory saga state store (development/testing only)");
             return new InMemorySagaStateStore();
+        }
+    }
+
+    /** "in-memory" (the default), or "jpa" with no EntityManagerFactory to back it. */
+    static class InMemoryEventStoreCondition extends AnyNestedCondition {
+
+        InMemoryEventStoreCondition() {
+            super(ConfigurationPhase.REGISTER_BEAN);
+        }
+
+        @ConditionalOnProperty(prefix = "adhar.event-sourcing", name = "event-store-type", havingValue = "in-memory", matchIfMissing = true)
+        static class InMemoryOrUnset {
+        }
+
+        @ConditionalOnMissingBean(type = "jakarta.persistence.EntityManagerFactory")
+        @ConditionalOnProperty(prefix = "adhar.event-sourcing", name = "event-store-type", havingValue = "jpa")
+        static class JpaWithoutEntityManagerFactory {
+        }
+    }
+
+    /** Adds the module's entity package to Spring Boot's auto-configuration packages. */
+    static class EventSourcingEntityPackage implements ImportBeanDefinitionRegistrar {
+        @Override
+        public void registerBeanDefinitions(AnnotationMetadata metadata, BeanDefinitionRegistry registry) {
+            AutoConfigurationPackages.register(registry, "com.adhar.kit.eventsourcing");
         }
     }
 }

@@ -89,7 +89,8 @@ public class AdharSecurityAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+            ObjectProvider<CorsConfigurationSource> corsConfigurationSource) throws Exception {
         log.debug("Configuring security filter chain");
 
         // Configure session management
@@ -99,7 +100,16 @@ public class AdharSecurityAutoConfiguration {
 
         // Configure authorization
         if (properties.getAuthorization().isEnabled()) {
+            if (!isJwtConfigured() && properties.getAuthorization().getPermitAll().stream().noneMatch("/**"::equals)) {
+                log.warn("adhar.security requires authentication but no JWT issuer-uri or jwk-set-uri is "
+                        + "configured, so no request can authenticate. Configure adhar.security.jwt.*, or "
+                        + "permit paths with adhar.security.authorization.permit-all.");
+            }
             http.authorizeHttpRequests(authorize -> {
+                if (properties.getAuthorization().isPermitHealthEndpoints()) {
+                    authorize.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
+                }
+
                 // Configure permitAll URLs
                 if (!properties.getAuthorization().getPermitAll().isEmpty()) {
                     String[] permitAllUrls = properties.getAuthorization().getPermitAll().toArray(new String[0]);
@@ -125,7 +135,7 @@ public class AdharSecurityAutoConfiguration {
 
         // Configure CORS
         if (properties.getCors().isEnabled()) {
-            http.cors(cors -> cors.configurationSource(corsConfigurationSource()));
+            corsConfigurationSource.ifAvailable(source -> http.cors(cors -> cors.configurationSource(source)));
         }
 
         // Configure CSRF
@@ -153,46 +163,10 @@ public class AdharSecurityAutoConfiguration {
         return http.build();
     }
 
-    /**
-     * Configures the CORS configuration source.
-     *
-     * @return the configured CorsConfigurationSource
-     */
-    @Bean
-    @ConditionalOnMissingBean
-    @ConditionalOnProperty(prefix = "adhar.security.cors", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration configuration = new CorsConfiguration();
-
-        // Configure allowed origins
-        if (!properties.getCors().getAllowedOrigins().isEmpty()) {
-            configuration.setAllowedOrigins(properties.getCors().getAllowedOrigins());
-        } else {
-            configuration.setAllowedOrigins(Arrays.asList("*"));
-        }
-
-        // Configure allowed methods
-        configuration.setAllowedMethods(properties.getCors().getAllowedMethods());
-
-        // Configure allowed headers
-        configuration.setAllowedHeaders(properties.getCors().getAllowedHeaders());
-
-        // Configure exposed headers
-        if (!properties.getCors().getExposedHeaders().isEmpty()) {
-            configuration.setExposedHeaders(properties.getCors().getExposedHeaders());
-        }
-
-        // Configure allow credentials
-        configuration.setAllowCredentials(properties.getCors().isAllowCredentials());
-
-        // Configure max age
-        configuration.setMaxAge(properties.getCors().getMaxAge());
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
-
-        return source;
-    }
+    // The CorsConfigurationSource bean is CorsConfig's. This class used to declare a
+    // second, identical one under the same name; with both conditional on the other
+    // being absent, the filter chain could end up with neither and fail startup on
+    // "required a bean named 'corsConfigurationSource' that could not be found".
 
     /**
      * Configures the CSRF token repository.

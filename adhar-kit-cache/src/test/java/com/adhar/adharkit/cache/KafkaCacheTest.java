@@ -63,6 +63,7 @@ public class KafkaCacheTest {
     @DynamicPropertySource
     static void kafkaProperties(DynamicPropertyRegistry registry) {
         registry.add("adhar.cache.kafka.bootstrap-servers", kafka::getBootstrapServers);
+        registry.add("adhar.cache.kafka.enabled", () -> "true");
         registry.add("adhar.cache.redis.enabled", () -> "false");
     }
 

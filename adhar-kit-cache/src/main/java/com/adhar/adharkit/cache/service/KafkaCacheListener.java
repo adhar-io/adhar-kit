@@ -50,7 +50,7 @@ public class KafkaCacheListener {
      */
     @KafkaListener(
             topics = "${adhar.cache.kafka.topic-prefix:adhar-cache}-put",
-            groupId = "${adhar.cache.kafka.group-id:adhar-cache-group}",
+            groupId = "#{@adharCacheKafkaClients.groupId}",
             containerFactory = "kafkaCacheListenerContainerFactory"
     )
     public void listenForPutMessages(CacheMessage message) {
@@ -69,7 +69,7 @@ public class KafkaCacheListener {
 
         try {
             // Get the cache
-            Cache cache = cacheManager.getCache(message.getCacheName());
+            Cache cache = localCache(message.getCacheName());
             if (cache == null) {
                 log.warn("Cache not found: {}", message.getCacheName());
                 return;
@@ -94,7 +94,7 @@ public class KafkaCacheListener {
      */
     @KafkaListener(
             topics = "${adhar.cache.kafka.topic-prefix:adhar-cache}-evict",
-            groupId = "${adhar.cache.kafka.group-id:adhar-cache-group}",
+            groupId = "#{@adharCacheKafkaClients.groupId}",
             containerFactory = "kafkaCacheListenerContainerFactory"
     )
     public void listenForEvictMessages(CacheMessage message) {
@@ -113,7 +113,7 @@ public class KafkaCacheListener {
 
         try {
             // Get the cache
-            Cache cache = cacheManager.getCache(message.getCacheName());
+            Cache cache = localCache(message.getCacheName());
             if (cache == null) {
                 log.warn("Cache not found: {}", message.getCacheName());
                 return;
@@ -135,7 +135,7 @@ public class KafkaCacheListener {
      */
     @KafkaListener(
             topics = "${adhar.cache.kafka.topic-prefix:adhar-cache}-clear",
-            groupId = "${adhar.cache.kafka.group-id:adhar-cache-group}",
+            groupId = "#{@adharCacheKafkaClients.groupId}",
             containerFactory = "kafkaCacheListenerContainerFactory"
     )
     public void listenForClearMessages(CacheMessage message) {
@@ -154,7 +154,7 @@ public class KafkaCacheListener {
 
         try {
             // Get the cache
-            Cache cache = cacheManager.getCache(message.getCacheName());
+            Cache cache = localCache(message.getCacheName());
             if (cache == null) {
                 log.warn("Cache not found: {}", message.getCacheName());
                 return;
@@ -167,6 +167,18 @@ public class KafkaCacheListener {
         } catch (Exception e) {
             log.error("Failed to process CLEAR message from Kafka", e);
         }
+    }
+
+    /**
+     * The cache a remote operation is applied to. For a {@link KafkaCacheManager}
+     * that is its local, non-publishing copy — applying it to the synchronized cache
+     * would publish it again and echo between instances forever.
+     */
+    private Cache localCache(String cacheName) {
+        if (cacheManager instanceof KafkaCacheManager kafkaCacheManager) {
+            return kafkaCacheManager.getLocalCache(cacheName);
+        }
+        return cacheManager.getCache(cacheName);
     }
 
     /**
@@ -207,7 +219,9 @@ public class KafkaCacheListener {
             return null;
         }
 
-        Class<?> type = Class.forName(valueType);
+        // Resolve without initializing: the class name arrives over the network, and
+        // naming a class must not be enough to run its static initializer.
+        Class<?> type = org.springframework.util.ClassUtils.forName(valueType, org.springframework.util.ClassUtils.getDefaultClassLoader());
         return objectMapper.readValue(valueStr, type);
     }
 }

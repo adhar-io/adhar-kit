@@ -83,14 +83,19 @@ public class AdharCacheProperties {
     @Data
     public static class KafkaProperties {
         /**
-         * Whether to enable Kafka-based distributed caching.
+         * Whether to enable Kafka-based distributed cache synchronization.
+         * <p>
+         * Opt-in. It used to default to {@code true}, which switched the module into
+         * Kafka mode merely because Kafka was on the classpath — taking over the
+         * application's own Kafka beans and pointing at {@code localhost:9092}.
          */
-        private boolean enabled = true;
+        private boolean enabled = false;
 
         /**
-         * Bootstrap servers for Kafka.
+         * Bootstrap servers for Kafka. When unset, Spring Boot's
+         * {@code spring.kafka.bootstrap-servers} is used, then {@code localhost:9092}.
          */
-        private String bootstrapServers = "localhost:9092";
+        private String bootstrapServers;
 
         /**
          * Group ID for the Kafka consumer.
@@ -134,7 +139,9 @@ public class AdharCacheProperties {
         private boolean enabled = true;
 
         /**
-         * Redis host.
+         * Redis host. Used only when the application has no Redis connection of its
+         * own — normally Spring Boot's, configured with {@code spring.data.redis.*}
+         * (e.g. {@code spring.data.redis.url}), which takes precedence.
          */
         private String host = "localhost";
 

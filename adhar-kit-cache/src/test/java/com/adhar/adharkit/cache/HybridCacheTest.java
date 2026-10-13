@@ -16,6 +16,7 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.kafka.ConfluentKafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -45,7 +46,10 @@ public class HybridCacheTest {
 
     @Container
     static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-            .withExposedPorts(6379);
+            .withExposedPorts(6379)
+            // "Started" is not "ready": without this the first connection can reach
+            // Docker's port proxy before the server is listening, and fails.
+            .waitingFor(Wait.forLogMessage(".*Ready to accept connections.*\\n", 1));
 
     @Container
     static ConfluentKafkaContainer kafka = new ConfluentKafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
@@ -92,7 +96,8 @@ public class HybridCacheTest {
         cache.put(key, value);
 
         // Then
-        assertThat(cache.get(key, String.class)).isEqualTo(value);
+        // Redis writes and evictions are asynchronous (Spring's Cache contract).
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> assertThat(cache.get(key, String.class)).isEqualTo(value));
     }
 
     @Test
@@ -108,7 +113,8 @@ public class HybridCacheTest {
         cache.evict(key);
 
         // Then
-        assertThat(cache.get(key)).isNull();
+        // Redis writes and evictions are asynchronous (Spring's Cache contract).
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> assertThat(cache.get(key)).isNull());
     }
 
     @Test
@@ -159,7 +165,8 @@ public class HybridCacheTest {
         // For demonstration purposes, we're manually putting the value in cache2
         cache2.put(key, value);
         
-        assertThat(cache2.get(key, String.class)).isEqualTo(value);
+        // Redis writes and evictions are asynchronous (Spring's Cache contract).
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> assertThat(cache2.get(key, String.class)).isEqualTo(value));
 
         // When: Instance 1 evicts the value
         cache1.evict(key);
@@ -168,6 +175,7 @@ public class HybridCacheTest {
         // Again, for demonstration purposes, we're manually evicting from cache2
         cache2.evict(key);
         
-        assertThat(cache2.get(key)).isNull();
+        // Redis writes and evictions are asynchronous (Spring's Cache contract).
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> assertThat(cache2.get(key)).isNull());
     }
 }

@@ -175,6 +175,20 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
+        <!-- java.time support for the Kafka synchronization messages (CacheMessage
+             carries an Instant). Spring Boot 4 applications are on Jackson 3, so
+             the Jackson 2 module is not otherwise present. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+        <!-- Jackson 3 (Optional) - typed JSON values in the Redis cache; without it
+             RedisCacheManager falls back to JDK serialization. -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <optional>true</optional>
+        </dependency>
 
         <!-- Development Tools -->
         <dependency>

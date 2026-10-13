@@ -458,6 +458,14 @@ public class AdharSecurityProperties {
         private List<String> permitAll = new ArrayList<>();
 
         /**
+         * Whether the health and info endpoints ({@code /actuator/health/**},
+         * {@code /actuator/info}) are open. Kubernetes probes cannot authenticate, so
+         * protecting them leaves every pod un-Ready; health details stay governed by
+         * {@code management.endpoint.health.show-details}.
+         */
+        private boolean permitHealthEndpoints = true;
+
+        /**
          * The authorization URL patterns to authenticate.
          */
         private List<String> authenticated = new ArrayList<>();
@@ -475,8 +483,14 @@ public class AdharSecurityProperties {
     public static class CsrfProperties {
         /**
          * Whether CSRF protection is enabled.
+         * <p>
+         * Off by default: the filter chain is a stateless bearer-token API
+         * (SessionCreationPolicy.STATELESS), where CSRF does not apply — a browser
+         * does not attach the token by itself — and where a session-held CSRF token
+         * can never be validated, so every POST, PUT and DELETE was rejected with 403.
+         * Enable it for cookie-authenticated browser applications.
          */
-        private boolean enabled = true;
+        private boolean enabled = false;
 
         /**
          * URL patterns to ignore for CSRF protection.

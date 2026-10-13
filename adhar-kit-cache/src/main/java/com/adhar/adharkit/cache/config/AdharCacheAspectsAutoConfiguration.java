@@ -14,6 +14,7 @@ import com.adhar.adharkit.cache.metrics.CacheMetricsBinder;
 import com.adhar.adharkit.cache.multilevel.InMemorySecondLevelCache;
 import com.adhar.adharkit.cache.multilevel.MultiLevelCacheService;
 import com.adhar.adharkit.cache.multilevel.SecondLevelCache;
+import com.adhar.adharkit.cache.multilevel.SpringCacheSecondLevelCache;
 import com.adhar.adharkit.cache.partition.KeyPartitionResolver;
 import com.adhar.adharkit.cache.partition.ThreadLocalKeyPartitionResolver;
 import com.adhar.adharkit.cache.properties.AdharCacheProperties;
@@ -53,7 +54,7 @@ import org.springframework.context.annotation.EnableAspectJAutoProxy;
  * @since 1.1.0
  */
 @Slf4j
-@AutoConfiguration
+@AutoConfiguration(after = {RedisConfig.class, AdharCacheAutoConfiguration.class})
 @EnableAspectJAutoProxy(proxyTargetClass = true)
 @EnableConfigurationProperties(AdharCacheProperties.class)
 @ConditionalOnClass(ProceedingJoinPoint.class)
@@ -130,14 +131,23 @@ public class AdharCacheAspectsAutoConfiguration {
     }
 
     /**
-     * Default in-memory L2; override with a distributed implementation
-     * (e.g. {@code SpringCacheSecondLevelCache} over a Redis CacheManager).
+     * Default L2 for {@code @MultiLevelCache}: the Redis/Valkey cache when one is
+     * configured ({@link RedisConfig}), so L2 is shared by every instance as the
+     * annotation promises; otherwise an in-memory map. Override with your own
+     * {@link SecondLevelCache} bean.
      *
+     * @param springCacheManagers the application's Spring cache managers
      * @return the second-level cache
      */
     @Bean
     @ConditionalOnMissingBean
-    public SecondLevelCache secondLevelCache() {
+    public SecondLevelCache secondLevelCache(
+            ObjectProvider<org.springframework.cache.CacheManager> springCacheManagers) {
+        org.springframework.cache.CacheManager shared = springCacheManagers.getIfUnique();
+        if (shared instanceof com.adhar.adharkit.cache.service.RedisCacheManager) {
+            log.info("@MultiLevelCache L2 is the Redis cache");
+            return new SpringCacheSecondLevelCache(shared);
+        }
         return new InMemorySecondLevelCache();
     }
 

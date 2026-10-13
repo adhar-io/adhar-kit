@@ -2,8 +2,10 @@ package com.adhar.adharkit.cache.config;
 
 import com.adhar.adharkit.cache.properties.AdharCacheProperties;
 import com.adhar.adharkit.cache.service.RedisCacheManager;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -13,113 +15,77 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
-import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import java.time.Duration;
 
 /**
- * Configuration for Redis-based caching.
+ * Auto-configuration for the Redis (Valkey) backed cache.
  * <p>
- * This class provides configuration for Redis connection and cache management.
- * It is conditionally enabled based on the "adhar.cache.redis.enabled" property.
+ * Registers {@link RedisCacheManager} as the application's Spring
+ * {@link org.springframework.cache.CacheManager} whenever a Redis connection is
+ * available, so {@code @Cacheable} and the module's multi-level L2 store entries in
+ * Redis shared by every instance.
+ * <p>
+ * The connection is Spring Boot's own ({@code spring.data.redis.*}, e.g.
+ * {@code spring.data.redis.url}) — this runs after Boot's Redis auto-configuration
+ * and reuses it. {@code adhar.cache.redis.host/port/...} build a connection only
+ * when the application has none. It runs before Boot's cache auto-configuration so
+ * Boot's default cache manager backs off in favour of this one.
+ * <p>
+ * Disable with {@code adhar.cache.redis.enabled=false}; an application-defined
+ * {@code CacheManager} always wins.
  */
 @Slf4j
-@Configuration
+@AutoConfiguration(
+        afterName = "org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration",
+        beforeName = "org.springframework.boot.cache.autoconfigure.CacheAutoConfiguration")
 @EnableConfigurationProperties(AdharCacheProperties.class)
+@ConditionalOnClass({RedisConnectionFactory.class, org.springframework.data.redis.cache.RedisCacheManager.class})
+@ConditionalOnProperty(prefix = "adhar.cache", name = "enabled", havingValue = "true", matchIfMissing = true)
 @ConditionalOnProperty(prefix = "adhar.cache.redis", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class RedisConfig {
 
     /**
-     * Creates an ObjectMapper for serialization/deserialization.
-     *
-     * @return the ObjectMapper
+     * Fallback connection from {@code adhar.cache.redis.*}, created only when the
+     * application has no Redis connection of its own.
      */
-    @Bean
-    @ConditionalOnMissingBean
-    public ObjectMapper objectMapper() {
-        return new ObjectMapper();
-    }
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.lettuce.core.RedisClient")
+    static class FallbackConnectionConfiguration {
 
-    /**
-     * Creates a Redis connection factory.
-     *
-     * @param properties the cache properties
-     * @return the Redis connection factory
-     */
-    @Bean
-    @ConditionalOnMissingBean
-    public RedisConnectionFactory redisConnectionFactory(AdharCacheProperties properties) {
-        RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
-        redisConfig.setHostName(properties.getRedis().getHost());
-        redisConfig.setPort(properties.getRedis().getPort());
+        @Bean
+        @ConditionalOnMissingBean(RedisConnectionFactory.class)
+        LettuceConnectionFactory adharCacheRedisConnectionFactory(AdharCacheProperties properties) {
+            AdharCacheProperties.RedisProperties redis = properties.getRedis();
+            RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration(redis.getHost(), redis.getPort());
+            if (redis.getPassword() != null) {
+                redisConfig.setPassword(redis.getPassword());
+            }
+            redisConfig.setDatabase(redis.getDatabase());
 
-        if (properties.getRedis().getPassword() != null) {
-            redisConfig.setPassword(properties.getRedis().getPassword());
+            LettuceClientConfiguration.LettuceClientConfigurationBuilder builder = LettuceClientConfiguration.builder()
+                    .commandTimeout(redis.getReadTimeout())
+                    .shutdownTimeout(Duration.ofMillis(100));
+            if (redis.isSsl()) {
+                builder.useSsl();
+            }
+            log.info("No Redis connection configured by the application; connecting to {}:{} from adhar.cache.redis.*",
+                    redis.getHost(), redis.getPort());
+            return new LettuceConnectionFactory(redisConfig, builder.build());
         }
-
-        redisConfig.setDatabase(properties.getRedis().getDatabase());
-
-        LettuceClientConfiguration.LettuceClientConfigurationBuilder builder = LettuceClientConfiguration.builder()
-                .commandTimeout(properties.getRedis().getConnectTimeout())
-                .shutdownTimeout(Duration.ofMillis(100));
-
-        if (properties.getRedis().isSsl()) {
-            builder.useSsl();
-        }
-
-        LettuceClientConfiguration clientConfig = builder.build();
-
-        return new LettuceConnectionFactory(redisConfig, clientConfig);
     }
 
     /**
-     * Creates a Redis template for general-purpose Redis operations.
-     *
-     * @param connectionFactory the Redis connection factory
-     * @param objectMapper      the object mapper for serialization/deserialization
-     * @return the Redis template
-     */
-    @Bean
-    @ConditionalOnMissingBean
-    public RedisTemplate<String, Object> redisTemplate(
-            RedisConnectionFactory connectionFactory,
-            ObjectMapper objectMapper) {
-        RedisTemplate<String, Object> template = new RedisTemplate<>();
-        template.setConnectionFactory(connectionFactory);
-
-        // Use StringRedisSerializer for keys
-        template.setKeySerializer(new StringRedisSerializer());
-
-        // Use Jackson2JsonRedisSerializer for values
-        GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer(objectMapper);
-        template.setValueSerializer(jsonSerializer);
-
-        // Also use the same serializers for hash keys and values
-        template.setHashKeySerializer(new StringRedisSerializer());
-        template.setHashValueSerializer(jsonSerializer);
-
-        template.afterPropertiesSet();
-
-        return template;
-    }
-
-    /**
-     * Creates a Redis cache manager.
+     * The Redis-backed cache manager.
      *
      * @param connectionFactory the Redis connection factory
      * @param properties        the cache properties
-     * @param objectMapper      the object mapper for serialization/deserialization
-     * @return the Redis cache manager
+     * @return the cache manager
      */
     @Bean
-    @ConditionalOnMissingBean(name = "cacheManager")
-    @ConditionalOnProperty(prefix = "adhar.cache.redis", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public org.springframework.cache.CacheManager redisCacheManager(
-            RedisConnectionFactory connectionFactory,
-            AdharCacheProperties properties,
-            ObjectMapper objectMapper) {
-        return new RedisCacheManager(connectionFactory, properties, objectMapper);
+    @ConditionalOnBean(RedisConnectionFactory.class)
+    @ConditionalOnMissingBean(org.springframework.cache.CacheManager.class)
+    public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory, AdharCacheProperties properties) {
+        return new RedisCacheManager(connectionFactory, properties);
     }
 }

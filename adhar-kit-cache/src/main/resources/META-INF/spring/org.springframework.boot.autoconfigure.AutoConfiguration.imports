@@ -1,3 +1,4 @@
+com.adhar.adharkit.cache.config.RedisConfig
 com.adhar.adharkit.cache.config.AdharCacheAutoConfiguration
 com.adhar.adharkit.cache.config.AdharCacheAspectsAutoConfiguration
 com.adhar.adharkit.cache.config.AdharCacheDaprAutoConfiguration

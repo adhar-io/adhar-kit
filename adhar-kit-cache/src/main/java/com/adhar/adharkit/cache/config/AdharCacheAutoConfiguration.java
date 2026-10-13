@@ -2,241 +2,106 @@ package com.adhar.adharkit.cache.config;
 
 import com.adhar.adharkit.cache.model.CacheMessage;
 import com.adhar.adharkit.cache.properties.AdharCacheProperties;
+import com.adhar.adharkit.cache.service.AdharCacheKafkaClients;
+import com.adhar.adharkit.cache.service.CacheMessageSerde;
 import com.adhar.adharkit.cache.service.KafkaCacheListener;
 import com.adhar.adharkit.cache.service.KafkaCacheManager;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.serialization.StringDeserializer;
-import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
-import org.springframework.kafka.config.KafkaListenerContainerFactory;
-import org.springframework.kafka.config.TopicBuilder;
-import org.springframework.kafka.core.*;
-import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
-import org.springframework.kafka.support.serializer.JsonDeserializer;
-import org.springframework.kafka.support.serializer.JsonSerializer;
-
-import jakarta.annotation.PostConstruct;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
-
-import java.util.HashMap;
-import java.util.Map;
 
 /**
- * Auto-configuration for Adhar Cache.
+ * Auto-configuration for Kafka-synchronized caching: a local cache on every
+ * instance, with each PUT, EVICT and CLEAR broadcast to the others over Kafka.
  * <p>
- * This class provides auto-configuration for the Adhar cache system, including:
- * - Configuration properties
- * - Kafka configuration for cache synchronization
- * - Cache manager
- * - Cache listeners
+ * <b>Opt-in</b> — set {@code adhar.cache.kafka.enabled=true}. Kafka being on the
+ * classpath is not a request for cache synchronization; an application using Kafka
+ * for its own events must keep its Kafka beans.
  * <p>
- * The auto-configuration is conditionally enabled based on the "adhar.cache.enabled" property
- * and requires Kafka classes on the classpath.
+ * Applies only when no other {@link CacheManager} is configured. In particular a
+ * Redis/Valkey cache ({@link RedisConfig}) is already shared by every instance and
+ * needs no synchronization, so it takes precedence.
+ * <p>
+ * The Kafka clients are private to the module ({@link AdharCacheKafkaClients}); the
+ * only Kafka bean registered is a listener container factory under its own name,
+ * which Spring Boot's Kafka auto-configuration does not back off for.
  *
- * <p><b>Configuration Example:</b></p>
  * <pre>{@code
  * adhar:
  *   cache:
- *     enabled: true
  *     kafka:
  *       enabled: true
- *       bootstrap-servers: localhost:9092
+ *       bootstrap-servers: kafka:9092   # default: spring.kafka.bootstrap-servers
  *       topic-prefix: adhar-cache
- *       group-id: adhar-cache-group
- *       auto-create-topics: true
- *       partitions: 3
- *       replication-factor: 1
  * }</pre>
- *
- * @author Adhar Platform Team
- * @since 1.0.0
  */
-@Slf4j
-@AutoConfiguration
+@AutoConfiguration(
+        after = RedisConfig.class,
+        afterName = "org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration",
+        beforeName = "org.springframework.boot.cache.autoconfigure.CacheAutoConfiguration")
 @EnableKafka
 @EnableConfigurationProperties(AdharCacheProperties.class)
+@ConditionalOnClass(name = "org.springframework.kafka.core.KafkaTemplate")
 @ConditionalOnProperty(prefix = "adhar.cache", name = "enabled", havingValue = "true", matchIfMissing = true)
-@ConditionalOnClass(name = "org.apache.kafka.clients.producer.KafkaProducer")
+@ConditionalOnProperty(prefix = "adhar.cache.kafka", name = "enabled", havingValue = "true")
+@ConditionalOnMissingBean(CacheManager.class)
 public class AdharCacheAutoConfiguration {
 
-    @PostConstruct
-    public void logCacheConfiguration() {
-        log.info("Adhar Cache module initialized with Kafka-based distributed cache synchronization");
+    /**
+     * The module's private Kafka clients.
+     *
+     * @param properties  the cache properties
+     * @param environment the environment
+     * @return the clients
+     */
+    @Bean
+    public AdharCacheKafkaClients adharCacheKafkaClients(AdharCacheProperties properties, Environment environment) {
+        return new AdharCacheKafkaClients(properties, environment);
     }
 
     /**
-     * Creates a Kafka admin client for topic management.
+     * Listener container factory for the synchronization listeners — referenced by
+     * name from {@link KafkaCacheListener}.
      *
-     * @param properties the cache properties
-     * @return the Kafka admin client factory
+     * @param clients the module's Kafka clients
+     * @return the container factory
      */
     @Bean
-    @ConditionalOnProperty(prefix = "adhar.cache.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public KafkaAdmin kafkaAdmin(AdharCacheProperties properties) {
-        Map<String, Object> configs = new HashMap<>();
-        configs.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
-
-        // Add any additional properties
-        configs.putAll(properties.getKafka().getProperties());
-
-        return new KafkaAdmin(configs);
-    }
-
-    /**
-     * Creates the Kafka topics for cache operations if they don't exist.
-     *
-     * @param properties the cache properties
-     * @return the Kafka topics
-     */
-    @Bean
-    @ConditionalOnProperty(prefix = "adhar.cache.kafka", name = {"enabled", "auto-create-topics"}, havingValue = "true", matchIfMissing = true)
-    public NewTopic[] cacheTopics(AdharCacheProperties properties) {
-        String topicPrefix = properties.getKafka().getTopicPrefix();
-        int partitions = properties.getKafka().getPartitions();
-        short replicationFactor = properties.getKafka().getReplicationFactor();
-
-        return new NewTopic[] {
-            TopicBuilder.name(topicPrefix + "-put")
-                .partitions(partitions)
-                .replicas(replicationFactor)
-                .build(),
-            TopicBuilder.name(topicPrefix + "-evict")
-                .partitions(partitions)
-                .replicas(replicationFactor)
-                .build(),
-            TopicBuilder.name(topicPrefix + "-clear")
-                .partitions(partitions)
-                .replicas(replicationFactor)
-                .build()
-        };
-    }
-
-    /**
-     * Creates a Kafka producer factory for sending cache messages.
-     *
-     * @param properties the cache properties
-     * @return the Kafka producer factory
-     */
-    @Bean
-    @ConditionalOnProperty(prefix = "adhar.cache.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public ProducerFactory<String, CacheMessage> kafkaCacheProducerFactory(AdharCacheProperties properties) {
-        Map<String, Object> configProps = new HashMap<>();
-        configProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
-        configProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        configProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-
-        // Add any additional properties
-        configProps.putAll(properties.getKafka().getProperties());
-
-        return new DefaultKafkaProducerFactory<>(configProps);
-    }
-
-    /**
-     * Creates a Kafka template for sending cache messages.
-     *
-     * @param producerFactory the Kafka producer factory
-     * @return the Kafka template
-     */
-    @Bean
-    @ConditionalOnProperty(prefix = "adhar.cache.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public KafkaTemplate<String, CacheMessage> kafkaCacheTemplate(ProducerFactory<String, CacheMessage> producerFactory) {
-        return new KafkaTemplate<>(producerFactory);
-    }
-
-    /**
-     * Creates a Kafka consumer factory for receiving cache messages.
-     *
-     * @param properties the cache properties
-     * @return the Kafka consumer factory
-     */
-    @Bean
-    @ConditionalOnProperty(prefix = "adhar.cache.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public ConsumerFactory<String, CacheMessage> kafkaCacheConsumerFactory(AdharCacheProperties properties) {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, properties.getKafka().getGroupId());
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
-        props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.adhar.adharkit.cache.model");
-
-        // Add any additional properties
-        props.putAll(properties.getKafka().getProperties());
-
-        return new DefaultKafkaConsumerFactory<>(props);
-    }
-
-    /**
-     * Creates a Kafka listener container factory for receiving cache messages.
-     *
-     * @param consumerFactory the Kafka consumer factory
-     * @return the Kafka listener container factory
-     */
-    @Bean
-    @ConditionalOnProperty(prefix = "adhar.cache.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public KafkaListenerContainerFactory<ConcurrentMessageListenerContainer<String, CacheMessage>> kafkaCacheListenerContainerFactory(
-            ConsumerFactory<String, CacheMessage> consumerFactory) {
+    public ConcurrentKafkaListenerContainerFactory<String, CacheMessage> kafkaCacheListenerContainerFactory(
+            AdharCacheKafkaClients clients) {
         ConcurrentKafkaListenerContainerFactory<String, CacheMessage> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
+        factory.setConsumerFactory(clients.getConsumerFactory());
         return factory;
     }
 
     /**
-     * Creates an ObjectMapper for serialization/deserialization.
+     * The synchronized cache manager.
      *
-     * @return the ObjectMapper
-     */
-    @Bean
-    @ConditionalOnMissingBean
-    public ObjectMapper objectMapper() {
-        return new ObjectMapper();
-    }
-
-    /**
-     * Creates a cache manager that uses Kafka for distributed cache synchronization.
-     * This bean is only created if Kafka is enabled and Redis is disabled.
-     *
-     * @param kafkaTemplate the Kafka template
-     * @param properties    the cache properties
-     * @param objectMapper  the ObjectMapper
+     * @param clients    the module's Kafka clients
+     * @param properties the cache properties
      * @return the cache manager
      */
     @Bean
-    @ConditionalOnMissingBean
-    @ConditionalOnProperty(prefix = "adhar.cache.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public CacheManager cacheManager(
-            KafkaTemplate<String, CacheMessage> kafkaTemplate,
-            AdharCacheProperties properties,
-            ObjectMapper objectMapper) {
-        return new KafkaCacheManager(kafkaTemplate, properties, objectMapper);
+    public KafkaCacheManager cacheManager(AdharCacheKafkaClients clients, AdharCacheProperties properties) {
+        return new KafkaCacheManager(clients.getTemplate(), properties, CacheMessageSerde.MAPPER);
     }
 
     /**
-     * Creates a Kafka cache listener for receiving cache messages.
+     * Applies operations received from other instances.
      *
-     * @param cacheManager the cache manager
+     * @param cacheManager the synchronized cache manager
      * @param properties   the cache properties
-     * @param objectMapper the ObjectMapper
-     * @return the Kafka cache listener
+     * @return the listener
      */
     @Bean
-    @ConditionalOnProperty(prefix = "adhar.cache.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public KafkaCacheListener kafkaCacheListener(
-            CacheManager cacheManager,
-            AdharCacheProperties properties,
-            ObjectMapper objectMapper) {
-        return new KafkaCacheListener(cacheManager, properties, objectMapper);
+    public KafkaCacheListener kafkaCacheListener(KafkaCacheManager cacheManager, AdharCacheProperties properties) {
+        return new KafkaCacheListener(cacheManager, properties, CacheMessageSerde.MAPPER);
     }
 }

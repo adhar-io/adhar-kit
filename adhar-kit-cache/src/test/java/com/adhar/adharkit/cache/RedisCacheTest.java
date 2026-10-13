@@ -15,13 +15,16 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 /**
  * Integration tests for Redis-based caching.
@@ -40,7 +43,10 @@ public class RedisCacheTest {
 
     @Container
     static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-            .withExposedPorts(6379);
+            .withExposedPorts(6379)
+            // "Started" is not "ready": without this the first connection can reach
+            // Docker's port proxy before the server is listening, and fails.
+            .waitingFor(Wait.forLogMessage(".*Ready to accept connections.*\\n", 1));
 
     @Autowired
     private CacheManager cacheManager;
@@ -108,7 +114,8 @@ public class RedisCacheTest {
         cache.evict(key);
 
         // Then
-        assertThat(cache.get(key)).isNull();
+        // Redis writes and evictions are asynchronous (Spring's Cache contract).
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> assertThat(cache.get(key)).isNull());
     }
 
     @Test

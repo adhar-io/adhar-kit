@@ -15,15 +15,15 @@ adhar:
     # Whether to allow null values in the cache
     allow-null-values: true
     
-    # Kafka-based distributed caching configuration
+    # Kafka-synchronized local caches (opt-in; ignored when a Redis cache is configured)
     kafka:
-      # Enable or disable Kafka-based distributed caching
-      enabled: true
+      # Enable Kafka-based cache synchronization
+      enabled: false
       
-      # Bootstrap servers for Kafka
-      bootstrap-servers: localhost:9092
+      # Bootstrap servers for Kafka (default: spring.kafka.bootstrap-servers)
+      # bootstrap-servers: localhost:9092
       
-      # Group ID for the Kafka consumer
+      # Consumer group prefix; each instance appends its own unique suffix
       group-id: adhar-cache-group
       
       # Prefix for Kafka topics used for cache operations
@@ -43,12 +43,12 @@ adhar:
         # Example: Set the max poll interval
         max.poll.interval.ms: 300000
     
-    # Redis-based distributed caching configuration
+    # Redis/Valkey cache (uses Spring Boot's spring.data.redis.* connection when present)
     redis:
-      # Enable or disable Redis-based distributed caching
+      # Enable or disable the Redis-backed cache manager
       enabled: true
       
-      # Redis host
+      # Redis host — only when the application has no spring.data.redis connection
       host: localhost
       
       # Redis port

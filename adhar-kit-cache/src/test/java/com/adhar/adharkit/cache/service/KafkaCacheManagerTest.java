@@ -40,6 +40,8 @@ class KafkaCacheManagerTest {
     @BeforeEach
     void setUp() {
         properties = new AdharCacheProperties();
+        // Synchronization is opt-in; these tests exercise it switched on.
+        properties.getKafka().setEnabled(true);
         manager = new KafkaCacheManager(kafkaTemplate, properties, objectMapper);
     }
 

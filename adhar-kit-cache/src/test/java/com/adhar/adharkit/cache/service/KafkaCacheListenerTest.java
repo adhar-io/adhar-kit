@@ -17,6 +17,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 
 import java.time.Instant;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -42,6 +43,8 @@ class KafkaCacheListenerTest {
     @BeforeEach
     void setUp() {
         properties = new AdharCacheProperties();
+        // Synchronization is opt-in; these tests exercise it switched on.
+        properties.getKafka().setEnabled(true);
         listener = new KafkaCacheListener(cacheManager, properties, objectMapper);
         when(cacheManager.getCache("users")).thenReturn(cache);
         when(cacheManager.getCache("missing")).thenReturn(null);
@@ -207,7 +210,7 @@ class KafkaCacheListenerTest {
         KafkaTemplate<String, CacheMessage> template = mock(KafkaTemplate.class);
         KafkaCacheManager kafkaManager = spy(new KafkaCacheManager(template, properties, objectMapper));
         Cache kCache = mock(Cache.class);
-        doReturn(kCache).when(kafkaManager).getCache("users");
+        doReturn(kCache).when(kafkaManager).getLocalCache("users");
         KafkaCacheListener kafkaListener = new KafkaCacheListener(kafkaManager, properties, objectMapper);
 
         CacheMessage msg = putMessage();
@@ -215,6 +218,22 @@ class KafkaCacheListenerTest {
 
         kafkaListener.listenForPutMessages(msg);
         verify(kCache).put("k1", "hello");
+    }
+
+    @Test
+    @DisplayName("A remote PUT is applied locally and NOT re-published (no echo between instances)")
+    void testRemotePutIsNotRepublished() {
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, CacheMessage> template = mock(KafkaTemplate.class);
+        KafkaCacheManager kafkaManager = new KafkaCacheManager(template, properties, objectMapper);
+        KafkaCacheListener kafkaListener = new KafkaCacheListener(kafkaManager, properties, objectMapper);
+
+        CacheMessage msg = putMessage();
+        msg.setSourceInstanceId("some-other-instance-id");
+        kafkaListener.listenForPutMessages(msg);
+
+        assertEquals("hello", kafkaManager.getCache("users").get("k1", String.class));
+        verify(template, never()).send(any(String.class), any(String.class), any(CacheMessage.class));
     }
 
     @Test

@@ -89,6 +89,20 @@ public class KafkaCacheManager implements CacheManager {
         });
     }
 
+    /**
+     * Returns this instance's local copy of a cache, WITHOUT synchronization: writes
+     * to it are not published to Kafka. This is what remote operations must be
+     * applied to — applying them through {@link #getCache(String)} re-published
+     * every received operation, so two instances echoed each PUT, EVICT and CLEAR
+     * back and forth indefinitely.
+     *
+     * @param name the cache name
+     * @return the local cache
+     */
+    public Cache getLocalCache(String name) {
+        return internalCacheManager.getCache(name);
+    }
+
     @Override
     public Collection<String> getCacheNames() {
         return internalCacheManager.getCacheNames();
