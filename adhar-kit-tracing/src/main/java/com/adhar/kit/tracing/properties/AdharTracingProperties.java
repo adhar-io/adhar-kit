@@ -94,7 +94,10 @@ public class AdharTracingProperties {
         private boolean enabled = true;
 
         /**
-         * OTLP endpoint URL.
+         * OTLP endpoint URL. For gRPC the collector address ({@code http://host:4317}); for
+         * HTTP the traces URL ({@code http://host:4318/v1/traces} — {@code /v1/traces} is
+         * appended when the URL has no path). Taken from {@code OTEL_EXPORTER_OTLP_TRACES_ENDPOINT}
+         * / {@code OTEL_EXPORTER_OTLP_ENDPOINT} when unset.
          */
         private String endpoint = "http://localhost:4317";
 
@@ -114,7 +117,9 @@ public class AdharTracingProperties {
         private Map<String, String> headers = new HashMap<>();
 
         /**
-         * Whether to use gRPC (true) or HTTP (false).
+         * Whether to use gRPC (true) or HTTP/protobuf (false). Follows
+         * {@code OTEL_EXPORTER_OTLP_[TRACES_]PROTOCOL} when an OTLP endpoint comes from the
+         * environment (the OpenTelemetry default there is {@code http/protobuf}).
          */
         private boolean useGrpc = true;
 
@@ -198,7 +203,9 @@ public class AdharTracingProperties {
         private String timeout = "PT30S";
 
         /**
-         * Whether to use gRPC (true) or HTTP (false).
+         * Whether to use gRPC (true) or HTTP/protobuf (false). Follows
+         * {@code OTEL_EXPORTER_OTLP_[TRACES_]PROTOCOL} when an OTLP endpoint comes from the
+         * environment (the OpenTelemetry default there is {@code http/protobuf}).
          */
         private boolean useGrpc = true;
     }
@@ -368,8 +375,11 @@ public class AdharTracingProperties {
 
         /**
          * Default sampling probability (0.0 to 1.0). Used when {@code mode} is "ratio".
+         * Defaults to 1.0 (every trace): the platform's collector, not each service, is the
+         * place to drop traces, and a 10% default made the per-application dashboard's
+         * trace links mostly empty. {@code OTEL_TRACES_SAMPLER_ARG} sets it when unset.
          */
-        private double probability = 0.1;
+        private double probability = 1.0;
 
         /**
          * Rate limiting samples per second.

@@ -1,6 +1,7 @@
 package com.adhar.kit.metrics.config;
 
 import com.adhar.kit.metrics.aspect.EnhancedMetricsAspect;
+import com.adhar.kit.metrics.env.DeploymentEnvironmentResolver;
 import com.adhar.kit.metrics.auto.JvmMetricsCollector;
 import com.adhar.kit.metrics.auto.MetricsInterceptor;
 import com.adhar.kit.metrics.auto.PlatformMetrics;
@@ -37,6 +38,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
+import org.springframework.util.ClassUtils;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -55,76 +57,7 @@ import java.util.Map;
 @EnableConfigurationProperties(AdharMetricsProperties.class)
 @ConditionalOnProperty(prefix = "adhar.metrics", name = "enabled", havingValue = "true", matchIfMissing = true)
 /*
- * Bean names here are PREFIXED with ADHAR — Open Cloud-Native Foundation · v0.1.5
-🚀 Welcome to Adhar Platform!
-
-Adhar Platform is a comprehensive Internal Developer Platform (IDP) that provides
-unified Kubernetes-native approach for the entire software development lifecycle.
-
- 📋 Platform Lifecycle
-  • up       - Create and start the Adhar platform (local or cloud)
-  • down     - Stop and destroy the Adhar platform
-  • status   - Check platform health and status
-
- 🔍 Resource Management
-  • get      - Display platform resources (apps, secrets, clusters, etc.)
-  • apps     - Manage application lifecycle and deployments
-  • cluster  - Manage Kubernetes clusters and configurations
-  • config   - Manage platform configuration and settings
-  • env      - Manage platform environments (dev, staging, prod)
-
- ⚡ Operations & Monitoring
-  • health   - Check platform health, services, and dependencies
-  • logs     - View centralized platform logs and events
-  • metrics  - Access platform metrics and performance data
-  • traces   - View distributed tracing information
-
- 🔒 Security & Compliance
-  • security - Security scanning, vulnerability management, and policies
-  • auth     - Authentication, authorization, and user management
-  • secrets  - Manage secrets, certificates, and sensitive data
-  • policy   - Platform policy management and governance
-
- 🔄 GitOps & DevOps
-  • gitops   - GitOps operations, ArgoCD management, and workflows
-  • pipeline - CI/CD pipeline creation, execution, and management
-  • webhook  - Webhook management and integration endpoints
-
- 🏗️ Infrastructure & Data
-  • network - Network diagnostics, policies, and connectivity testing
-  • db      - Database management, operations, and monitoring
-  • storage - Storage management, volumes, and data persistence
-  • service - Service management, load balancing, and API endpoints
-
- 📊 Resource Management & Optimization
-  • scale   - Resource scaling, auto-scaling, and optimization
-  • backup  - Platform backup creation and management
-  • restore - Platform restoration from backups
-
- 🛠️ Utilities
-  • help     - Get help about commands (this command)
-  • version  - Show version information and build details
-
- 🚀 Quick Start Examples
-  • adhar up                    - Create local development platform
-  • adhar up -f config.yaml   - Deploy production platform
-  • adhar get status          - Check platform health
-  • adhar get secrets         - View platform credentials
-  • adhar down                - Clean up local platform
-
- 📚 Getting More Help
-  • Command-specific help: adhar help <command>
-  • Detailed documentation: https://docs.adhar.io
-  • Community support: https://github.com/adhar-io/adhar
-
- 💡 Pro Tips
-  • Use --dry-run flag to preview changes without applying them
-  • Use --verbose flag for detailed output and debugging
-  • Use --no-color flag to disable colored output
-  • Use --kubeconfig to specify custom kubeconfig path
-
-
-  Adhar • Built with ❤️ for developers! on purpose.
+ * Bean names here are PREFIXED with "adhar" on purpose.
  *
  * Spring Boot's own JvmMetricsAutoConfiguration and SystemMetricsAutoConfiguration
  * register beans called jvmMemoryMetrics, jvmGcMetrics, jvmThreadMetrics,
@@ -165,38 +98,39 @@ public class AdharMetricsAutoConfiguration {
     }
 
     /**
-     * Configures common tags for all meter registries directly.
-     * This is the Spring Boot 4.0 compatible approach without MeterRegistryCustomizer.
+     * Applies the custom {@code adhar.metrics.common-tags.*}.
+     * <p>
+     * The {@code application} and {@code environment} tags are NOT set here: the kit's
+     * {@link com.adhar.kit.metrics.env.AdharMetricsEnvironmentPostProcessor} contributes them
+     * as {@code management.metrics.tags.*}, which Spring Boot applies when the registry is
+     * created. Tagging the registry from here runs after meters were already registered, so
+     * the JVM and persistence meters came out without them. Only when Spring Boot's metrics
+     * auto-configuration is absent are they applied here as a fallback.
+     * </p>
      */
     @Bean
     @ConditionalOnMissingBean(name = "metricsCommonTagsPostProcessor")
     public MeterRegistryPostProcessor metricsCommonTagsPostProcessor() {
         return registry -> {
-            // Add application name tag
-            String applicationName = environment.getProperty("spring.application.name", "unknown-application");
-            registry.config().commonTags("application", applicationName);
-
-            // Add environment tag
-            String activeProfiles = String.join(",", environment.getActiveProfiles());
-            if (activeProfiles.isEmpty()) {
-                activeProfiles = environment.getProperty("spring.profiles.active", "default");
-            }
-            registry.config().commonTags("environment", activeProfiles);
-
-            // Add custom common tags from properties
             List<Tag> tags = new ArrayList<>();
+            if (!ClassUtils.isPresent(BOOT_PROPERTIES_METER_FILTER, getClass().getClassLoader())) {
+                tags.add(Tag.of("application", environment.getProperty("management.metrics.tags.application",
+                        environment.getProperty("spring.application.name", "unknown-application"))));
+                tags.add(Tag.of("environment", environment.getProperty("management.metrics.tags.environment",
+                        DeploymentEnvironmentResolver.resolve(environment))));
+            }
             for (Map.Entry<String, String> entry : properties.getCommonTags().entrySet()) {
                 tags.add(Tag.of(entry.getKey(), entry.getValue()));
             }
-
             if (!tags.isEmpty()) {
                 registry.config().commonTags(tags);
             }
-
-            log.debug("Configured meter registry with common tags: application={}, environment={}, customTags={}",
-                    applicationName, activeProfiles, properties.getCommonTags());
+            log.debug("Configured meter registry with common tags: {}", tags);
         };
     }
+
+    private static final String BOOT_PROPERTIES_METER_FILTER =
+            "org.springframework.boot.micrometer.metrics.autoconfigure.PropertiesMeterFilter";
 
     /**
      * Configures Prometheus-specific settings.

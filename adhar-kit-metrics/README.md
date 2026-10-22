@@ -290,6 +290,41 @@ automatically from `HttpMetricsFilter` (success = status < 500) or manually via 
 - **Flexible configuration** - Property-driven setup with feature toggles
 - **Comprehensive tagging** - Application, environment, and custom tags
 
+## 📈 Per-application dashboard contract
+
+Out of the box (no application properties needed) every Spring app on the kit emits what the
+platform's per-application Grafana dashboard reads. All defaults are lowest-precedence and can
+be overridden.
+
+| What | Name | Notes |
+|------|------|-------|
+| Common tags | `application`, `environment` | `application` = `spring.application.name`, else `OTEL_SERVICE_NAME`. `environment`: `adhar.metrics.environment` → `ADHAR_ENVIRONMENT` → `deployment.environment[.name]` in `OTEL_RESOURCE_ATTRIBUTES` → pod namespace (`POD_NAMESPACE` / service-account file) → first active profile other than `kubernetes`/`default` → `local`. The kit never sets `namespace`/`pod` tags — Prometheus adds those as target labels. |
+| HTTP server | `http_server_requests_seconds_{bucket,count,sum}` (`uri`, `method`, `status`, `outcome`) | `percentiles-histogram` on, SLO buckets `50ms,100ms,250ms,500ms,1s,2s,5s` |
+| Exemplars | trace id on histogram buckets/counters | OpenMetrics scrape; via the kit's Prometheus `SpanContext` bean |
+| Actuator | `/actuator/{health,info,prometheus}` exposed | `management.endpoints.web.exposure.include` overrides |
+| Business | `adhar_business_<name>…` | see below |
+
+### Business metrics: `adhar.business.<name>`
+
+Anything named `adhar.business.<name>` shows up in the dashboard's business section (it
+discovers every series matching `adhar_business_.+`). Either annotate a method:
+
+```java
+@BusinessMetric(name = "orders.placed", category = "sales")   // adhar_business_orders_placed_total{category,outcome}
+public Order place(OrderRequest request) { ... }
+```
+
+or record programmatically — the helpers always add the prefix:
+
+```java
+AdharMetrics.businessCounter("payments", "billing", "success").increment(); // adhar_business_payments_total
+AdharMetrics.businessTimer("checkout").record(duration);                     // adhar_business_checkout_seconds_*
+AdharMetrics.businessSummary("order.value", "currency", "EUR").record(42.5); // adhar_business_order_value_{count,sum,max}
+AdharMetrics.businessGauge("queue.depth", queue, Queue::size);               // adhar_business_queue_depth
+```
+
+Keep tag values low-cardinality (no ids, emails or free text).
+
 ## Quick Start
 
 ### 1. Add Dependency
@@ -493,7 +528,7 @@ public class MetricsService {
     
     public void recordBusinessEvent(String eventType, double value) {
         // Counter
-        adharMetrics.increment("business.events", 
+        adharMetrics.increment("adhar.business.events", 
             "type", eventType, 
             "status", "success");
         

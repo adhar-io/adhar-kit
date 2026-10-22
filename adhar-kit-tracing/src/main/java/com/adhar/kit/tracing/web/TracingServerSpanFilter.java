@@ -2,6 +2,7 @@ package com.adhar.kit.tracing.web;
 
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.sdk.trace.ReadableSpan;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
@@ -92,6 +93,18 @@ public class TracingServerSpanFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
 
+        // A SERVER span for this request already exists: Spring Boot's
+        // ServerHttpObservationFilter (ordered ahead of this filter) creates one now that
+        // observations are traced. A second one here would nest an identical SERVER span
+        // under the first. This filter remains the fallback when nothing else traces the
+        // request. Only a live SERVER span counts - a context leaked onto the thread (an
+        // unclosed baggage scope, say) carries an ended or INTERNAL span and must not
+        // suppress the request's own span.
+        if (serverSpanInProgress()) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         String method = request.getMethod() != null ? request.getMethod() : "HTTP";
         String route = routeOf(request);
 
@@ -123,6 +136,12 @@ public class TracingServerSpanFilter extends OncePerRequestFilter {
         } finally {
             span.end();
         }
+    }
+
+    static boolean serverSpanInProgress() {
+        return Span.current() instanceof ReadableSpan current
+                && current.getKind() == SpanKind.SERVER
+                && !current.hasEnded();
     }
 
     /**

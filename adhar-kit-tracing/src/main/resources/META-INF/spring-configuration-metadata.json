@@ -259,8 +259,8 @@
       "name": "adhar.tracing.sampling.probability",
       "type": "java.lang.Double",
       "sourceType": "com.adhar.kit.tracing.properties.AdharTracingProperties$SamplingProperties",
-      "description": "Default sampling probability (0.0 to 1.0).",
-      "defaultValue": 0.1
+      "description": "Default sampling probability (0.0 to 1.0). OTEL_TRACES_SAMPLER_ARG sets it when the property is not.",
+      "defaultValue": 1.0
     },
     {
       "name": "adhar.tracing.sampling.rate-limit",
@@ -365,4 +365,3 @@
     }
   ]
 }
-

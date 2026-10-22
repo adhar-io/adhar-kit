@@ -96,7 +96,7 @@ class AdharTracingPropertiesTest {
 
         // Test Sampling properties
         assertThat(defaultProps.getSampling()).isNotNull();
-        assertThat(defaultProps.getSampling().getProbability()).isEqualTo(0.1);
+        assertThat(defaultProps.getSampling().getProbability()).isEqualTo(1.0);
         assertThat(defaultProps.getSampling().getRateLimit()).isEqualTo(100);
         assertThat(defaultProps.getSampling().getPerService()).isEmpty();
         assertThat(defaultProps.getSampling().getPerOperation()).isEmpty();

@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **adhar-kit-tracing** — outbound calls are traced and carry the trace context. The kit now
+  supplies the `Propagator` (and depends on `spring-boot-micrometer-tracing`), so Boot's tracing
+  observation handlers record into the kit's SDK: `RestClient`/`RestTemplate`/`WebClient` calls,
+  Kafka sends and `@KafkaListener` receives (observation switched on by default), RabbitMQ,
+  Lettuce commands and JDBC queries (datasource-micrometer, sanitized SQL, no parameter values)
+  are spans, and W3C `traceparent` is injected/extracted. Incoming WebFlux requests get SERVER
+  spans too; the servlet `TracingServerSpanFilter` defers to Boot's server observation instead
+  of nesting a duplicate SERVER span.
+
 ### Fixed
+
+- **adhar-kit-metrics / adhar-kit-tracing** — inside a pod, a hard-coded
+  `deployment.environment=local` in `OTEL_RESOURCE_ATTRIBUTES` (older scaffolds' base Rollout)
+  no longer labels every environment `local`: the environment comes from `ADHAR_ENVIRONMENT`,
+  else the namespace, for metrics, logs and the trace resource.
 
 - **adhar-kit-cache** — Redis/Valkey caching now works as a Spring Boot auto-configuration:
   it reuses Spring Boot's Redis connection (`spring.data.redis.*`), registers before Boot's

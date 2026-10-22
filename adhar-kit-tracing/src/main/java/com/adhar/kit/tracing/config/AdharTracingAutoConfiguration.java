@@ -13,11 +13,14 @@ import io.micrometer.tracing.BaggageManager;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.otel.bridge.OtelBaggageManager;
 import io.micrometer.tracing.otel.bridge.OtelCurrentTraceContext;
+import io.micrometer.tracing.otel.bridge.OtelPropagator;
+import io.micrometer.tracing.propagation.Propagator;
 import io.micrometer.tracing.otel.bridge.OtelTracer;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
 import io.opentelemetry.context.propagation.ContextPropagators;
 import io.opentelemetry.context.propagation.TextMapPropagator;
+import io.opentelemetry.exporter.otlp.http.trace.OtlpHttpSpanExporter;
 import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
 import io.opentelemetry.exporter.zipkin.ZipkinSpanExporter;
 import io.opentelemetry.extension.trace.propagation.B3Propagator;
@@ -35,6 +38,7 @@ import io.opentelemetry.sdk.trace.samplers.Sampler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -61,9 +65,24 @@ import java.util.Map;
  * defined in {@link AdharTracingProperties}. It configures OpenTelemetry, Zipkin,
  * and Jaeger exporters with proper sampling and propagation settings.
  * </p>
+ * <p>
+ * It also supplies the {@link Tracer} and {@link Propagator} that Spring Boot's
+ * {@code MicrometerTracingAutoConfiguration} needs to turn every Micrometer
+ * {@code Observation} into a span: outgoing {@code RestClient}/{@code WebClient}/
+ * {@code RestTemplate} calls, Kafka and RabbitMQ sends and receives, Lettuce commands,
+ * JDBC queries (datasource-micrometer) and incoming HTTP requests. Sender observations
+ * inject the configured propagation headers (W3C {@code traceparent} by default),
+ * receiver observations continue the remote trace. It therefore runs BEFORE Boot's
+ * tracer auto-configurations, so theirs back off ({@code @ConditionalOnMissingBean}) and
+ * Boot's no-op tracer is never chosen over the kit's SDK.
+ * </p>
  */
 @Slf4j
-@Configuration
+@AutoConfiguration(beforeName = {
+        "org.springframework.boot.micrometer.tracing.autoconfigure.MicrometerTracingAutoConfiguration",
+        "org.springframework.boot.micrometer.tracing.autoconfigure.NoopTracerAutoConfiguration",
+        "org.springframework.boot.micrometer.tracing.opentelemetry.autoconfigure.OpenTelemetryTracingAutoConfiguration",
+        "org.springframework.boot.micrometer.tracing.brave.autoconfigure.BraveAutoConfiguration"})
 @EnableConfigurationProperties(AdharTracingProperties.class)
 @ConditionalOnProperty(prefix = "adhar.tracing", name = "enabled", havingValue = "true", matchIfMissing = true)
 @ConditionalOnClass(Tracer.class)
@@ -78,13 +97,20 @@ public class AdharTracingAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean
-    public OpenTelemetry openTelemetry(ObjectProvider<SpanMetricsProcessor> spanMetricsProcessorProvider) {
+    public OpenTelemetry openTelemetry(ObjectProvider<SpanMetricsProcessor> spanMetricsProcessorProvider,
+                                       ObjectProvider<SpanProcessor> spanProcessors) {
         log.info("Initializing Adhar Tracing with OpenTelemetry support");
 
         OpenTelemetrySdkBuilder builder = OpenTelemetrySdk.builder();
 
-        // Configure tracer provider
-        SdkTracerProvider tracerProvider = createTracerProvider(spanMetricsProcessorProvider.getIfAvailable());
+        // Configure tracer provider. SpanProcessor beans the application declares are
+        // attached too (after the kit's own), e.g. an extra exporter or an in-memory one
+        // in a test.
+        List<SpanProcessor> additionalProcessors = spanProcessors.orderedStream()
+                .filter(processor -> !(processor instanceof SpanMetricsProcessor))
+                .toList();
+        SdkTracerProvider tracerProvider = createTracerProvider(spanMetricsProcessorProvider.getIfAvailable(),
+                additionalProcessors);
         builder.setTracerProvider(tracerProvider);
 
         // Configure context propagators
@@ -122,6 +148,19 @@ public class AdharTracingAutoConfiguration {
                              currentTraceContext,
                              event -> {},  // EventPublisher that does nothing
                              baggageManager);
+    }
+
+    /**
+     * The {@link Propagator} Spring Boot's tracing observation handlers use to inject the
+     * trace context into outgoing requests and messages and to extract it from incoming
+     * ones. It is backed by the SAME propagators as the SDK (W3C {@code traceparent} by
+     * default, plus any {@code adhar.tracing.propagation.*} formats), so an outgoing call
+     * carries exactly the headers the kit's own server filter understands.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public Propagator adharTracingPropagator(OpenTelemetry openTelemetry) {
+        return new OtelPropagator(openTelemetry.getPropagators(), openTelemetry.getTracer("adhar-kit-tracing"));
     }
 
     /**
@@ -179,7 +218,8 @@ public class AdharTracingAutoConfiguration {
      * @param metricsProcessor the span-to-RED-metrics processor, or {@code null} if disabled
      *                         or no {@link MeterRegistry} is available
      */
-    private SdkTracerProvider createTracerProvider(SpanMetricsProcessor metricsProcessor) {
+    private SdkTracerProvider createTracerProvider(SpanMetricsProcessor metricsProcessor,
+                                                   List<SpanProcessor> additionalProcessors) {
         SdkTracerProviderBuilder builder = SdkTracerProvider.builder();
 
         // Configure resource attributes
@@ -216,6 +256,8 @@ public class AdharTracingAutoConfiguration {
             builder.addSpanProcessor(metricsProcessor);
             log.info("Span-to-RED metrics bridge enabled");
         }
+
+        additionalProcessors.forEach(builder::addSpanProcessor);
 
         return builder.build();
     }
@@ -256,7 +298,9 @@ public class AdharTracingAutoConfiguration {
         // Additional custom attributes
         for (Map.Entry<String, String> entry : properties.getResource().getAttributes().entrySet()) {
             String resolvedValue = environment.resolvePlaceholders(entry.getValue());
-            resourceBuilder.put(entry.getKey(), resolvedValue);
+            if (StringUtils.hasText(resolvedValue)) {
+                resourceBuilder.put(entry.getKey(), resolvedValue);
+            }
         }
 
         // Common tags from properties
@@ -306,7 +350,7 @@ public class AdharTracingAutoConfiguration {
             SpanExporter otlpExporter = createOtlpExporter();
             if (otlpExporter != null) {
                 exporters.add(otlpExporter);
-                log.info("Configured OTLP span exporter to: {}", properties.getOpenTelemetry().getEndpoint());
+                log.info("Configured OTLP span exporter ({}) to: {}", properties.getOpenTelemetry().isUseGrpc() ? "grpc" : "http/protobuf", properties.getOpenTelemetry().getEndpoint());
             }
         }
 
@@ -349,38 +393,41 @@ public class AdharTracingAutoConfiguration {
                 var builder = OtlpGrpcSpanExporter.builder()
                         .setEndpoint(otlpProps.getEndpoint())
                         .setTimeout(Duration.parse(otlpProps.getTimeout()));
-
-                // Add headers
-                if (!otlpProps.getHeaders().isEmpty()) {
-                    otlpProps.getHeaders().forEach(builder::addHeader);
-                }
-
+                otlpProps.getHeaders().forEach(builder::addHeader);
                 if ("gzip".equals(otlpProps.getCompression())) {
                     builder.setCompression("gzip");
                 }
-
-                return builder.build();
-            } else {
-                // HTTP protocol: use gRPC exporter as HTTP exporter is not available in newer versions
-                var builder = OtlpGrpcSpanExporter.builder()
-                        .setEndpoint(otlpProps.getEndpoint())
-                        .setTimeout(Duration.parse(otlpProps.getTimeout()));
-
-                // Add headers
-                if (!otlpProps.getHeaders().isEmpty()) {
-                    otlpProps.getHeaders().forEach(builder::addHeader);
-                }
-
-                if ("gzip".equals(otlpProps.getCompression())) {
-                    builder.setCompression("gzip");
-                }
-
                 return builder.build();
             }
+            // HTTP/protobuf — what the platform's collector (Alloy, :4318) and the OTEL_*
+            // defaults speak. This used to build a gRPC exporter too, so a service pointed at
+            // an HTTP collector exported nothing at all.
+            var builder = OtlpHttpSpanExporter.builder()
+                    .setEndpoint(httpTracesEndpoint(otlpProps.getEndpoint()))
+                    .setTimeout(Duration.parse(otlpProps.getTimeout()));
+            otlpProps.getHeaders().forEach(builder::addHeader);
+            if ("gzip".equals(otlpProps.getCompression())) {
+                builder.setCompression("gzip");
+            }
+            return builder.build();
         } catch (Exception e) {
             log.error("Failed to create OTLP exporter", e);
             return null;
         }
+    }
+
+    /**
+     * The OTLP/HTTP exporter needs the full signal URL: a bare collector address
+     * ({@code http://alloy:4318}) gets {@code /v1/traces} appended.
+     */
+    static String httpTracesEndpoint(String endpoint) {
+        String trimmed = endpoint == null ? "" : endpoint.trim();
+        java.net.URI uri = java.net.URI.create(trimmed);
+        String path = uri.getPath();
+        if (path == null || path.isEmpty() || "/".equals(path)) {
+            return trimmed.replaceAll("/+$", "") + "/v1/traces";
+        }
+        return trimmed;
     }
 
     /**

@@ -28,6 +28,13 @@ public class AdharMetricsProperties {
     private Map<String, String> commonTags = new HashMap<>();
 
     /**
+     * Deployment environment reported as the {@code environment} tag, the {@code env} log
+     * field and the {@code deployment.environment.name} trace attribute. Unset: resolved from
+     * ADHAR_ENVIRONMENT, OTEL_RESOURCE_ATTRIBUTES, the pod namespace, then the active profiles.
+     */
+    private String environment;
+
+    /**
      * Configuration for Prometheus metrics.
      */
     private PrometheusProperties prometheus = new PrometheusProperties();

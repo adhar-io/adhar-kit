@@ -260,6 +260,30 @@ thread), honoring `adhar.tracing.web.skip-patterns`. Include `%X{traceId}`/`%X{s
 logging pattern to correlate log lines with traces. Disable it with
 `adhar.tracing.web.mdc-enabled=false`.
 
+#### Outbound Calls (automatic)
+
+Every Micrometer `Observation` becomes a span of the kit's SDK - Spring Boot's
+`MicrometerTracingAutoConfiguration` registers the tracing observation handlers on the
+kit's `Tracer` and `Propagator`. Out of the box, with nothing configured:
+
+| Client | Span | Context on the wire |
+|---|---|---|
+| `RestClient` / `RestTemplate` / `WebClient` built from Boot's builders | CLIENT `http get` | W3C `traceparent` request header |
+| `KafkaTemplate` send / `@KafkaListener` receive | PRODUCER / CONSUMER (child of the producer) | `traceparent` record header |
+| RabbitMQ `RabbitTemplate` / listener containers | PRODUCER / CONSUMER | message header |
+| Lettuce (Valkey/Redis) commands | CLIENT, named after the command; arguments never recorded | - |
+| JDBC through the application's `DataSource` | connection acquisition + one span per query; SQL sanitized (`db.query.text`, literals -> `?`), no parameter values; Hikari metrics unchanged | - |
+| Incoming HTTP (MVC and WebFlux) | SERVER (Boot's `http.server.requests` observation; the kit's servlet filter steps aside) | `traceparent` extracted |
+| gRPC (`adhar-kit-grpc`), GraphQL | via their observations | |
+
+Kafka and RabbitMQ observation are off in Spring Boot; the kit turns them on at the lowest
+precedence (`spring.kafka.template.observation-enabled`, `spring.kafka.listener.observation-enabled`,
+`spring.rabbitmq.template.observation-enabled`, `spring.rabbitmq.listener.{simple,direct,stream}.observation-enabled`),
+and shapes JDBC spans with `jdbc.includes=connection,query` and
+`jdbc.datasource-proxy.include-parameter-values=false`. Set any of them in the application to
+override. Build clients from the injected builders (`RestClient.Builder`, `WebClient.Builder`,
+`RestTemplateBuilder`): `RestClient.create()` / `new RestTemplate()` are not observed.
+
 ## Configuration Reference
 
 ### Core Configuration

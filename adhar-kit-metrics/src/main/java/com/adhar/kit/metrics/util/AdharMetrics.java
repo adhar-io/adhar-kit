@@ -128,6 +128,59 @@ public class AdharMetrics {
         return DistributionSummary.builder(name).tags(tags).register(registry);
     }
 
+    // ==================== Business Metrics ====================
+
+    /**
+     * Prefix of every application-specific (business) metric. In Prometheus the names become
+     * {@code adhar_business_<name>_total} (counters), {@code adhar_business_<name>_seconds_*}
+     * (timers), {@code adhar_business_<name>_{count,sum,max}} (summaries) and
+     * {@code adhar_business_<name>} (gauges) — the per-application dashboard discovers every
+     * series matching {@code adhar_business_.+}.
+     */
+    public static final String BUSINESS_PREFIX = "adhar.business.";
+
+    /**
+     * The full meter name for a business metric: {@code adhar.business.<name>}. A name that
+     * already carries the prefix is returned unchanged.
+     */
+    public static String businessName(String name) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("business metric name must not be blank");
+        }
+        String trimmed = name.trim();
+        return trimmed.startsWith(BUSINESS_PREFIX) ? trimmed : BUSINESS_PREFIX + trimmed;
+    }
+
+    /**
+     * Counter {@code adhar.business.<name>} tagged with {@code category} and {@code outcome}
+     * (the same tags {@code @BusinessMetric} records) plus any extra key/value tags.
+     */
+    public static Counter businessCounter(String name, String category, String outcome, String... tags) {
+        return Counter.builder(businessName(name))
+                .tag("category", category)
+                .tag("outcome", outcome)
+                .tags(tags)
+                .register(registry);
+    }
+
+    /** Timer {@code adhar.business.<name>} with the given key/value tags. */
+    public static Timer businessTimer(String name, String... tags) {
+        return Timer.builder(businessName(name)).tags(tags).register(registry);
+    }
+
+    /** Distribution summary {@code adhar.business.<name>} (e.g. an order value). */
+    public static DistributionSummary businessSummary(String name, String... tags) {
+        return DistributionSummary.builder(businessName(name)).tags(tags).register(registry);
+    }
+
+    /**
+     * Gauge {@code adhar.business.<name>} sampling {@code value} from {@code stateObject}.
+     * Micrometer holds the state object weakly: keep a reference to it.
+     */
+    public static <T> Gauge businessGauge(String name, T stateObject, ToDoubleFunction<T> value, String... tags) {
+        return Gauge.builder(businessName(name), stateObject, value).tags(tags).register(registry);
+    }
+
     // ==================== Fluent Builder API ====================
 
     /**
@@ -257,7 +310,8 @@ public class AdharMetrics {
     }
 
     /**
-     * Records business metrics with context.
+     * Records a business event: increments {@code adhar.business.events} and records
+     * {@code value} on {@code adhar.business.values}, both tagged with event and entity.
      */
     public static void recordBusiness(String event, String entity, double value, String... additionalTags) {
         List<String> allTags = new ArrayList<>();
@@ -267,8 +321,8 @@ public class AdharMetrics {
         allTags.add(entity);
         Collections.addAll(allTags, additionalTags);
 
-        counter("business.events", allTags.toArray(new String[0])).increment();
-        summary("business.values", allTags.toArray(new String[0])).record(value);
+        counter(businessName("events"), allTags.toArray(new String[0])).increment();
+        summary(businessName("values"), allTags.toArray(new String[0])).record(value);
     }
 
     // ==================== Health and Performance Monitoring ====================

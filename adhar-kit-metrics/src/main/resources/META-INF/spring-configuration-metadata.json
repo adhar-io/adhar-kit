@@ -310,6 +310,12 @@
       "type": "java.lang.String[]",
       "sourceType": "com.adhar.kit.metrics.properties.AdharMetricsProperties$KubernetesProperties",
       "description": "Custom Kubernetes labels to include as tags."
+    },
+    {
+      "name": "adhar.metrics.environment",
+      "type": "java.lang.String",
+      "sourceType": "com.adhar.kit.metrics.properties.AdharMetricsProperties",
+      "description": "Deployment environment reported as the 'environment' metric tag, the 'env' log field and the 'deployment.environment.name' trace attribute. Unset: ADHAR_ENVIRONMENT, then deployment.environment[.name] in OTEL_RESOURCE_ATTRIBUTES, then the pod namespace, then the first active profile other than kubernetes/default, then 'local'."
     }
   ],
   "hints": [
@@ -366,4 +372,3 @@
     }
   ]
 }
-

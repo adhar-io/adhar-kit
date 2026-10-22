@@ -109,8 +109,8 @@ class AdharMetricsTest {
         assertThat(registry.get("g").tags("k", "v").gauge().value()).isEqualTo(99.0);
 
         AdharMetrics.recordBusiness("created", "order", 12.0, "region", "us");
-        assertThat(registry.find("business.events").counter().count()).isEqualTo(1.0);
-        assertThat(registry.find("business.values").summary().count()).isEqualTo(1L);
+        assertThat(registry.find("adhar.business.events").counter().count()).isEqualTo(1.0);
+        assertThat(registry.find("adhar.business.values").summary().count()).isEqualTo(1L);
 
         AdharMetrics.recordHealth("db", true, "node", "1");
         assertThat(registry.find("db.health").gauge().value()).isEqualTo(1.0);

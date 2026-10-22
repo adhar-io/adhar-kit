@@ -1,13 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
 
-    <include resource="org/springframework/boot/logging/logback/base.xml"/>
+    <!-- defaults.xml, NOT base.xml: base.xml also attaches Spring Boot's own CONSOLE (plain
+         text) and FILE appenders to the root logger, so every line was printed twice — once
+         as text and once as JSON — and also written to ${LOG_PATH}/spring.log. defaults.xml
+         only brings the conversion rules and pattern properties. -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
     <!-- Application properties -->
     <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="unknown-app"/>
     <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="logs"/>
     <springProperty scope="context" name="ROOT_LOG_LEVEL" source="logging.level.root" defaultValue="INFO"/>
     <springProperty scope="context" name="SPRING_PROFILES_ACTIVE" source="spring.profiles.active" defaultValue="default"/>
+    <!-- The deployment environment resolved by adhar-kit-metrics (ADHAR_ENVIRONMENT, OTEL
+         resource attributes, pod namespace, ...). Active profiles are not the environment:
+         Spring Cloud Kubernetes adds a "kubernetes" profile. -->
+    <springProperty scope="context" name="ADHAR_ENV" source="adhar.environment" defaultValue="local"/>
 
     <!-- Console logging properties -->
     <springProperty scope="context" name="CONSOLE_ENABLED" source="adhar.logging.console.enabled" defaultValue="true"/>
@@ -90,7 +98,10 @@
                 <then>
                     <appender name="CONSOLE_JSON" class="ch.qos.logback.core.ConsoleAppender">
                         <encoder class="com.adhar.adharkit.logging.encoder.MaskingJsonEncoder">
-                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${SPRING_PROFILES_ACTIVE:-default}"}</customFields>
+                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${ADHAR_ENV:-local}"}</customFields>
+                            <!-- Context properties are this file's settings (JSON_LEVEL_FIELD, LOGSTASH_HOST, ...),
+                                 not log data; LogstashEncoder writes them into every line by default. -->
+                            <includeContext>false</includeContext>
                             <includeMdc>${JSON_INCLUDE_MDC}</includeMdc>
                             <fieldNames>
                                 <timestamp>${JSON_TIMESTAMP_FIELD}</timestamp>
@@ -108,7 +119,7 @@
                 <else>
                     <appender name="CONSOLE_TEXT" class="ch.qos.logback.core.ConsoleAppender">
                         <encoder>
-                            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSX} %-5level [%thread] %logger - %msg%n</pattern>
+                            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSX} %-5level [%thread] [%X{traceId:-},%X{spanId:-}] %logger - %msg%n</pattern>
                         </encoder>
                         <includeCallerData>${CONSOLE_CALLER_DATA}</includeCallerData>
                     </appender>
@@ -132,7 +143,10 @@
                             <cleanHistoryOnStart>${FILE_CLEAN_HISTORY}</cleanHistoryOnStart>
                         </rollingPolicy>
                         <encoder class="com.adhar.adharkit.logging.encoder.MaskingJsonEncoder">
-                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${SPRING_PROFILES_ACTIVE:-default}"}</customFields>
+                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${ADHAR_ENV:-local}"}</customFields>
+                            <!-- Context properties are this file's settings (JSON_LEVEL_FIELD, LOGSTASH_HOST, ...),
+                                 not log data; LogstashEncoder writes them into every line by default. -->
+                            <includeContext>false</includeContext>
                             <includeMdc>${JSON_INCLUDE_MDC}</includeMdc>
                             <fieldNames>
                                 <timestamp>${JSON_TIMESTAMP_FIELD}</timestamp>
@@ -167,7 +181,7 @@
                             <cleanHistoryOnStart>${FILE_CLEAN_HISTORY}</cleanHistoryOnStart>
                         </rollingPolicy>
                         <encoder>
-                            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSX} %-5level [%thread] %logger - %msg%n</pattern>
+                            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSX} %-5level [%thread] [%X{traceId:-},%X{spanId:-}] %logger - %msg%n</pattern>
                         </encoder>
                         <includeCallerData>${FILE_CALLER_DATA}</includeCallerData>
                     </appender>
@@ -195,7 +209,10 @@
                         <connectionTimeout>${LOGSTASH_CONNECTION_TIMEOUT}</connectionTimeout>
                         <keepAliveDuration>5 minutes</keepAliveDuration>
                         <encoder class="com.adhar.adharkit.logging.encoder.MaskingJsonEncoder">
-                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${SPRING_PROFILES_ACTIVE:-default}"}</customFields>
+                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${ADHAR_ENV:-local}"}</customFields>
+                            <!-- Context properties are this file's settings (JSON_LEVEL_FIELD, LOGSTASH_HOST, ...),
+                                 not log data; LogstashEncoder writes them into every line by default. -->
+                            <includeContext>false</includeContext>
                             <includeMdc>${JSON_INCLUDE_MDC}</includeMdc>
                             <fieldNames>
                                 <timestamp>${JSON_TIMESTAMP_FIELD}</timestamp>
@@ -216,7 +233,10 @@
                         <host>${LOGSTASH_HOST}</host>
                         <port>${LOGSTASH_PORT}</port>
                         <encoder class="com.adhar.adharkit.logging.encoder.MaskingJsonEncoder">
-                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${SPRING_PROFILES_ACTIVE:-default}"}</customFields>
+                            <customFields>{"app_name":"${APP_NAME:-unknown-app}","env":"${ADHAR_ENV:-local}"}</customFields>
+                            <!-- Context properties are this file's settings (JSON_LEVEL_FIELD, LOGSTASH_HOST, ...),
+                                 not log data; LogstashEncoder writes them into every line by default. -->
+                            <includeContext>false</includeContext>
                             <includeMdc>${JSON_INCLUDE_MDC}</includeMdc>
                             <fieldNames>
                                 <timestamp>${JSON_TIMESTAMP_FIELD}</timestamp>

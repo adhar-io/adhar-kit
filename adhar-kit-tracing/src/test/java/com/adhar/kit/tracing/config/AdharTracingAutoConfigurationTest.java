@@ -275,7 +275,7 @@ class AdharTracingAutoConfigurationTest {
                     assertThat(properties.getOpenTelemetry().isEnabled()).isTrue();
                     assertThat(properties.getZipkin().isEnabled()).isFalse();
                     assertThat(properties.getJaeger().isEnabled()).isFalse();
-                    assertThat(properties.getSampling().getProbability()).isEqualTo(0.1);
+                    assertThat(properties.getSampling().getProbability()).isEqualTo(1.0);
                 });
     }
 

@@ -22,6 +22,7 @@
         <brave.version>6.3.1</brave.version>
         <quarkus.version>3.37.0</quarkus.version>
         <micronaut.version>5.0.2</micronaut.version>
+        <datasource-micrometer.version>2.3.0</datasource-micrometer.version>
     </properties>
 
     <dependencyManagement>
@@ -34,6 +35,18 @@
                 <groupId>io.opentelemetry</groupId>
                 <artifactId>opentelemetry-bom</artifactId>
                 <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Then Spring Boot's own versions, ahead of the Quarkus and Micronaut BOMs.
+                 Those pinned Micrometer 1.16 / Micrometer Tracing 1.6 here while every
+                 application resolves Boot's (1.17 / 1.7): the tests ran against a
+                 classpath no service ever has, and spring-boot-micrometer-tracing 4.1 is
+                 built against Micrometer Tracing 1.7. -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -132,6 +145,45 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-tracing-bridge-brave</artifactId>
             <optional>true</optional>
+        </dependency>
+
+        <!-- Observation -> span bridge. Spring Boot's MicrometerTracingAutoConfiguration
+             registers the tracing ObservationHandlers (client spans that INJECT
+             traceparent, server/consumer spans that EXTRACT it) on the ObservationRegistry
+             once a Tracer and a Propagator exist; the kit supplies both. Without this
+             module every RestClient/WebClient/RestTemplate call, Kafka send/receive,
+             Lettuce command and JDBC query was observed for metrics only: no span, and
+             no traceparent on the wire. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-micrometer-tracing</artifactId>
+        </dependency>
+
+        <!-- JDBC spans: one per connection acquisition and per query, with the SQL
+             sanitized by the OpenTelemetry module (literals replaced by ?) and no
+             parameter values. It decorates the application's DataSource bean; Hikari and
+             its metrics stay as they are. spring-boot-jdbc is excluded so that a service
+             without a database does not gain DataSource auto-configuration from the kit;
+             a service with one already has it. -->
+        <dependency>
+            <groupId>net.ttddyy.observation</groupId>
+            <artifactId>datasource-micrometer-spring-boot</artifactId>
+            <version>${datasource-micrometer.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-jdbc</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.zaxxer</groupId>
+                    <artifactId>HikariCP</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>net.ttddyy.observation</groupId>
+            <artifactId>datasource-micrometer-opentelemetry</artifactId>
+            <version>${datasource-micrometer.version}</version>
         </dependency>
 
         <!-- OpenTelemetry -->
@@ -279,6 +331,48 @@
         <dependency>
             <groupId>org.wiremock</groupId>
             <artifactId>wiremock-standalone</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Outbound-instrumentation tests: each client is driven through Spring Boot's
+             own auto-configuration, exactly as in a service. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-restclient</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webclient</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-data-redis</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.lettuce</groupId>
+            <artifactId>lettuce-core</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

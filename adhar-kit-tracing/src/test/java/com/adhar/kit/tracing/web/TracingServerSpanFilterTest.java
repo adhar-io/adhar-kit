@@ -76,6 +76,37 @@ class TracingServerSpanFilterTest {
     }
 
     @Test
+    void defersToAServerSpanSomethingElseAlreadyStarted() throws Exception {
+        // Spring Boot's ServerHttpObservationFilter runs first and has made its span current.
+        io.opentelemetry.api.trace.Span outer = openTelemetry.getTracer("boot")
+                .spanBuilder("http get /api/orders").setSpanKind(SpanKind.SERVER).startSpan();
+        java.util.concurrent.atomic.AtomicReference<String> seenByHandler = new java.util.concurrent.atomic.AtomicReference<>();
+        try (io.opentelemetry.context.Scope ignored = outer.makeCurrent()) {
+            filter().doFilter(new MockHttpServletRequest("GET", "/api/orders"), new MockHttpServletResponse(),
+                    (req, res) -> seenByHandler.set(io.opentelemetry.api.trace.Span.current().getSpanContext().getSpanId()));
+        } finally {
+            outer.end();
+        }
+
+        assertThat(seenByHandler.get()).isEqualTo(outer.getSpanContext().getSpanId());
+        assertThat(exporter.getFinishedSpanItems()).extracting(SpanData::getName).containsExactly("http get /api/orders");
+    }
+
+    @Test
+    void aLeakedNonServerContextDoesNotSuppressTheRequestsSpan() throws Exception {
+        // E.g. an unclosed baggage scope left on a pooled thread by an earlier request.
+        io.opentelemetry.api.trace.Span leaked = openTelemetry.getTracer("app").spanBuilder("leaked").startSpan();
+        leaked.end();
+        try (io.opentelemetry.context.Scope ignored = leaked.makeCurrent()) {
+            filter().doFilter(new MockHttpServletRequest("GET", "/api/orders"), new MockHttpServletResponse(),
+                    (req, res) -> { });
+        }
+
+        assertThat(exporter.getFinishedSpanItems()).extracting(SpanData::getName)
+                .containsExactly("leaked", "GET /api/orders");
+    }
+
+    @Test
     void joinsIncomingRemoteTraceViaTraceparent() throws Exception {
         String remoteTraceId = "4bf92f3577b34da6a3ce929d0e0e4736";
         String remoteSpanId = "00f067aa0ba902b7";
