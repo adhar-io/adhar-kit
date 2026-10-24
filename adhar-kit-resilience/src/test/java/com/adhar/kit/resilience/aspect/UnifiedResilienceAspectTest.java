@@ -231,7 +231,12 @@ class UnifiedResilienceAspectTest {
     @Test
     @DisplayName("sync @TimeLimiter returns the value of a fast method")
     void syncTimeLimiterFastPath() throws Throwable {
-        ProceedingJoinPoint jp = joinPoint("slowSync", () -> "fast");
+        // Its own limiter with a generous budget: this asserts that a fast call
+        // is NOT cut off, and sharing slowSync's 250 ms made it a timing race —
+        // on a loaded CI node handing the call to the limiter's worker thread
+        // took longer than that, and the release pipeline failed all three
+        // surefire attempts (2026-10-24). The timeout path keeps its own test.
+        ProceedingJoinPoint jp = joinPoint("fastSync", () -> "fast");
         assertThat(aspect.applyResilience(jp)).isEqualTo("fast");
     }
 
@@ -355,6 +360,11 @@ class UnifiedResilienceAspectTest {
 
         @TimeLimiter(name = "u-sync-tl", timeoutDuration = 250)
         String slowSync() {
+            return null;
+        }
+
+        @TimeLimiter(name = "u-sync-fast-tl", timeoutDuration = 10_000)
+        String fastSync() {
             return null;
         }
 
