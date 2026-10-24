@@ -1,3 +1,6 @@
+# REFERENCE ONLY — documented defaults, not loaded. It was this module's
+# application.yml, which Spring loads as the CONSUMING SERVICE's config when that
+# service has none of its own (see adhar-kit-ai.reference.yml).
 # Adhar Kit gRPC - Enterprise Microservices Configuration
 
 adhar:
@@ -114,4 +117,3 @@ adhar:
       enable-logging: true
       log-level: "BASIC"                     # NONE, BASIC, HEADERS, FULL
       enable-health-check: true
-

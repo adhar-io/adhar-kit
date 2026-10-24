@@ -1,3 +1,6 @@
+# REFERENCE ONLY — documented defaults, not loaded. It was this module's
+# application.yml, which Spring loads as the CONSUMING SERVICE's config when that
+# service has none of its own (see adhar-kit-ai.reference.yml).
 # Adhar Kit Docs - OpenAPI/Swagger Configuration
 # Comprehensive API documentation setup for enterprise microservices
 
@@ -65,4 +68,3 @@ adhar:
         - "/api/**"
       paths-to-exclude:
         - "/api/internal/**"
-

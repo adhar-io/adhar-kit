@@ -1,8 +1,29 @@
+# REFERENCE ONLY — the defaults adhar-kit-ai documents, not configuration it loads.
+#
+# This file used to be this module's src/main/resources/application.yml, and a
+# library's application.yml is not inert: Spring loads the FIRST
+# classpath:application.yml it finds, so every service without its own took this
+# one — its name became "adhar-kit-ai", its profile "development", its cache
+# Caffeine — and this copy also had `spring:` three times in one document, so
+# Spring refused to start at all ("found duplicate key spring"; my-service,
+# 2026-10-24). Defaults belong in the @ConfigurationProperties classes; a
+# service sets its own values in its own application.yml/properties.
 spring:
-  application:
-    name: adhar-kit-ai
-  profiles:
-    active: development
+  ai:
+    openai:
+      api-key: ${adhar.ai.openai.api-key}
+      chat:
+        options:
+          model: ${adhar.ai.openai.model}
+          temperature: ${adhar.ai.openai.temperature}
+          max-tokens: ${adhar.ai.openai.max-tokens}
+      embedding:
+        options:
+          model: text-embedding-ada-002
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=1000,expireAfterWrite=30m
 
 # Adhar AI Configuration
 adhar:
@@ -72,19 +93,6 @@ adhar:
         - codellama
 
 # Spring AI Configuration
-spring:
-  ai:
-    openai:
-      api-key: ${adhar.ai.openai.api-key}
-      chat:
-        options:
-          model: ${adhar.ai.openai.model}
-          temperature: ${adhar.ai.openai.temperature}
-          max-tokens: ${adhar.ai.openai.max-tokens}
-      embedding:
-        options:
-          model: text-embedding-ada-002
-
 # Actuator Configuration
 management:
   endpoints:
@@ -116,8 +124,3 @@ server:
     context-path: /
 
 # Cache Configuration
-spring:
-  cache:
-    type: caffeine
-    caffeine:
-      spec: maximumSize=1000,expireAfterWrite=30m
