@@ -1,168 +1,198 @@
 package com.adhar.kit.dapr.pubsub;
 
+import com.adhar.kit.dapr.DaprFacade;
+import com.adhar.kit.dapr.DaprSubscription;
 import com.adhar.kit.dapr.annotation.DaprSubscribe;
 import com.adhar.kit.dapr.annotation.DaprTopic;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
+import com.adhar.kit.dapr.support.MemoryDapr;
+import io.dapr.Topic;
+import io.dapr.utils.TypeRef;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Unit tests for {@link DaprSubscriptionRegistrar}: handler discovery via
- * {@code @DaprSubscribe}/{@code @DaprTopic}, route synthesis, duplicate-route handling, and
- * metadata parsing.
+ * Discovery, advertisement and in-memory delivery of {@link DaprSubscriptionRegistrar}.
  */
-@DisplayName("DaprSubscriptionRegistrar Tests")
 class DaprSubscriptionRegistrarTest {
 
-    static class SubscribeHandlers {
+    record Order(String id) {
+    }
 
-        @DaprSubscribe(pubsubName = "pubsub", topic = "orders.created")
-        public void handleCreated(String event) {
+    static class OrderHandlers {
+        final List<Order> created = new ArrayList<>();
+        final List<Order> cancelled = new ArrayList<>();
+        final List<Order> priority = new ArrayList<>();
+
+        @DaprSubscribe(topic = "orders", deadLetterTopic = "orders-dlq", metadata = "rawPayload=false")
+        public void onOrder(Order order) {
+            created.add(order);
         }
 
-        @DaprSubscribe(pubsubName = "pubsub", topic = "orders.updated", route = "custom-route",
-                deadLetterTopic = "orders-dlq")
-        public void handleUpdated(String event) {
+        @DaprSubscribe(topic = "orders", match = "event.data.priority == true", priority = 1,
+                route = "orders/priority")
+        public void onPriority(Order order) {
+            priority.add(order);
+        }
+
+        @DaprTopic(pubsubName = "${test.pubsub}", name = "cancellations", metadata = {"ttlInSeconds=60"})
+        public void onCancelled(DaprCloudEvent<Order> event) {
+            cancelled.add(event.data());
+        }
+
+        @DaprSubscribe(topic = "orders", route = "/duplicate")
+        public void duplicateDefault(Order order) {
+            // a second default route for the same topic: ignored
+        }
+
+        @DaprSubscribe(topic = "audit", bulk = true, maxMessagesCount = 50)
+        public void onAudit(Map<String, Object> entry) {
+            // bulk delivery
         }
     }
 
-    static class TopicHandlers {
-
-        @DaprTopic(pubsubName = "pubsub", name = "shipments.dispatched", metadata = {"rawPayload=true", "malformed"})
-        public void handleShipment(String event) {
+    @RestController
+    @RequestMapping("/legacy")
+    static class SdkTopicController {
+        @Topic(name = "payments", pubsubName = "pubsub")
+        @PostMapping("/payments")
+        public void onPayment(Map<String, Object> event) {
+            // served by the controller itself
         }
     }
 
-    static class DuplicateHandler {
+    private AnnotationConfigApplicationContext context;
 
-        @DaprSubscribe(pubsubName = "pubsub", topic = "orders.created")
-        public void anotherHandler(String event) {
+    @AfterEach
+    void close() {
+        if (context != null) {
+            context.close();
         }
     }
 
-    private ApplicationContext context;
-
-    @BeforeEach
-    void setUp() {
-        context = mock(ApplicationContext.class);
-    }
-
-    @Test
-    @DisplayName("discovers @DaprSubscribe handlers and exposes them as subscription metadata")
-    void discoversDaprSubscribeHandlers() {
-        SubscribeHandlers bean = new SubscribeHandlers();
-        when(context.getBeansOfType(Object.class)).thenReturn(Map.of("subscribeHandlers", bean));
-
-        DaprSubscriptionRegistrar registrar = new DaprSubscriptionRegistrar(context);
+    private DaprSubscriptionRegistrar start(DaprFacade facade, boolean http) {
+        context = new AnnotationConfigApplicationContext();
+        context.getEnvironment().getPropertySources().addFirst(
+                new MapPropertySource("test", Map.of("test.pubsub", "events")));
+        context.registerBean(OrderHandlers.class);
+        context.registerBean(SdkTopicController.class);
+        context.refresh();
+        DaprSubscriptionRegistrar registrar = new DaprSubscriptionRegistrar(context, facade, new DaprEventDispatcher());
+        if (http) {
+            registrar.enableHttpDelivery();
+        }
         registrar.afterSingletonsInstantiated();
-
-        assertThat(registrar.size()).isEqualTo(2);
-        List<DaprSubscriptionEntry> subs = registrar.getSubscriptions();
-        assertThat(subs).extracting(DaprSubscriptionEntry::topic)
-                .containsExactlyInAnyOrder("orders.created", "orders.updated");
-        assertThat(subs).extracting(DaprSubscriptionEntry::pubsubname).allMatch("pubsub"::equals);
-
-        DaprSubscriptionEntry updated = subs.stream()
-                .filter(e -> e.topic().equals("orders.updated")).findFirst().orElseThrow();
-        assertThat(updated.route()).isEqualTo("/dapr/subscribe/pubsub/custom-route");
-        assertThat(updated.deadLetterTopic()).isEqualTo("orders-dlq");
+        return registrar;
     }
 
     @Test
-    @DisplayName("default route (no custom route attribute) is derived from the topic name")
-    void defaultRouteDerivedFromTopic() {
-        SubscribeHandlers bean = new SubscribeHandlers();
-        when(context.getBeansOfType(Object.class)).thenReturn(Map.of("subscribeHandlers", bean));
+    void advertisesAnnotatedHandlersOnTheirRoutes() {
+        DaprSubscriptionRegistrar registrar = start(null, true);
 
-        DaprSubscriptionRegistrar registrar = new DaprSubscriptionRegistrar(context);
-        registrar.afterSingletonsInstantiated();
+        assertThat(registrar.findHandler("/dapr/events/pubsub/orders")).isPresent();
+        assertThat(registrar.findHandler("/orders/priority")).isPresent();
+        assertThat(registrar.findHandler("/dapr/events/events/cancellations")).isPresent();
+        assertThat(registrar.findHandler("/duplicate")).isEmpty();
 
-        Optional<DaprSubscriptionHandler> handler =
-                registrar.findHandler("/dapr/subscribe/pubsub/orders-created");
-        assertThat(handler).isPresent();
-        assertThat(handler.get().method().getName()).isEqualTo("handleCreated");
-        assertThat(handler.get().deadLetterTopic()).isNull();
+        List<DaprSubscriptionEntry> entries = registrar.getSubscriptions();
+        DaprSubscriptionEntry orders = entries.stream().filter(e -> e.topic().equals("orders")).findFirst().orElseThrow();
+        assertThat(orders.pubsubname()).isEqualTo("pubsub");
+        assertThat(orders.route()).isNull();
+        assertThat(orders.routes().defaultRoute()).isEqualTo("/dapr/events/pubsub/orders");
+        assertThat(orders.routes().rules()).containsExactly(
+                new DaprSubscriptionEntry.Rule("event.data.priority == true", "/orders/priority"));
+        assertThat(orders.deadLetterTopic()).isEqualTo("orders-dlq");
+        assertThat(orders.metadata()).containsEntry("rawPayload", "false");
+
+        DaprSubscriptionEntry cancellations = entries.stream().filter(e -> e.topic().equals("cancellations"))
+                .findFirst().orElseThrow();
+        assertThat(cancellations.pubsubname()).isEqualTo("events");
+        assertThat(cancellations.route()).isEqualTo("/dapr/events/events/cancellations");
+        assertThat(cancellations.metadata()).containsEntry("ttlInSeconds", "60");
+
+        DaprSubscriptionEntry audit = entries.stream().filter(e -> e.topic().equals("audit")).findFirst().orElseThrow();
+        assertThat(audit.bulkSubscribe()).isEqualTo(new DaprSubscriptionEntry.BulkSubscribe(true, 50, null));
     }
 
     @Test
-    @DisplayName("discovers @DaprTopic handlers and parses key=value metadata pairs")
-    void discoversDaprTopicHandlersWithMetadata() {
-        TopicHandlers bean = new TopicHandlers();
-        when(context.getBeansOfType(Object.class)).thenReturn(Map.of("topicHandlers", bean));
+    void advertisesTheSdkTopicMethodsOnTheirControllerRoutes() {
+        DaprSubscriptionRegistrar registrar = start(null, true);
 
-        DaprSubscriptionRegistrar registrar = new DaprSubscriptionRegistrar(context);
-        registrar.afterSingletonsInstantiated();
-
-        assertThat(registrar.size()).isEqualTo(1);
-        DaprSubscriptionEntry entry = registrar.getSubscriptions().get(0);
-        assertThat(entry.topic()).isEqualTo("shipments.dispatched");
-        assertThat(entry.metadata()).containsEntry("rawPayload", "true");
-        assertThat(entry.metadata()).doesNotContainKey("malformed");
+        assertThat(registrar.getSubscriptions()).anySatisfy(entry -> {
+            assertThat(entry.topic()).isEqualTo("payments");
+            assertThat(entry.route()).isEqualTo("/legacy/payments");
+        });
+        assertThat(registrar.findHandler("/legacy/payments")).isEmpty();
     }
 
     @Test
-    @DisplayName("a duplicate route keeps the first-registered handler and logs a warning")
-    void duplicateRouteKeepsFirstHandler() {
-        SubscribeHandlers first = new SubscribeHandlers();
-        DuplicateHandler second = new DuplicateHandler();
-        Map<String, Object> beans = new java.util.LinkedHashMap<>();
-        beans.put("subscribeHandlers", first);
-        beans.put("duplicateHandler", second);
-        when(context.getBeansOfType(Object.class)).thenReturn(beans);
+    void inMemoryModeDeliversThisProcesssPublishesToTheHandlers() {
+        DaprFacade facade = MemoryDapr.facade();
+        DaprSubscriptionRegistrar registrar = start(facade, true);
+        OrderHandlers handlers = context.getBean(OrderHandlers.class);
 
-        DaprSubscriptionRegistrar registrar = new DaprSubscriptionRegistrar(context);
-        registrar.afterSingletonsInstantiated();
+        facade.publish("orders", new Order("o-1"));
+        facade.publishEvent("events", "cancellations", new Order("o-2"));
 
-        // Both SubscribeHandlers#handleCreated and DuplicateHandler#anotherHandler map to the
-        // same route ("orders.created" with no custom route on either), so only one survives.
-        assertThat(registrar.size()).isEqualTo(2);
-        Optional<DaprSubscriptionHandler> handler =
-                registrar.findHandler("/dapr/subscribe/pubsub/orders-created");
-        assertThat(handler).isPresent();
-        assertThat(handler.get().beanName()).isEqualTo("subscribeHandlers");
+        assertThat(handlers.created).containsExactly(new Order("o-1"));
+        assertThat(handlers.cancelled).containsExactly(new Order("o-2"));
+        // routing rules are evaluated by the sidecar only
+        assertThat(handlers.priority).isEmpty();
+        registrar.destroy();
     }
 
     @Test
-    @DisplayName("findHandler returns empty for an unregistered route")
-    void findHandlerReturnsEmptyForUnknownRoute() {
-        when(context.getBeansOfType(Object.class)).thenReturn(Map.of());
-        DaprSubscriptionRegistrar registrar = new DaprSubscriptionRegistrar(context);
-        registrar.afterSingletonsInstantiated();
+    void handlersRegisteredInCodeAreAdvertisedAndCanBeRemoved() {
+        DaprFacade facade = MemoryDapr.facade();
+        start(facade, false);
+        List<String> received = new ArrayList<>();
 
-        assertThat(registrar.findHandler("/dapr/subscribe/pubsub/nope")).isEmpty();
-        assertThat(registrar.size()).isZero();
+        DaprSubscription subscription = facade.subscribe("shipments", TypeRef.get(String.class), event -> {
+            received.add(event.data());
+            return DispatchStatus.SUCCESS;
+        }, SubscribeOptions.none().withDeadLetterTopic("shipments-dlq"));
+
+        facade.publish("shipments", "s-1");
+        assertThat(received).containsExactly("s-1");
+
+        subscription.unsubscribe();
+        assertThat(subscription.isActive()).isFalse();
+        facade.publish("shipments", "s-2");
+        assertThat(received).containsExactly("s-1");
     }
 
     @Test
-    @DisplayName("slugify normalizes arbitrary strings into safe route segments")
-    void slugifyNormalizesStrings() {
-        assertThat(DaprSubscriptionRegistrar.slugify("Orders.Created!!")).isEqualTo("orders-created");
-        assertThat(DaprSubscriptionRegistrar.slugify("  --weird--  ")).isEqualTo("weird");
-        assertThat(DaprSubscriptionRegistrar.slugify("***")).isEqualTo("route");
+    void registeringASecondDefaultRouteForATopicInCodeFails() {
+        DaprFacade facade = MemoryDapr.facade();
+        start(facade, false);
+        assertThatThrownBy(() -> facade.subscribe("orders", Order.class, event -> DispatchStatus.SUCCESS))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("already has a default route");
     }
 
     @Test
-    @DisplayName("buildRoute composes the pubsub name and slug under the fixed prefix")
-    void buildRouteComposesPrefixedPath() {
-        assertThat(DaprSubscriptionRegistrar.buildRoute("pubsub", "orders.created"))
-                .isEqualTo("/dapr/subscribe/pubsub/orders-created");
+    void routesAreEncodedForTheUrlPath() {
+        assertThat(DaprSubscriptionRegistrar.buildRoute("pubsub", "orders.created")).isEqualTo(
+                "/dapr/events/pubsub/orders.created");
+        assertThat(DaprSubscriptionRegistrar.buildRoute("pubsub", "a b")).isEqualTo("/dapr/events/pubsub/a%20b");
+        assertThat(DaprSubscriptionRegistrar.routeFor("pubsub", "orders", "custom/path")).isEqualTo("/custom/path");
     }
 
     @Test
-    @DisplayName("parseMetadata ignores malformed entries and empty arrays")
     void parseMetadataIgnoresMalformedEntries() {
+        assertThat(DaprSubscriptionRegistrar.parseMetadata(new String[] {"a=1", "broken", " b = 2 "}))
+                .isEqualTo(Map.of("a", "1", "b", "2"));
         assertThat(DaprSubscriptionRegistrar.parseMetadata(null)).isEmpty();
-        assertThat(DaprSubscriptionRegistrar.parseMetadata(new String[0])).isEmpty();
-        assertThat(DaprSubscriptionRegistrar.parseMetadata(new String[] {"a=1", "malformed", "b=2"}))
-                .containsEntry("a", "1").containsEntry("b", "2").hasSize(2);
     }
 }

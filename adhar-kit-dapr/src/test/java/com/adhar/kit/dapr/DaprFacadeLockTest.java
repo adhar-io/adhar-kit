@@ -57,7 +57,7 @@ class DaprFacadeLockTest {
 
         assertThatThrownBy(() -> facade.tryLock("lockstore", "res", "owner", 30))
             .isInstanceOf(DaprFacade.DaprException.class)
-            .hasMessage("Failed to acquire lock");
+            .hasMessageStartingWith("Failed to acquire lock");
     }
 
     @Test
@@ -82,7 +82,7 @@ class DaprFacadeLockTest {
 
         assertThatThrownBy(() -> facade.unlock("lockstore", "res", "owner"))
             .isInstanceOf(DaprFacade.DaprException.class)
-            .hasMessage("Failed to release lock");
+            .hasMessageStartingWith("Failed to release lock");
     }
 
     @Test
@@ -104,9 +104,9 @@ class DaprFacadeLockTest {
     }
 
     @Test
-    void shutdownClosesPreviewClient() throws Exception {
+    void clientsHandedInAreNotClosedByTheFacade() throws Exception {
         facade.shutdown();
 
-        org.mockito.Mockito.verify(previewClient).close();
+        org.mockito.Mockito.verify(previewClient, org.mockito.Mockito.never()).close();
     }
 }

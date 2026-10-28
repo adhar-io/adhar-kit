@@ -3,18 +3,22 @@ package com.adhar.kit.dapr.annotation;
 import java.lang.annotation.*;
 
 /**
- * Marks a class as a Dapr Actor.
+ * Marks a Dapr actor implementation (a class extending the SDK's {@code AbstractActor} and
+ * implementing its actor interface) for registration with the actor runtime at startup. The kit
+ * scans the application's packages for it, creates instances through Spring (so the actor can
+ * {@code @Autowired} beans) and serves the runtime's {@code /actors/...} callbacks.
  *
  * <p><b>Example:</b></p>
  * <pre>{@code
  * @DaprActor(type = "OrderActor")
- * public class OrderActor {
+ * public class OrderActorImpl extends AbstractActor implements OrderActor {
  *
- *     @DaprActorMethod
- *     public Order processOrder(OrderRequest request) {
- *         // Actor method
- *         return new Order(request);
+ *     public OrderActorImpl(ActorRuntimeContext<OrderActorImpl> context, ActorId id) {
+ *         super(context, id);
  *     }
+ *
+ *     @Override
+ *     public Mono<Order> process(OrderRequest request) { ... }
  * }
  * }</pre>
  *
@@ -27,26 +31,17 @@ import java.lang.annotation.*;
 public @interface DaprActor {
 
     /**
-     * Actor type name.
+     * Actor type name; empty for the class's simple name.
      */
-    String type();
+    String type() default "";
 
     /**
      * Actor idle timeout.
+     *
+     * @deprecated the Java SDK only exposes one idle timeout for all actor types; set
+     *     {@code adhar.dapr.actors.actor-idle-timeout}. A value other than the default is logged.
      */
+    @Deprecated(since = "0.2.0")
     String idleTimeout() default "60m";
-}
-
-/**
- * Marks a method as a Dapr Actor method.
- */
-@Target(ElementType.METHOD)
-@Retention(RetentionPolicy.RUNTIME)
-@Documented
-@interface DaprActorMethod {
-    /**
-     * Method name (defaults to method name).
-     */
-    String value() default "";
 }
 

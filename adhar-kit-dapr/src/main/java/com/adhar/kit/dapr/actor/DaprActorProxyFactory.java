@@ -36,6 +36,15 @@ public class DaprActorProxyFactory implements AutoCloseable {
         this(new ActorClient());
     }
 
+    /**
+     * Creates a factory on the kit's sidecar connection (endpoint and API token).
+     *
+     * @param connection the resolved connection
+     */
+    public DaprActorProxyFactory(com.adhar.kit.dapr.DaprConnectionDetails connection) {
+        this(new ActorClient(connection.sdkProperties()));
+    }
+
     public DaprActorProxyFactory(ActorClient actorClient) {
         this.actorClient = Objects.requireNonNull(actorClient, "actorClient must not be null");
     }

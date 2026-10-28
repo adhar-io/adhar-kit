@@ -97,6 +97,19 @@ public class InMemoryDaprBackend implements DaprBackend {
         return DaprMode.MEMORY;
     }
 
+    /**
+     * The one warning memory mode logs when a service starts: nothing it stores or publishes
+     * leaves the process, which is right for tests and local runs and wrong anywhere else.
+     *
+     * @param connection the resolved connection
+     */
+    public static void warnStartup(com.adhar.kit.dapr.DaprConnectionDetails connection) {
+        log.warn("No Dapr sidecar configured (ADHAR_DAPR_MODE={}, DAPR_HTTP_PORT/DAPR_HTTP_ENDPOINT unset): state, "
+                        + "cache, pub/sub, lock, configuration and secrets run in memory for app '{}'. Nothing is "
+                        + "shared between replicas or kept across restarts.",
+                connection.requestedMode().name().toLowerCase(java.util.Locale.ROOT), connection.appId());
+    }
+
     // ---------------------------------------------------------------- seeding
 
     /**
@@ -195,11 +208,14 @@ public class InMemoryDaprBackend implements DaprBackend {
         synchronized (values) {
             // Validate every ETag first: a transaction either applies whole or not at all.
             for (StateOperation op : operations) {
+                StoredValue current = liveLocked(values, op.getKey());
                 if (op.getEtag() != null) {
-                    StoredValue current = liveLocked(values, op.getKey());
                     if (current == null || !current.etag.equals(op.getEtag())) {
                         throw etagMismatch(store, op.getKey());
                     }
+                } else if (op.getConcurrency() == Concurrency.FIRST_WRITE && current != null
+                        && op.getOperation() != StateOperation.OperationType.DELETE) {
+                    throw etagMismatch(store, op.getKey());
                 }
             }
             for (StateOperation op : operations) {

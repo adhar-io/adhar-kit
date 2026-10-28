@@ -12,14 +12,20 @@ import com.adhar.kit.docs.asyncapi.AsyncApiDocument;
 import com.adhar.kit.docs.asyncapi.AsyncApiGenerator;
 import com.adhar.kit.docs.asyncapi.AsyncApiSpecExporter;
 import com.adhar.kit.docs.diff.OpenApiDiffService;
+import com.adhar.kit.commons.web.versioning.ApiVersionRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springdoc.core.models.GroupedOpenApi;
+import org.springdoc.core.properties.SwaggerUiConfigProperties;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.info.BuildProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 
 import java.util.List;
 
@@ -38,17 +44,37 @@ public class DocsAutoConfiguration {
 
     private final DocsProperties properties;
 
+    /**
+     * The base document springdoc builds {@code /v3/api-docs} on. Its title is
+     * {@code adhar.docs.title} when set, else the application's name; its version
+     * {@code adhar.docs.version} when set, else the build's version (build-info), so
+     * the document names the service it describes rather than a generic default.
+     * Define your own {@link OpenAPI} bean to replace it.
+     *
+     * @param environment     to tell explicit settings from defaults
+     * @param buildProperties the build information, when the build records it
+     * @return the base document
+     */
     @Bean
-    public OpenAPI customOpenAPI() {
+    @ConditionalOnMissingBean(OpenAPI.class)
+    public OpenAPI customOpenAPI(Environment environment, ObjectProvider<BuildProperties> buildProperties) {
         log.info("Initializing OpenAPI documentation");
 
         var apiInfo = properties.getApiInfo();
+        String title = environment.containsProperty("adhar.docs.title")
+                ? apiInfo.getTitle()
+                : environment.getProperty("spring.application.name", apiInfo.getTitle());
+        BuildProperties build = buildProperties.getIfAvailable();
+        String version = environment.containsProperty("adhar.docs.version") || build == null
+                || build.getVersion() == null
+                ? apiInfo.getVersion()
+                : build.getVersion();
 
         OpenAPI openAPI = new OpenAPI()
                 .info(new Info()
-                        .title(apiInfo.getTitle())
+                        .title(title)
                         .description(apiInfo.getDescription())
-                        .version(apiInfo.getVersion())
+                        .version(version)
                         .termsOfService(apiInfo.getTermsOfService())
                         .contact(new Contact()
                                 .name(apiInfo.getContact().getName())
@@ -154,6 +180,35 @@ public class DocsAutoConfiguration {
                 .toList();
         log.info("Building AsyncApiDocument with {} channel(s)", channels.size());
         return generator.generate(cfg.getTitle(), cfg.getVersion(), cfg.getDescription(), channels);
+    }
+
+    /**
+     * Shows the specs the service ships in Swagger UI, when adhar-kit-commons serves
+     * them ({@code GET /api/v<major>/openapi.yaml}).
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = {
+            "com.adhar.kit.commons.web.versioning.ApiVersionRegistry",
+            "org.springdoc.core.properties.SwaggerUiConfigProperties"})
+    @ConditionalOnProperty(prefix = "adhar.commons.api-versioning.endpoints", name = "enabled",
+            havingValue = "true", matchIfMissing = true)
+    static class ShippedSpecConfiguration {
+
+        /**
+         * Points Swagger UI at the shipped specs.
+         *
+         * @param registry   the versions and their specs
+         * @param swaggerUi  springdoc's Swagger UI settings
+         * @param properties the docs properties
+         * @return the configurer
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        public ShippedSpecSwaggerUi adharShippedSpecSwaggerUi(ObjectProvider<ApiVersionRegistry> registry,
+                                                            ObjectProvider<SwaggerUiConfigProperties> swaggerUi,
+                                                            DocsProperties properties) {
+            return new ShippedSpecSwaggerUi(registry, swaggerUi, properties);
+        }
     }
 }
 

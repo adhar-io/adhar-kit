@@ -196,7 +196,8 @@ public class SidecarDaprBackend implements DaprBackend {
         for (StateOperation op : operations) {
             boolean upsert = op.getOperation() != StateOperation.OperationType.DELETE;
             State<Object> state = new State<>(op.getKey(), upsert ? op.getValue() : null, op.getEtag(),
-                    op.getMetadata() == null ? Map.of() : op.getMetadata(), null);
+                    op.getMetadata() == null ? Map.of() : op.getMetadata(),
+                    StateOptionsSupport.toSdk(null, op.getConcurrency()));
             sdkOperations.add(new TransactionalStateOperation<>(
                     upsert ? TransactionalStateOperation.OperationType.UPSERT
                             : TransactionalStateOperation.OperationType.DELETE,

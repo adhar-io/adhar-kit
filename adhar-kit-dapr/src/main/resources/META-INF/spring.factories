@@ -1,0 +1,5 @@
+# Dapr secrets as configuration: spring.config.import=optional:dapr-secrets:<store>[/<name>,...]
+org.springframework.boot.context.config.ConfigDataLocationResolver=\
+com.adhar.kit.dapr.secrets.DaprSecretsConfigDataLocationResolver
+org.springframework.boot.context.config.ConfigDataLoader=\
+com.adhar.kit.dapr.secrets.DaprSecretsConfigDataLoader

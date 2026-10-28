@@ -42,6 +42,10 @@ final class TestJoinPoint implements ProceedingJoinPoint {
         return method;
     }
 
+    boolean proceeded() {
+        return proceedCount.get() > 0;
+    }
+
     @Override
     public Object proceed() throws Throwable {
         proceedCount.incrementAndGet();

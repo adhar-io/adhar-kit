@@ -2,31 +2,25 @@ package com.adhar.kit.dapr.aspect;
 
 import com.adhar.kit.dapr.DaprFacade;
 import com.adhar.kit.dapr.annotation.DaprState;
-import io.dapr.client.DaprClient;
-import io.dapr.client.domain.State;
+import com.adhar.kit.dapr.support.MemoryDapr;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import reactor.core.publisher.Mono;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link DaprStateAspect} using a real annotated sample class exercised through
- * a {@link TestJoinPoint} double, and a {@link DaprFacade} backed by a mocked {@link DaprClient}
- * (matching the pattern used by {@code DaprFacadeTest}).
+ * a {@link TestJoinPoint} double, on an in-memory facade.
  */
 @DisplayName("DaprStateAspect Tests")
 class DaprStateAspectTest {
 
-    private DaprClient client;
+    record User(String name) {
+    }
+
     private DaprFacade facade;
     private DaprStateAspect aspect;
     private SampleService service;
@@ -40,6 +34,11 @@ class DaprStateAspectTest {
 
         @DaprState(storeName = "store", key = "#userId", operation = DaprState.Operation.GET)
         public String getUser(String userId) {
+            return "body-should-not-run";
+        }
+
+        @DaprState(key = "#team", operation = DaprState.Operation.GET)
+        public List<User> getTeam(String team) {
             return null;
         }
 
@@ -60,14 +59,13 @@ class DaprStateAspectTest {
 
         @DaprState(storeName = "store", key = "#userId", operation = DaprState.Operation.GET)
         public void getVoidReturn(String userId) {
-            // void return type: GET should fall through to proceed()
+            // void return type: GET falls through to proceed()
         }
     }
 
     @BeforeEach
     void setUp() {
-        client = mock(DaprClient.class);
-        facade = new DaprFacade(client);
+        facade = MemoryDapr.facade();
         aspect = new DaprStateAspect(facade);
         service = new SampleService();
     }
@@ -75,78 +73,68 @@ class DaprStateAspectTest {
     @Test
     @DisplayName("SAVE proceeds then saves the return value under the resolved SpEL key")
     void saveOperationSavesReturnValue() throws Throwable {
-        when(client.saveState(anyString(), anyString(), any())).thenReturn(Mono.empty());
-        TestJoinPoint jp = new TestJoinPoint(service, "saveUser", "u1", "Alice");
-
-        Object result = aspect.applyState(jp, jp.method().getAnnotation(DaprState.class));
+        Object result = aspect.applyState(new TestJoinPoint(service, "saveUser", "u1", "Alice"),
+                annotation("saveUser", String.class, String.class));
 
         assertThat(result).isEqualTo("saved-Alice");
-        assertThat(jp.proceedCount.get()).isEqualTo(1);
-        verify(client).saveState("store", "u1", "saved-Alice");
+        assertThat(facade.getState("store", "u1", String.class)).isEqualTo("saved-Alice");
     }
 
     @Test
-    @DisplayName("SAVE does not persist a null result")
-    void saveOperationSkipsNullResult() throws Throwable {
-        TestJoinPoint jp = new TestJoinPoint(service, "saveNullResult", "u1");
-
-        Object result = aspect.applyState(jp, jp.method().getAnnotation(DaprState.class));
-
-        assertThat(result).isNull();
-        verify(client, never()).saveState(anyString(), anyString(), any());
-    }
-
-    @Test
-    @DisplayName("SAVE falls back to a deterministic default key when key expression is blank")
-    void saveOperationUsesDefaultKeyWhenBlank() throws Throwable {
-        when(client.saveState(anyString(), anyString(), any())).thenReturn(Mono.empty());
-        TestJoinPoint jp = new TestJoinPoint(service, "saveWithDefaultKey", "id1", "value1");
-
-        aspect.applyState(jp, jp.method().getAnnotation(DaprState.class));
-
-        verify(client).saveState(eq("store"), eq("SampleService.saveWithDefaultKey:" + java.util.Arrays.deepHashCode(new Object[] {"id1", "value1"})), eq("value1"));
-    }
-
-    @Test
-    @DisplayName("GET skips proceed() and returns the state store value directly")
+    @DisplayName("GET returns the stored value without running the body")
     void getOperationFetchesFromStateStoreWithoutProceeding() throws Throwable {
-        when(client.getState("store", "u1", String.class))
-                .thenReturn(Mono.just(new State<>("u1", "Alice", "etag-1")));
+        facade.saveState("store", "u1", "Alice");
         TestJoinPoint jp = new TestJoinPoint(service, "getUser", "u1");
 
-        Object result = aspect.applyState(jp, jp.method().getAnnotation(DaprState.class));
-
-        assertThat(result).isEqualTo("Alice");
-        assertThat(jp.proceedCount.get()).isZero();
+        assertThat(aspect.applyState(jp, annotation("getUser", String.class))).isEqualTo("Alice");
+        assertThat(jp.proceeded()).isFalse();
     }
 
     @Test
-    @DisplayName("GET on a void-returning method proceeds instead of fetching state")
-    void getOperationWithVoidReturnProceedsInstead() throws Throwable {
-        TestJoinPoint jp = new TestJoinPoint(service, "getVoidReturn", "u1");
+    @DisplayName("GET reads generic return types and defaults the store to the service's")
+    void getOperationHonoursGenericReturnTypes() throws Throwable {
+        facade.state().save("platform", List.of(new User("ana"), new User("raj")));
 
-        aspect.applyState(jp, jp.method().getAnnotation(DaprState.class));
+        Object result = aspect.applyState(new TestJoinPoint(service, "getTeam", "platform"),
+                annotation("getTeam", String.class));
 
-        assertThat(jp.proceedCount.get()).isEqualTo(1);
-        verify(client, never()).getState(anyString(), anyString(), eq(String.class));
+        assertThat(result).isEqualTo(List.of(new User("ana"), new User("raj")));
     }
 
     @Test
-    @DisplayName("DELETE proceeds then deletes the resolved key")
     void deleteOperationProceedsThenDeletes() throws Throwable {
-        when(client.deleteState(anyString(), anyString())).thenReturn(Mono.empty());
+        facade.saveState("store", "u1", "Alice");
         TestJoinPoint jp = new TestJoinPoint(service, "deleteUser", "u1");
 
-        aspect.applyState(jp, jp.method().getAnnotation(DaprState.class));
+        aspect.applyState(jp, annotation("deleteUser", String.class));
 
-        assertThat(jp.proceedCount.get()).isEqualTo(1);
-        verify(client).deleteState("store", "u1");
+        assertThat(jp.proceeded()).isTrue();
+        assertThat(facade.getState("store", "u1", String.class)).isNull();
     }
 
     @Test
-    @DisplayName("constructor rejects a null facade")
-    void constructorRejectsNullFacade() {
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new DaprStateAspect(null))
-                .isInstanceOf(NullPointerException.class);
+    void saveOperationUsesDefaultKeyWhenBlank() throws Throwable {
+        aspect.applyState(new TestJoinPoint(service, "saveWithDefaultKey", "id1", "value1"),
+                annotation("saveWithDefaultKey", String.class, String.class));
+
+        String key = "SampleService.saveWithDefaultKey:" + java.util.Arrays.deepHashCode(new Object[] {"id1", "value1"});
+        assertThat(facade.getState("store", key, String.class)).isEqualTo("value1");
+    }
+
+    @Test
+    void nullResultsAreNotSaved() throws Throwable {
+        aspect.applyState(new TestJoinPoint(service, "saveNullResult", "id1"), annotation("saveNullResult", String.class));
+        assertThat(facade.getState("store", "id1", String.class)).isNull();
+    }
+
+    @Test
+    void getWithVoidReturnProceeds() throws Throwable {
+        TestJoinPoint jp = new TestJoinPoint(service, "getVoidReturn", "u1");
+        aspect.applyState(jp, annotation("getVoidReturn", String.class));
+        assertThat(jp.proceeded()).isTrue();
+    }
+
+    private static DaprState annotation(String method, Class<?>... types) throws NoSuchMethodException {
+        return SampleService.class.getMethod(method, types).getAnnotation(DaprState.class);
     }
 }

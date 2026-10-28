@@ -6,11 +6,19 @@ import com.adhar.kit.commons.idempotency.IdempotencyStore;
 import com.adhar.kit.commons.idempotency.InMemoryIdempotencyStore;
 import com.adhar.kit.commons.web.ApiVersionInterceptor;
 import com.adhar.kit.commons.web.CorrelationIdFilter;
+import com.adhar.kit.commons.web.ProblemDetailsResponseAdvice;
 import com.adhar.kit.commons.web.SpringGlobalExceptionHandler;
 import com.adhar.kit.commons.web.TenantContextFilter;
+import com.adhar.kit.commons.web.versioning.AdharApiVersionDeprecationHandler;
+import com.adhar.kit.commons.web.versioning.ApiVersionEndpoints;
+import com.adhar.kit.commons.web.versioning.ApiVersionHeaderFilter;
+import com.adhar.kit.commons.web.versioning.ApiVersionMappingScanner;
+import com.adhar.kit.commons.web.versioning.ApiVersionRegistry;
+import com.adhar.kit.commons.web.versioning.ApiVersioningWebMvcConfigurer;
 import jakarta.servlet.Filter;
 import jakarta.servlet.http.HttpServletRequest;
 import org.aspectj.lang.ProceedingJoinPoint;
+import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -21,14 +29,22 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
+import org.springframework.core.env.Environment;
+import org.springframework.core.io.ResourceLoader;
+import org.springframework.core.io.support.ResourcePatternUtils;
+import org.springframework.web.accept.ApiVersionDeprecationHandler;
+import org.springframework.web.accept.ApiVersionParser;
+import org.springframework.web.accept.SemanticApiVersionParser;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import org.springframework.web.servlet.function.RouterFunction;
+import org.springframework.web.servlet.function.ServerResponse;
 
 /**
  * Auto-configuration for the adhar-kit-commons runtime features:
- * global exception handling, the {@code @Idempotent} aspect, tenant / correlation
- * context filters and the {@code @ApiVersion} interceptor.
+ * global exception handling (with RFC 9457 problem details for the versioned API),
+ * the {@code @Idempotent} aspect, tenant / correlation context filters and API
+ * versioning.
  *
  * <p>Every bean is conditional on its dependencies being on the classpath, overridable
  * via {@code @ConditionalOnMissingBean} and toggleable under {@code adhar.commons.*}
@@ -68,11 +84,12 @@ public class AdharCommonsAutoConfiguration {
     }
 
     /**
-     * Registers the Spring MVC global exception handler when Spring Web and the
+     * Registers the Spring MVC global exception handler when Spring MVC and the
      * Servlet API are present.
      */
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnClass({RestControllerAdvice.class, HttpServletRequest.class})
+    @ConditionalOnClass(value = {RestControllerAdvice.class, HttpServletRequest.class},
+        name = "org.springframework.web.servlet.DispatcherServlet")
     @ConditionalOnProperty(prefix = "adhar.commons.exception-handler", name = "enabled",
         havingValue = "true", matchIfMissing = true)
     static class ExceptionHandlerConfiguration {
@@ -89,6 +106,17 @@ public class AdharCommonsAutoConfiguration {
             SpringGlobalExceptionHandler handler = new SpringGlobalExceptionHandler();
             errorCatalog.ifAvailable(handler::setErrorCatalog);
             return handler;
+        }
+
+        /**
+         * Writes error bodies as RFC 9457 problem details where
+         * {@code adhar.commons.exception-handler.problem-details} asks for them
+         * ({@code /api/v<major>} by default).
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        public ProblemDetailsResponseAdvice problemDetailsResponseAdvice(AdharCommonsProperties properties) {
+            return new ProblemDetailsResponseAdvice(properties.getExceptionHandler().getProblemDetails());
         }
     }
 
@@ -156,36 +184,92 @@ public class AdharCommonsAutoConfiguration {
     }
 
     /**
-     * Registers the {@code @ApiVersion} interceptor with Spring MVC.
+     * Configures API versioning for Spring MVC: the major version is the path segment of
+     * {@code /api/v<major>}, resolved by Spring Framework's built-in API versioning;
+     * every response below it reports the full version ({@code API-Version}); a
+     * deprecated version is announced with the RFC 9745/8594 headers; and
+     * {@code GET /api} plus {@code GET /api/v<major>/openapi.yaml} expose the versions
+     * and the specs shipped in the artifact.
      */
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnWebApplication
-    @ConditionalOnClass(WebMvcConfigurer.class)
+    @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+    @ConditionalOnClass({WebMvcConfigurer.class, ApiVersionDeprecationHandler.class})
     @ConditionalOnProperty(prefix = "adhar.commons.api-versioning", name = "enabled",
         havingValue = "true", matchIfMissing = true)
-    static class ApiVersioningConfiguration implements WebMvcConfigurer {
-
-        private final ObjectProvider<ApiVersionInterceptor> interceptorProvider;
-
-        ApiVersioningConfiguration(ObjectProvider<ApiVersionInterceptor> interceptorProvider) {
-            this.interceptorProvider = interceptorProvider;
-        }
+    static class ApiVersioningConfiguration {
 
         /**
-         * Creates the interceptor; define your own bean to customize it.
+         * The versions the service serves, from the shipped specs and
+         * {@code adhar.commons.api-versioning.versions.*}.
          */
         @Bean
         @ConditionalOnMissingBean
-        public ApiVersionInterceptor apiVersionInterceptor(AdharCommonsProperties properties) {
-            return new ApiVersionInterceptor(properties.getApiVersioning().isValidateRequestVersion());
+        public ApiVersionRegistry adharApiVersionRegistry(AdharCommonsProperties properties,
+                                                          ResourceLoader resourceLoader) {
+            return ApiVersionRegistry.load(properties.getApiVersioning(),
+                ResourcePatternUtils.getResourcePatternResolver(resourceLoader));
         }
 
-        @Override
-        public void addInterceptors(InterceptorRegistry registry) {
-            ApiVersionInterceptor interceptor = interceptorProvider.getIfAvailable();
-            if (interceptor != null) {
-                registry.addInterceptor(interceptor);
-            }
+        /**
+         * Announces deprecated versions; Spring Boot hands it to the MVC version
+         * strategy. Define your own {@link ApiVersionDeprecationHandler} to replace it.
+         */
+        @Bean
+        @ConditionalOnMissingBean(ApiVersionDeprecationHandler.class)
+        public AdharApiVersionDeprecationHandler adharApiVersionDeprecationHandler(
+                ApiVersionRegistry registry, ObjectProvider<ApiVersionParser<?>> parser) {
+            return new AdharApiVersionDeprecationHandler(registry,
+                parser.getIfAvailable(SemanticApiVersionParser::new));
+        }
+
+        /**
+         * Resolves the version from the path and registers the legacy interceptor.
+         */
+        @Bean
+        public ApiVersioningWebMvcConfigurer adharApiVersioningWebMvcConfigurer(ApiVersionRegistry registry,
+                Environment environment, ObjectProvider<ApiVersionInterceptor> legacyInterceptor) {
+            return new ApiVersioningWebMvcConfigurer(registry, environment, legacyInterceptor);
+        }
+
+        /**
+         * Sets {@code API-Version} and refuses contradicting {@code API-Version} request
+         * headers under {@code /api/v<major>}.
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        public ApiVersionHeaderFilter apiVersionHeaderFilter(ApiVersionRegistry registry,
+                                                             AdharCommonsProperties properties) {
+            return new ApiVersionHeaderFilter(registry, properties.getApiVersioning().isRejectMismatchedMajor());
+        }
+
+        /**
+         * Adds the majors the application maps without a spec or configuration.
+         */
+        @Bean
+        public ApiVersionMappingScanner adharApiVersionMappingScanner(ApiVersionRegistry registry,
+                                                                      ListableBeanFactory beanFactory) {
+            return new ApiVersionMappingScanner(registry, beanFactory);
+        }
+
+        /**
+         * {@code GET /api} and {@code GET /api/v<major>/openapi.yaml}.
+         */
+        @Bean
+        @ConditionalOnProperty(prefix = "adhar.commons.api-versioning.endpoints", name = "enabled",
+            havingValue = "true", matchIfMissing = true)
+        public RouterFunction<ServerResponse> adharApiVersionRoutes(ApiVersionRegistry registry) {
+            return ApiVersionEndpoints.routes(registry);
+        }
+
+        /**
+         * The legacy {@code @ApiVersion} interceptor, for paths outside
+         * {@code /api/v<major>}; define your own bean to customize it.
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        @SuppressWarnings("deprecation")
+        public ApiVersionInterceptor apiVersionInterceptor(AdharCommonsProperties properties) {
+            return new ApiVersionInterceptor(properties.getApiVersioning().isValidateRequestVersion());
         }
     }
 }

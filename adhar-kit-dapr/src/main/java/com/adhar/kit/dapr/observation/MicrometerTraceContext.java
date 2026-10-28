@@ -6,6 +6,7 @@ import io.micrometer.tracing.propagation.Propagator;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * Trace context of the current Micrometer span, rendered with the application's configured
@@ -17,22 +18,37 @@ import java.util.Map;
  */
 public final class MicrometerTraceContext implements DaprTraceContext {
 
-    private final Tracer tracer;
-    private final Propagator propagator;
+    private final Supplier<Tracer> tracer;
+    private final Supplier<Propagator> propagator;
 
     public MicrometerTraceContext(Tracer tracer, Propagator propagator) {
+        this(() -> tracer, () -> propagator);
+    }
+
+    /**
+     * Resolves the tracer and propagator on each call, so they may appear after this object.
+     *
+     * @param tracer     supplies the tracer, or {@code null} when there is none
+     * @param propagator supplies the propagator, or {@code null} when there is none
+     */
+    public MicrometerTraceContext(Supplier<Tracer> tracer, Supplier<Propagator> propagator) {
         this.tracer = tracer;
         this.propagator = propagator;
     }
 
     @Override
     public Map<String, String> current() {
-        Span span = tracer.currentSpan();
+        Tracer currentTracer = tracer.get();
+        Propagator currentPropagator = propagator.get();
+        if (currentTracer == null || currentPropagator == null) {
+            return Map.of();
+        }
+        Span span = currentTracer.currentSpan();
         if (span == null) {
             return Map.of();
         }
         Map<String, String> carrier = new LinkedHashMap<>();
-        propagator.inject(span.context(), carrier, Map::put);
+        currentPropagator.inject(span.context(), carrier, Map::put);
         Map<String, String> headers = new LinkedHashMap<>();
         carrier.forEach((key, value) -> {
             if (TRACEPARENT.equalsIgnoreCase(key)) {

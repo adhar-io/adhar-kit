@@ -5,6 +5,11 @@ import java.lang.annotation.*;
 /**
  * Marks a method to publish events to Dapr pub/sub.
  *
+ * <p>The event is published after the method returns, outside any transaction it ran in. When the
+ * event must not be lost if the process dies right after the commit, write it in the same state
+ * transaction instead (Dapr's transactional outbox, see
+ * {@code DaprFacade#executeStateTransaction}).</p>
+ *
  * <p><b>Example:</b></p>
  * <pre>{@code
  * @DaprPublish(pubsubName = "pubsub", topic = "order-created")
@@ -22,9 +27,9 @@ import java.lang.annotation.*;
 public @interface DaprPublish {
 
     /**
-     * Pub/sub component name.
+     * Pub/sub component name; empty for the service default ({@code adhar.dapr.pubsub}).
      */
-    String pubsubName() default "pubsub";
+    String pubsubName() default "";
 
     /**
      * Topic name.

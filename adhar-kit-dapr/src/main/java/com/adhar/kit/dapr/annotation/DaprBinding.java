@@ -5,6 +5,8 @@ import java.lang.annotation.*;
 /**
  * Marks a method to invoke an output binding.
  *
+ * <p>Enforced by {@code DaprBindingAspect}: the payload is sent after the method returns.</p>
+ *
  * <p><b>Example:</b></p>
  * <pre>{@code
  * @DaprBinding(bindingName = "email-binding", operation = "create")

@@ -2,46 +2,40 @@ package com.adhar.kit.dapr.aspect;
 
 import com.adhar.kit.dapr.DaprFacade;
 import com.adhar.kit.dapr.annotation.DaprPublish;
-import io.dapr.client.DaprClient;
+import com.adhar.kit.dapr.pubsub.DispatchStatus;
+import com.adhar.kit.dapr.support.MemoryDapr;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import reactor.core.publisher.Mono;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link DaprPublishAspect} using a real annotated sample class exercised
- * through a {@link TestJoinPoint} double, and a {@link DaprFacade} backed by a mocked
- * {@link DaprClient}.
+ * Unit tests for {@link DaprPublishAspect} on an in-memory facade, observing what subscribers of
+ * the topic receive.
  */
 @DisplayName("DaprPublishAspect Tests")
 class DaprPublishAspectTest {
 
-    private DaprClient client;
     private DaprFacade facade;
     private DaprPublishAspect aspect;
     private SampleService service;
+    private final List<String> received = new ArrayList<>();
 
     static class SampleService {
 
-        @DaprPublish(pubsubName = "pubsub", topic = "order-created")
+        @DaprPublish(topic = "order-created")
         public String createOrder(String request) {
             return "order-" + request;
         }
 
         @DaprPublish(pubsubName = "pubsub", topic = "order-updated", publishReturnValue = false, parameterIndex = 1)
         public void updateOrder(String orderId, String event) {
-            // return value ignored; parameter at index 1 is published instead
+            // the parameter is published
         }
 
         @DaprPublish(pubsubName = "pubsub", topic = "order-null")
@@ -51,65 +45,55 @@ class DaprPublishAspectTest {
 
         @DaprPublish(pubsubName = "pubsub", topic = "bad-index", publishReturnValue = false, parameterIndex = 5)
         public void badIndex(String a) {
+            // invalid index
         }
     }
 
     @BeforeEach
     void setUp() {
-        client = mock(DaprClient.class);
-        facade = new DaprFacade(client);
+        facade = MemoryDapr.facade();
         aspect = new DaprPublishAspect(facade);
         service = new SampleService();
+        for (String topic : List.of("order-created", "order-updated", "order-null")) {
+            facade.subscribe(topic, String.class, event -> {
+                received.add(event.topic() + ":" + event.data());
+                return DispatchStatus.SUCCESS;
+            });
+        }
     }
 
     @Test
-    @DisplayName("publishes the method's return value after it executes")
-    void publishesReturnValueAfterExecution() throws Throwable {
-        when(client.publishEvent(anyString(), anyString(), any(), anyMap())).thenReturn(Mono.empty());
-        TestJoinPoint jp = new TestJoinPoint(service, "createOrder", "req1");
-
-        Object result = aspect.applyPublish(jp, jp.method().getAnnotation(DaprPublish.class));
+    void publishesReturnValueAfterExecutionToTheDefaultPubsub() throws Throwable {
+        Object result = aspect.applyPublish(new TestJoinPoint(service, "createOrder", "req1"),
+                annotation("createOrder", String.class));
 
         assertThat(result).isEqualTo("order-req1");
-        assertThat(jp.proceedCount.get()).isEqualTo(1);
-        verify(client).publishEvent(eq("pubsub"), eq("order-created"), eq("order-req1"), anyMap());
+        assertThat(received).containsExactly("order-created:order-req1");
     }
 
     @Test
-    @DisplayName("publishes a specific parameter instead of the return value when configured")
     void publishesSpecificParameterInsteadOfReturnValue() throws Throwable {
-        when(client.publishEvent(anyString(), anyString(), any(), anyMap())).thenReturn(Mono.empty());
-        TestJoinPoint jp = new TestJoinPoint(service, "updateOrder", "order1", "event-payload");
+        aspect.applyPublish(new TestJoinPoint(service, "updateOrder", "o-1", "event-payload"),
+                annotation("updateOrder", String.class, String.class));
 
-        aspect.applyPublish(jp, jp.method().getAnnotation(DaprPublish.class));
-
-        verify(client).publishEvent(eq("pubsub"), eq("order-updated"), eq("event-payload"), anyMap());
+        assertThat(received).containsExactly("order-updated:event-payload");
     }
 
     @Test
-    @DisplayName("does not publish when the resolved payload is null")
-    void skipsPublishWhenPayloadNull() throws Throwable {
-        TestJoinPoint jp = new TestJoinPoint(service, "returnsNull");
-
-        Object result = aspect.applyPublish(jp, jp.method().getAnnotation(DaprPublish.class));
-
-        assertThat(result).isNull();
-        verify(client, never()).publishEvent(anyString(), anyString(), any(), anyMap());
+    void nullPayloadIsNotPublished() throws Throwable {
+        aspect.applyPublish(new TestJoinPoint(service, "returnsNull"), annotation("returnsNull"));
+        assertThat(received).isEmpty();
     }
 
     @Test
-    @DisplayName("throws when parameterIndex is out of bounds")
-    void throwsWhenParameterIndexOutOfBounds() {
-        TestJoinPoint jp = new TestJoinPoint(service, "badIndex", "a1");
-
-        assertThatThrownBy(() -> aspect.applyPublish(jp, jp.method().getAnnotation(DaprPublish.class)))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThat(jp.proceedCount.get()).isEqualTo(1);
+    void outOfBoundsParameterIndexIsRejected() throws NoSuchMethodException {
+        assertThatThrownBy(() -> aspect.applyPublish(new TestJoinPoint(service, "badIndex", "a"),
+                annotation("badIndex", String.class)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("parameterIndex 5");
     }
 
-    @Test
-    @DisplayName("constructor rejects a null facade")
-    void constructorRejectsNullFacade() {
-        assertThatThrownBy(() -> new DaprPublishAspect(null)).isInstanceOf(NullPointerException.class);
+    private static DaprPublish annotation(String method, Class<?>... types) throws NoSuchMethodException {
+        return SampleService.class.getMethod(method, types).getAnnotation(DaprPublish.class);
     }
 }

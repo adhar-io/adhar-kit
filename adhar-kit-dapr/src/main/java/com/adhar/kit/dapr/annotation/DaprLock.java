@@ -5,6 +5,9 @@ import java.lang.annotation.*;
 /**
  * Marks a method to acquire a distributed lock before execution.
  *
+ * <p>Enforced by {@code DaprLockAspect}. The lock expires after {@code expiryInSeconds} even if
+ * the holder dies, so choose an expiry longer than the method can run.</p>
+ *
  * <p><b>Example:</b></p>
  * <pre>{@code
  * @DaprLock(storeName = "lockstore", resourceId = "#orderId", lockOwner = "order-service")
@@ -23,9 +26,9 @@ import java.lang.annotation.*;
 public @interface DaprLock {
 
     /**
-     * Lock store name.
+     * Lock store name; empty for the service default ({@code adhar.dapr.lock-store}).
      */
-    String storeName() default "lockstore";
+    String storeName() default "";
 
     /**
      * Resource ID to lock (supports SpEL expressions).
@@ -33,9 +36,10 @@ public @interface DaprLock {
     String resourceId();
 
     /**
-     * Lock owner identifier.
+     * Prefix of the lock owner; the kit appends a per-invocation id so replicas never release each
+     * other's locks. Empty for the app id.
      */
-    String lockOwner();
+    String lockOwner() default "";
 
     /**
      * Lock expiry in seconds.
@@ -43,7 +47,8 @@ public @interface DaprLock {
     int expiryInSeconds() default 30;
 
     /**
-     * Fail if lock cannot be acquired.
+     * Throw {@code DaprLockNotAcquiredException} when the lock is held elsewhere; otherwise the
+     * method is skipped and returns {@code null} (or the primitive default).
      */
     boolean failOnLockFailure() default true;
 }

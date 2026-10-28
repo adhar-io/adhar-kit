@@ -1,22 +1,79 @@
 package com.adhar.kit.dapr;
 
-import com.adhar.kit.dapr.api.ConfigurationCallback;
 import com.adhar.kit.dapr.api.StateOperation;
 import com.adhar.kit.dapr.api.StateWithETag;
+import com.adhar.kit.dapr.backend.SidecarDaprBackend;
+import com.adhar.kit.dapr.configuration.ConfigItem;
+import com.adhar.kit.dapr.jobs.JobDetails;
+import com.adhar.kit.dapr.jobs.JobOptions;
+import com.adhar.kit.dapr.lock.UnlockStatus;
+import com.adhar.kit.dapr.observation.DaprObservations;
+import com.adhar.kit.dapr.observation.DaprTraceContext;
+import com.adhar.kit.dapr.pubsub.BulkPublishResult;
+import com.adhar.kit.dapr.pubsub.PublishOptions;
+import com.adhar.kit.dapr.resilience.DaprResilienceRegistry;
+import com.adhar.kit.dapr.serialization.DaprJsonSerializer;
+import com.adhar.kit.dapr.state.Concurrency;
+import com.adhar.kit.dapr.state.Consistency;
+import com.adhar.kit.dapr.state.GetOptions;
+import com.adhar.kit.dapr.state.SaveOptions;
+import com.adhar.kit.dapr.state.StateEntry;
+import com.adhar.kit.dapr.state.StateItem;
+import com.adhar.kit.dapr.state.StateQueryResult;
 import io.dapr.client.DaprClient;
+import io.dapr.client.DaprPreviewClient;
+import io.dapr.client.domain.BulkPublishEntry;
+import io.dapr.client.domain.BulkPublishRequest;
+import io.dapr.client.domain.BulkPublishResponse;
+import io.dapr.client.domain.BulkPublishResponseFailedEntry;
+import io.dapr.client.domain.ComponentMetadata;
 import io.dapr.client.domain.ConfigurationItem;
-import io.dapr.client.domain.HttpExtension;
+import io.dapr.client.domain.DaprMetadata;
+import io.dapr.client.domain.DecryptRequestAlpha1;
+import io.dapr.client.domain.DeleteJobRequest;
+import io.dapr.client.domain.DeleteStateRequest;
+import io.dapr.client.domain.EncryptRequestAlpha1;
+import io.dapr.client.domain.ExecuteStateTransactionRequest;
+import io.dapr.client.domain.GetBulkSecretRequest;
+import io.dapr.client.domain.GetBulkStateRequest;
+import io.dapr.client.domain.GetConfigurationRequest;
+import io.dapr.client.domain.GetJobRequest;
+import io.dapr.client.domain.GetJobResponse;
+import io.dapr.client.domain.GetSecretRequest;
+import io.dapr.client.domain.GetStateRequest;
 import io.dapr.client.domain.InvokeBindingRequest;
+import io.dapr.client.domain.JobSchedule;
+import io.dapr.client.domain.LockRequest;
+import io.dapr.client.domain.PublishEventRequest;
+import io.dapr.client.domain.QueryStateItem;
+import io.dapr.client.domain.QueryStateResponse;
+import io.dapr.client.domain.ScheduleJobRequest;
 import io.dapr.client.domain.State;
+import io.dapr.client.domain.StateOptions;
+import io.dapr.client.domain.SubscribeConfigurationRequest;
 import io.dapr.client.domain.SubscribeConfigurationResponse;
+import io.dapr.client.domain.SubscriptionMetadata;
 import io.dapr.client.domain.TransactionalStateOperation;
+import io.dapr.client.domain.UnlockRequest;
+import io.dapr.client.domain.UnlockResponseStatus;
+import io.dapr.client.domain.UnsubscribeConfigurationResponse;
+import io.dapr.exceptions.DaprException;
 import io.dapr.utils.TypeRef;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationHandler;
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -24,615 +81,481 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link DaprFacade} using a mocked {@link DaprClient}.
+ * The facade's gRPC-backed building blocks against a mocked SDK client: what reaches the SDK,
+ * how results come back, how failures become {@link DaprError}s, trace propagation and
+ * observations.
  */
 class DaprFacadeTest {
 
+    record Order(String id, int quantity, Instant placedAt) {
+    }
+
     private DaprClient client;
+    private DaprPreviewClient preview;
     private DaprFacade facade;
+    private final List<Observation.Context> observed = new ArrayList<>();
+    private final AtomicReference<Map<String, String>> trace = new AtomicReference<>(Map.of());
 
     @BeforeEach
     void setUp() {
         client = mock(DaprClient.class);
-        facade = new DaprFacade(client);
+        preview = mock(DaprPreviewClient.class);
+        ObservationRegistry registry = ObservationRegistry.create();
+        registry.observationConfig().observationHandler(new ObservationHandler<>() {
+            @Override
+            public boolean supportsContext(Observation.Context context) {
+                return true;
+            }
+
+            @Override
+            public void onStop(Observation.Context context) {
+                observed.add(context);
+            }
+        });
+        DaprJsonSerializer serializer = new DaprJsonSerializer();
+        DaprTraceContext traceContext = () -> trace.get();
+        facade = new DaprFacade(new SidecarDaprBackend(client, preview, null, serializer, traceContext, true),
+                DaprConnectionDetails.resolve(Map.of("adhar.dapr.mode", "sidecar", "adhar.dapr.app-id", "orders")::get),
+                DaprComponents.defaults(), serializer, new DaprObservations(registry), new DaprResilienceRegistry());
     }
 
-    // ==================== State Management ====================
+    // ------------------------------------------------------------------ state
 
     @Test
-    void saveStateDelegatesToClient() {
-        when(client.saveState(anyString(), anyString(), any())).thenReturn(Mono.empty());
+    void saveStateSendsAnUnconditionalWrite() {
+        when(client.saveState(eq("store"), eq("key"), isNull(), eq("value"), anyMap(), isNull())).thenReturn(Mono.empty());
 
         facade.saveState("store", "key", "value");
 
-        verify(client).saveState("store", "key", "value");
+        verify(client).saveState("store", "key", null, "value", Map.of(), null);
     }
 
     @Test
-    void saveStateWrapsExceptionInDaprException() {
-        when(client.saveState(anyString(), anyString(), any()))
-            .thenThrow(new RuntimeException("boom"));
+    void saveOptionsBecomeEtagTtlMetadataAndStateOptions() {
+        ArgumentCaptor<StateOptions> options = ArgumentCaptor.forClass(StateOptions.class);
+        when(client.saveState(any(), any(), any(), any(), anyMap(), any())).thenReturn(Mono.empty());
 
-        assertThatThrownBy(() -> facade.saveState("store", "key", "value"))
-            .isInstanceOf(DaprFacade.DaprException.class)
-            .hasMessage("Failed to save state");
+        facade.saveState("store", "key", "value",
+                SaveOptions.etag("7").withTtl(Duration.ofMillis(1500)).withConsistency(Consistency.STRONG));
+
+        verify(client).saveState(eq("store"), eq("key"), eq("7"), eq("value"), eq(Map.of("ttlInSeconds", "2")),
+                options.capture());
+        assertThat(options.getValue().getConcurrency()).isEqualTo(StateOptions.Concurrency.FIRST_WRITE);
+        assertThat(options.getValue().getConsistency()).isEqualTo(StateOptions.Consistency.STRONG);
     }
 
     @Test
-    void saveStateWithETagReturnsTrueOnSuccess() {
-        when(client.saveState(anyString(), anyString(), any(), any(), any())).thenReturn(Mono.empty());
+    void saveStateWithEtagReportsConflictsAsFalse() {
+        when(client.saveState(any(), any(), any(), any(), anyMap(), any()))
+                .thenReturn(Mono.error(sdkError("ABORTED", "possible etag mismatch. error from state store")))
+                .thenReturn(Mono.empty())
+                .thenReturn(Mono.error(sdkError("INTERNAL", "store down")));
 
-        boolean saved = facade.saveStateWithETag("store", "key", "value", "etag");
-
-        assertThat(saved).isTrue();
+        assertThat(facade.saveStateWithETag("store", "key", "v", "1")).isFalse();
+        assertThat(facade.saveStateWithETag("store", "key", "v", "1")).isTrue();
+        assertThatThrownBy(() -> facade.saveStateWithETag("store", "key", "v", "1"))
+                .isInstanceOf(DaprError.class)
+                .hasMessageStartingWith("Failed to save state: store down");
     }
 
     @Test
-    void saveStateWithETagReturnsFalseOnEtagMismatch() {
-        when(client.saveState(anyString(), anyString(), any(), any(), any()))
-            .thenThrow(new RuntimeException("ETag mismatch detected"));
+    void saveStateWithTtlUsesTtlMetadataAndSkipsNonPositiveTtls() {
+        when(client.saveState(any(), any(), any(), any(), anyMap(), any())).thenReturn(Mono.empty());
 
-        boolean saved = facade.saveStateWithETag("store", "key", "value", "etag");
+        facade.saveStateWithTTL("store", "key", "v", Duration.ofSeconds(30));
+        facade.saveStateWithTTL("store", "key", "v", Duration.ZERO);
 
-        assertThat(saved).isFalse();
+        verify(client).saveState("store", "key", null, "v", Map.of("ttlInSeconds", "30"), null);
+        verify(client).saveState("store", "key", null, "v", Map.of(), null);
     }
 
     @Test
-    void saveStateWithETagReturnsFalseOnRealSidecarEtagMessage() {
-        // Real sidecar errors are gRPC ABORTED with a lowercase message, e.g.
-        // "possible etag mismatch. error from state store: ..."
-        when(client.saveState(anyString(), anyString(), any(), any(), any()))
-            .thenThrow(new RuntimeException(
-                "ABORTED: possible etag mismatch. error from state store: ERR Error running script"));
+    void getStateReadsTypedValuesWithTheRequestedConsistency() {
+        ArgumentCaptor<GetStateRequest> request = ArgumentCaptor.forClass(GetStateRequest.class);
+        Order order = new Order("o-1", 2, Instant.parse("2026-10-28T00:00:00Z"));
+        when(client.getState(request.capture(), any(TypeRef.class)))
+                .thenReturn(Mono.just(new State<>("key", order, "etag-3")));
 
-        boolean saved = facade.saveStateWithETag("store", "key", "value", "etag");
+        assertThat(facade.getState("store", "key", Order.class, GetOptions.strong())).isEqualTo(order);
+        assertThat(request.getValue().getStoreName()).isEqualTo("store");
+        assertThat(request.getValue().getStateOptions().getConsistency()).isEqualTo(StateOptions.Consistency.STRONG);
 
-        assertThat(saved).isFalse();
+        StateWithETag<Order> withEtag = facade.getStateWithETag("store", "key", Order.class);
+        assertThat(withEtag.getValue()).isEqualTo(order);
+        assertThat(withEtag.getEtag()).isEqualTo("etag-3");
     }
 
     @Test
-    void saveStateWithETagDetectsConflictInCauseChain() {
-        when(client.saveState(anyString(), anyString(), any(), any(), any()))
-            .thenThrow(new RuntimeException("save failed",
-                new RuntimeException("possible etag mismatch")));
-
-        boolean saved = facade.saveStateWithETag("store", "key", "value", "etag");
-
-        assertThat(saved).isFalse();
-    }
-
-    @Test
-    void saveStateWithETagThrowsOnOtherFailure() {
-        when(client.saveState(anyString(), anyString(), any(), any(), any()))
-            .thenThrow(new RuntimeException("network down"));
-
-        assertThatThrownBy(() -> facade.saveStateWithETag("store", "key", "value", "etag"))
-            .isInstanceOf(DaprFacade.DaprException.class);
-    }
-
-    @Test
-    void saveStateWithTtlPassesTtlMetadata() {
-        when(client.saveState(anyString(), anyString(), isNull(), any(), anyMap(), isNull()))
-            .thenReturn(Mono.empty());
-
-        facade.saveStateWithTTL("store", "key", "value", Duration.ofSeconds(30));
-
-        verify(client).saveState("store", "key", null, "value", Map.of("ttlInSeconds", "30"), null);
-    }
-
-    @Test
-    void saveStateWithNonPositiveTtlSavesWithoutMetadata() {
-        when(client.saveState(anyString(), anyString(), any())).thenReturn(Mono.empty());
-
-        facade.saveStateWithTTL("store", "key", "value", Duration.ZERO);
-
-        verify(client).saveState("store", "key", "value");
-    }
-
-    @Test
-    void saveStateWithSubSecondTtlRoundsUpToOneSecond() {
-        when(client.saveState(anyString(), anyString(), isNull(), any(), anyMap(), isNull()))
-            .thenReturn(Mono.empty());
-
-        facade.saveStateWithTTL("store", "key", "value", Duration.ofMillis(200));
-
-        verify(client).saveState("store", "key", null, "value", Map.of("ttlInSeconds", "1"), null);
-    }
-
-    @Test
-    void saveStateWithTtlWrapsException() {
-        when(client.saveState(anyString(), anyString(), isNull(), any(), anyMap(), isNull()))
-            .thenThrow(new RuntimeException("boom"));
-
-        assertThatThrownBy(() -> facade.saveStateWithTTL("store", "key", "value", Duration.ofSeconds(1)))
-            .isInstanceOf(DaprFacade.DaprException.class);
-    }
-
-    @Test
-    void getStateReturnsValueWhenPresent() {
-        when(client.getState("store", "key", String.class))
-            .thenReturn(Mono.just(new State<>("key", "value", "etag")));
-
-        String result = facade.getState("store", "key", String.class);
-
-        assertThat(result).isEqualTo("value");
-    }
-
-    @Test
-    void getStateReturnsNullWhenStateAbsent() {
-        when(client.getState("store", "key", String.class)).thenReturn(Mono.empty());
+    void getStateReturnsNullForAMissingKey() {
+        when(client.getState(any(GetStateRequest.class), any(TypeRef.class)))
+                .thenReturn(Mono.just(new State<>("key", null, "")));
 
         assertThat(facade.getState("store", "key", String.class)).isNull();
+        assertThat(facade.getStateWithETag("store", "key", String.class).exists()).isFalse();
     }
 
     @Test
-    void getStateWrapsException() {
-        when(client.getState("store", "key", String.class))
-            .thenThrow(new RuntimeException("boom"));
+    void getStateFailuresBecomeDaprErrorsWithDaprsStatus() {
+        when(client.getState(any(GetStateRequest.class), any(TypeRef.class)))
+                .thenReturn(Mono.error(sdkError("INVALID_ARGUMENT", "state store statestore is not found")));
 
         assertThatThrownBy(() -> facade.getState("store", "key", String.class))
-            .isInstanceOf(DaprFacade.DaprException.class);
+                .isInstanceOfSatisfying(DaprError.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(400);
+                    assertThat(e.getErrorCode()).isEqualTo("INVALID_ARGUMENT");
+                    assertThat(e.getDaprMessage()).isEqualTo("state store statestore is not found");
+                })
+                .isInstanceOf(DaprFacade.DaprException.class);
     }
 
     @Test
-    void getStateWithETagReturnsValueAndEtag() {
-        when(client.getState("store", "key", String.class))
-            .thenReturn(Mono.just(new State<>("key", "value", "etag-1")));
+    void bulkReadsKeepEtagsAndSkipMissingAndFailedKeys() {
+        when(client.getBulkState(any(GetBulkStateRequest.class), any(TypeRef.class))).thenReturn(Mono.just(List.of(
+                new State<>("a", "1", "e1"), new State<>("b", null, ""), new State<>("c", "failure"))));
 
-        StateWithETag<String> result = facade.getStateWithETag("store", "key", String.class);
-
-        assertThat(result.getValue()).isEqualTo("value");
-        assertThat(result.getEtag()).isEqualTo("etag-1");
+        assertThat(facade.getBulkState("store", List.of("a", "b", "c"), String.class)).isEqualTo(Map.of("a", "1"));
+        List<StateEntry<String>> entries = facade.getBulkStateEntries("store", List.of("a", "b", "c"), TypeRef.STRING);
+        assertThat(entries).containsExactly(new StateEntry<>("a", "1", "e1"), new StateEntry<>("b", null, null));
+        assertThat(facade.getBulkState("store", List.of(), String.class)).isEmpty();
     }
 
     @Test
-    void getStateWithETagReturnsEmptyWhenStateNull() {
-        when(client.getState("store", "key", String.class)).thenReturn(Mono.empty());
+    void saveBulkSendsOneCall() {
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<State<?>>> states = ArgumentCaptor.forClass(List.class);
+        when(client.saveBulkState(eq("store"), states.capture())).thenReturn(Mono.empty());
 
-        StateWithETag<String> result = facade.getStateWithETag("store", "key", String.class);
+        facade.saveBulkState("store", List.of(StateItem.of("a", 1),
+                new StateItem("b", 2, SaveOptions.etag("9"))));
 
-        assertThat(result.getValue()).isNull();
-        assertThat(result.getEtag()).isNull();
+        assertThat(states.getValue()).extracting(State::getKey).containsExactly("a", "b");
+        assertThat(states.getValue().get(1).getEtag()).isEqualTo("9");
     }
 
     @Test
-    void getStateWithETagWrapsException() {
-        when(client.getState("store", "key", String.class))
-            .thenThrow(new RuntimeException("boom"));
+    void deletesCarryTheEtagAndReportConflicts() {
+        ArgumentCaptor<DeleteStateRequest> request = ArgumentCaptor.forClass(DeleteStateRequest.class);
+        when(client.deleteState(request.capture()))
+                .thenReturn(Mono.empty())
+                .thenReturn(Mono.error(sdkError("ABORTED", "possible etag mismatch")));
 
-        assertThatThrownBy(() -> facade.getStateWithETag("store", "key", String.class))
-            .isInstanceOf(DaprFacade.DaprException.class);
+        assertThat(facade.deleteStateWithETag("store", "key", "5")).isTrue();
+        assertThat(request.getValue().getEtag()).isEqualTo("5");
+        assertThat(facade.deleteStateWithETag("store", "key", "5")).isFalse();
     }
 
     @Test
-    void getBulkStateReturnsMapFilteringNulls() {
-        List<State<String>> states = List.of(
-            new State<>("k1", "v1", "e1"),
-            new State<String>("k2", null, "e2"));
-        when(client.getBulkState(eq("store"), anyList(), eq(String.class)))
-            .thenReturn(Mono.just(states));
-
-        Map<String, String> result = facade.getBulkState("store", List.of("k1", "k2"), String.class);
-
-        assertThat(result).containsEntry("k1", "v1").doesNotContainKey("k2");
-    }
-
-    @Test
-    void getBulkStateReturnsEmptyMapWhenNull() {
-        when(client.getBulkState(eq("store"), anyList(), eq(String.class)))
-            .thenReturn(Mono.empty());
-
-        assertThat(facade.getBulkState("store", List.of("k1"), String.class)).isEmpty();
-    }
-
-    @Test
-    void getBulkStateWrapsException() {
-        when(client.getBulkState(eq("store"), anyList(), eq(String.class)))
-            .thenThrow(new RuntimeException("boom"));
-
-        assertThatThrownBy(() -> facade.getBulkState("store", List.of("k1"), String.class))
-            .isInstanceOf(DaprFacade.DaprException.class);
-    }
-
-    @Test
-    void deleteStateDelegatesToClient() {
-        when(client.deleteState("store", "key")).thenReturn(Mono.empty());
-
-        facade.deleteState("store", "key");
-
-        verify(client).deleteState("store", "key");
-    }
-
-    @Test
-    void deleteStateWrapsException() {
-        when(client.deleteState("store", "key")).thenThrow(new RuntimeException("boom"));
-
-        assertThatThrownBy(() -> facade.deleteState("store", "key"))
-            .isInstanceOf(DaprFacade.DaprException.class);
-    }
-
-    @Test
-    void deleteStateWithETagReturnsTrueOnSuccess() {
-        when(client.deleteState(anyString(), anyString(), any(), any())).thenReturn(Mono.empty());
-
-        assertThat(facade.deleteStateWithETag("store", "key", "etag")).isTrue();
-    }
-
-    @Test
-    void deleteStateWithETagReturnsFalseOnEtagMismatch() {
-        when(client.deleteState(anyString(), anyString(), any(), any()))
-            .thenThrow(new RuntimeException("ETag mismatch happened"));
-
-        assertThat(facade.deleteStateWithETag("store", "key", "etag")).isFalse();
-    }
-
-    @Test
-    void deleteStateWithETagThrowsOnOtherFailure() {
-        when(client.deleteState(anyString(), anyString(), any(), any()))
-            .thenThrow(new RuntimeException("boom"));
-
-        assertThatThrownBy(() -> facade.deleteStateWithETag("store", "key", "etag"))
-            .isInstanceOf(DaprFacade.DaprException.class);
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void executeStateTransactionMapsUpsertAndDeleteOperations() {
-        when(client.executeStateTransaction(anyString(), anyList())).thenReturn(Mono.empty());
+    void transactionsKeepEtagsOnDeletesAndPassMetadataAndConcurrency() {
+        ArgumentCaptor<ExecuteStateTransactionRequest> request = ArgumentCaptor.forClass(ExecuteStateTransactionRequest.class);
+        when(client.executeStateTransaction(request.capture())).thenReturn(Mono.empty());
 
         facade.executeStateTransaction("store", List.of(
-            StateOperation.upsert("k1", "v1", "e1"),
-            StateOperation.delete("k2")));
+                StateOperation.upsert("a", "1"),
+                StateOperation.delete("b", "etag-b"),
+                StateOperation.conditionalUpsert("index", "i", null),
+                StateOperation.projection("a", Map.of("id", "1"))), Map.of("partitionKey", "p"));
 
-        verify(client).executeStateTransaction(eq("store"),
-            (List<TransactionalStateOperation<?>>) any());
+        List<TransactionalStateOperation<?>> ops = request.getValue().getOperations();
+        assertThat(ops).extracting(TransactionalStateOperation::getOperation).containsExactly(
+                TransactionalStateOperation.OperationType.UPSERT, TransactionalStateOperation.OperationType.DELETE,
+                TransactionalStateOperation.OperationType.UPSERT, TransactionalStateOperation.OperationType.UPSERT);
+        assertThat(ops.get(1).getRequest().getEtag()).isEqualTo("etag-b");
+        assertThat(ops.get(2).getRequest().getOptions().getConcurrency()).isEqualTo(StateOptions.Concurrency.FIRST_WRITE);
+        assertThat(ops.get(3).getRequest().getMetadata()).containsEntry("outbox.projection", "true");
+        assertThat(request.getValue().getMetadata()).containsEntry("partitionKey", "p");
     }
 
     @Test
-    void executeStateTransactionWrapsException() {
-        when(client.executeStateTransaction(anyString(), anyList()))
-            .thenThrow(new RuntimeException("boom"));
+    void queriesRunOnThePreviewClient() {
+        QueryStateResponse<Integer> response = new QueryStateResponse<>(List.of(
+                new QueryStateItem<>("a", 1, "e1"), new QueryStateItem<Integer>("b", "e2", "parse error")), "next");
+        when(preview.<Integer>queryState(eq("store"), eq("{}"), anyMap(), any(TypeRef.class))).thenReturn(Mono.just(response));
 
-        assertThatThrownBy(() -> facade.executeStateTransaction("store",
-            List.of(StateOperation.delete("k"))))
-            .isInstanceOf(DaprFacade.DaprException.class);
+        StateQueryResult<Integer> page = facade.queryStatePage("store", "{}", TypeRef.get(Integer.class), Map.of());
+
+        assertThat(page.values()).containsExactly(1);
+        assertThat(page.errors()).containsEntry("b", "parse error");
+        assertThat(page.token()).isEqualTo("next");
+        assertThat(facade.queryState("store", "{}", Integer.class)).containsExactly(1);
+    }
+
+    // ------------------------------------------------------------------ pub/sub
+
+    @Test
+    void publishGoesToTheDefaultPubsubWithCloudEventMetadata() {
+        ArgumentCaptor<PublishEventRequest> request = ArgumentCaptor.forClass(PublishEventRequest.class);
+        when(client.publishEvent(request.capture())).thenReturn(Mono.empty());
+
+        facade.publish("orders", Map.of("id", "1"),
+                PublishOptions.none().withCloudEvent("o-1", "orders-service", "io.adhar.orders.order.created")
+                        .withPartitionKey("1").withTtl(Duration.ofSeconds(90)));
+
+        PublishEventRequest sent = request.getValue();
+        assertThat(sent.getPubsubName()).isEqualTo("pubsub");
+        assertThat(sent.getTopic()).isEqualTo("orders");
+        assertThat(sent.getMetadata()).containsEntry("cloudevent.id", "o-1")
+                .containsEntry("cloudevent.source", "orders-service")
+                .containsEntry("cloudevent.type", "io.adhar.orders.order.created")
+                .containsEntry("partitionKey", "1")
+                .containsEntry("ttlInSeconds", "90");
     }
 
     @Test
-    void queryStateThrowsUnsupported() {
-        assertThatThrownBy(() -> facade.queryState("store", "{}", String.class))
-            .isInstanceOf(UnsupportedOperationException.class);
-    }
+    void publishEventKeepsItsExplicitComponentAndMetadata() {
+        ArgumentCaptor<PublishEventRequest> request = ArgumentCaptor.forClass(PublishEventRequest.class);
+        when(client.publishEvent(request.capture())).thenReturn(Mono.empty());
 
-    // ==================== Pub/Sub ====================
+        facade.publishEvent("kafka", "topic", "event", Map.of("k", "v"));
 
-    @Test
-    void publishEventDelegatesWithEmptyMetadata() {
-        when(client.publishEvent(anyString(), anyString(), any(), anyMap())).thenReturn(Mono.empty());
-
-        facade.publishEvent("pubsub", "topic", "event");
-
-        verify(client).publishEvent(eq("pubsub"), eq("topic"), eq("event"), anyMap());
+        assertThat(request.getValue().getPubsubName()).isEqualTo("kafka");
+        assertThat(request.getValue().getMetadata()).isEqualTo(Map.of("k", "v"));
     }
 
     @Test
-    void publishEventWithMetadataWrapsException() {
-        when(client.publishEvent(anyString(), anyString(), any(), anyMap()))
-            .thenThrow(new RuntimeException("boom"));
+    void bulkPublishIsOneNativeCallAndReportsRejectedEntries() {
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<BulkPublishRequest<String>> request = ArgumentCaptor.forClass(BulkPublishRequest.class);
+        BulkPublishResponse<String> partial = new BulkPublishResponse<>(List.of(new BulkPublishResponseFailedEntry<>(
+                new BulkPublishEntry<>("1", "b", null), "broker full")));
+        when(client.publishEvents(request.capture()))
+                .thenReturn(Mono.just(new BulkPublishResponse<>()))
+                .thenReturn(Mono.just(partial));
 
-        assertThatThrownBy(() -> facade.publishEvent("pubsub", "topic", "event", Map.of("k", "v")))
-            .isInstanceOf(DaprFacade.DaprException.class);
+        BulkPublishResult ok = facade.publishBulk("orders", List.of("a", "b"));
+        assertThat(ok.allSucceeded()).isTrue();
+        assertThat(ok.published()).isEqualTo(2);
+        assertThat(request.getValue().getEntries()).extracting(BulkPublishEntry::getEntryId).containsExactly("0", "1");
+
+        assertThatThrownBy(() -> facade.publishBulkEvents("pubsub", "orders", List.of("a", "b")))
+                .isInstanceOf(DaprError.class)
+                .hasMessageContaining("1 of 2 rejected")
+                .hasMessageContaining("broker full");
+    }
+
+    // ------------------------------------------------------------------ secrets and configuration
+
+    @Test
+    void secretsReturnTheNamedValueOrTheOnlyValue() {
+        when(client.getSecret(any(GetSecretRequest.class)))
+                .thenReturn(Mono.just(Map.of("api-key", "k1")))
+                .thenReturn(Mono.just(Map.of("token", "t1")))
+                .thenReturn(Mono.just(Map.of("username", "u", "password", "p")));
+
+        assertThat(facade.getSecret("secretstore", "api-key")).isEqualTo("k1");
+        assertThat(facade.getSecret("secretstore", "other")).isEqualTo("t1");
+        assertThat(facade.secrets().get("db")).containsEntry("password", "p");
     }
 
     @Test
-    void publishBulkEventsPublishesEach() {
-        when(client.publishEvent(anyString(), anyString(), any(), anyMap())).thenReturn(Mono.empty());
+    void bulkSecretsFlattenLosslessly() {
+        when(client.getBulkSecret(any(GetBulkSecretRequest.class))).thenReturn(Mono.just(Map.of(
+                "api-key", Map.of("api-key", "k"), "db", Map.of("username", "u", "password", "p"))));
 
-        facade.publishBulkEvents("pubsub", "topic", List.of("e1", "e2", "e3"));
-
-        verify(client, times(3)).publishEvent(eq("pubsub"), eq("topic"), any(), anyMap());
+        assertThat(facade.getBulkSecrets("secretstore")).isEqualTo(Map.of(
+                "api-key", "k", "db.username", "u", "db.password", "p"));
     }
 
     @Test
-    void publishBulkEventsWrapsException() {
-        when(client.publishEvent(anyString(), anyString(), any(), anyMap()))
-            .thenThrow(new RuntimeException("boom"));
+    void configurationValuesAndItems() {
+        when(client.getConfiguration(any(GetConfigurationRequest.class))).thenReturn(Mono.just(Map.of(
+                "flag", new ConfigurationItem("flag", "on", "3", Map.of()))));
 
-        assertThatThrownBy(() -> facade.publishBulkEvents("pubsub", "topic", List.of("e1")))
-            .isInstanceOf(DaprFacade.DaprException.class);
-    }
-
-    // ==================== Service Invocation ====================
-
-    @Test
-    void invokeServiceDefaultsToPost() {
-        when(client.invokeMethod(eq("app"), eq("method"), any(), any(HttpExtension.class), eq(String.class)))
-            .thenReturn(Mono.just("response"));
-
-        String result = facade.invokeService("app", "method", "request", String.class);
-
-        assertThat(result).isEqualTo("response");
+        assertThat(facade.getConfiguration("configstore", "flag")).isEqualTo("on");
+        Map<String, ConfigItem> items = facade.configuration().get(List.of("flag"));
+        assertThat(items.get("flag").version()).isEqualTo("3");
     }
 
     @Test
-    void invokeServiceSupportsAllHttpMethods() {
-        when(client.invokeMethod(anyString(), anyString(), any(), any(HttpExtension.class), eq(String.class)))
-            .thenReturn(Mono.just("ok"));
+    void configurationSubscriptionsDeliverChangesAndCanBeEnded() {
+        Sinks.Many<SubscribeConfigurationResponse> updates = Sinks.many().unicast().onBackpressureBuffer();
+        when(client.subscribeConfiguration(any(SubscribeConfigurationRequest.class))).thenReturn(updates.asFlux());
+        when(client.unsubscribeConfiguration("sub-1", "configstore"))
+                .thenReturn(Mono.just(new UnsubscribeConfigurationResponse(true, "")));
+        List<Map<String, String>> changes = new ArrayList<>();
 
-        assertThat(facade.invokeService("app", "m", "GET", "req", String.class)).isEqualTo("ok");
-        assertThat(facade.invokeService("app", "m", "PUT", "req", String.class)).isEqualTo("ok");
-        assertThat(facade.invokeService("app", "m", "DELETE", "req", String.class)).isEqualTo("ok");
-        assertThat(facade.invokeService("app", "m", "PATCH", "req", String.class)).isEqualTo("ok");
+        DaprSubscription subscription = facade.subscribeConfiguration("configstore", List.of("flag"), changes::add);
+        updates.tryEmitNext(new SubscribeConfigurationResponse("sub-1", Map.of()));
+        updates.tryEmitNext(new SubscribeConfigurationResponse("sub-1", Map.of(
+                "flag", new ConfigurationItem("flag", "off", "4", Map.of()))));
+        updates.tryEmitNext(new SubscribeConfigurationResponse("sub-1", Map.of(
+                "flag", new ConfigurationItem("flag", "", "5", Map.of()))));
+
+        Map<String, String> deleted = new HashMap<>();
+        deleted.put("flag", null);
+        assertThat(changes).containsExactly(Map.of("flag", "off"), deleted);
+        assertThat(subscription.id()).isEqualTo("sub-1");
+        subscription.unsubscribe();
+        assertThat(subscription.isActive()).isFalse();
+        verify(client).unsubscribeConfiguration("sub-1", "configstore");
+    }
+
+    // ------------------------------------------------------------------ lock
+
+    @Test
+    void locksRunOnThePreviewClient() {
+        when(preview.tryLock(any(LockRequest.class))).thenReturn(Mono.just(true), Mono.just(false));
+        when(preview.unlock(any(UnlockRequest.class))).thenReturn(Mono.just(UnlockResponseStatus.SUCCESS),
+                Mono.just(UnlockResponseStatus.LOCK_BELONG_TO_OTHERS), Mono.just(UnlockResponseStatus.LOCK_UNEXIST));
+
+        assertThat(facade.lock().tryLock("report", "me", 30)).isTrue();
+        assertThat(facade.tryLock("lockstore", "report", "me", 30)).isFalse();
+        assertThat(facade.unlock("lockstore", "report", "me")).isTrue();
+        assertThat(facade.lock().unlock("report", "me")).isEqualTo(UnlockStatus.LOCK_BELONGS_TO_OTHERS);
+        assertThat(facade.unlockStatus("lockstore", "report", "me")).isEqualTo(UnlockStatus.LOCK_DOES_NOT_EXIST);
     }
 
     @Test
-    void invokeServiceWrapsException() {
-        when(client.invokeMethod(anyString(), anyString(), any(), any(HttpExtension.class), eq(String.class)))
-            .thenThrow(new RuntimeException("boom"));
+    void locksWithoutAPreviewClientFailClearly() {
+        DaprFacade withoutPreview = new DaprFacade(client);
+        assertThatThrownBy(() -> withoutPreview.tryLock("lockstore", "r", "o", 1))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("DaprPreviewClient");
+    }
 
-        assertThatThrownBy(() -> facade.invokeService("app", "method", "request", String.class))
-            .isInstanceOf(DaprFacade.DaprException.class);
+    // ------------------------------------------------------------------ bindings, jobs, crypto
+
+    @Test
+    void outputBindingsSendTheRequestAndReadTheResponse() {
+        ArgumentCaptor<InvokeBindingRequest> request = ArgumentCaptor.forClass(InvokeBindingRequest.class);
+        when(client.invokeBinding(request.capture(), eq(TypeRef.BYTE_ARRAY)))
+                .thenReturn(Mono.just("{\"id\":\"x\",\"quantity\":1}".getBytes(StandardCharsets.UTF_8)));
+
+        Order response = facade.invokeBinding("orders-db", "get", Map.of("id", "x"), Map.of("table", "orders"),
+                Order.class);
+
+        assertThat(response.id()).isEqualTo("x");
+        assertThat(request.getValue().getName()).isEqualTo("orders-db");
+        assertThat(request.getValue().getOperation()).isEqualTo("get");
+        assertThat(request.getValue().getMetadata()).containsEntry("table", "orders");
     }
 
     @Test
-    void invokeServiceAsyncReturnsCompletedFuture() {
-        when(client.invokeMethod(anyString(), anyString(), any(), any(HttpExtension.class), eq(String.class)))
-            .thenReturn(Mono.just("async-response"));
+    void jobsAreScheduledReadAndDeleted() {
+        ArgumentCaptor<ScheduleJobRequest> scheduled = ArgumentCaptor.forClass(ScheduleJobRequest.class);
+        when(client.scheduleJob(scheduled.capture())).thenReturn(Mono.empty());
+        when(client.getJob(any(GetJobRequest.class)))
+                .thenReturn(Mono.just(new GetJobResponse("nightly", JobSchedule.fromString("0 0 2 * * *"))
+                        .setData("{\"region\":\"sg\"}".getBytes(StandardCharsets.UTF_8)).setRepeat(3)))
+                .thenReturn(Mono.error(sdkError("NOT_FOUND", "job not found")));
+        when(client.deleteJob(any(DeleteJobRequest.class))).thenReturn(Mono.empty());
 
-        assertThat(facade.invokeServiceAsync("app", "method", "request", String.class).join())
-            .isEqualTo("async-response");
-    }
+        facade.jobs().schedule("nightly", JobOptions.cron("0 0 2 * * *").withData(Map.of("region", "sg")).withRepeats(3)
+                .overwriting());
 
-    // ==================== Bindings ====================
+        assertThat(scheduled.getValue().getName()).isEqualTo("nightly");
+        assertThat(scheduled.getValue().getSchedule().getExpression()).isEqualTo("0 0 2 * * *");
+        assertThat(new String(scheduled.getValue().getData(), StandardCharsets.UTF_8)).isEqualTo("{\"region\":\"sg\"}");
+        assertThat(scheduled.getValue().getRepeats()).isEqualTo(3);
+        assertThat(scheduled.getValue().getOverwrite()).isTrue();
 
-    @Test
-    void invokeBindingDelegatesWithEmptyMetadata() {
-        when(client.invokeBinding(any(InvokeBindingRequest.class), any(TypeRef.class)))
-            .thenReturn(Mono.just(new byte[0]));
-
-        facade.invokeBinding("binding", "create", "data");
-
-        verify(client).invokeBinding(any(InvokeBindingRequest.class), any(TypeRef.class));
-    }
-
-    @Test
-    void invokeBindingWithMetadataWrapsException() {
-        when(client.invokeBinding(any(InvokeBindingRequest.class), any(TypeRef.class)))
-            .thenThrow(new RuntimeException("boom"));
-
-        assertThatThrownBy(() -> facade.invokeBinding("binding", "create", "data", Map.of("k", "v")))
-            .isInstanceOf(DaprFacade.DaprException.class);
-    }
-
-    // ==================== Secrets ====================
-
-    @Test
-    void getSecretReturnsValue() {
-        when(client.getSecret(anyString(), anyString(), anyMap()))
-            .thenReturn(Mono.just(Map.of("password", "s3cr3t")));
-
-        assertThat(facade.getSecret("store", "password")).isEqualTo("s3cr3t");
+        JobDetails job = facade.jobs().get("nightly");
+        assertThat(job.schedule()).isEqualTo("0 0 2 * * *");
+        assertThat(job.dataAsString()).isEqualTo("{\"region\":\"sg\"}");
+        assertThat(facade.jobs().get("missing")).isNull();
+        facade.jobs().delete("nightly");
+        verify(client).deleteJob(any(DeleteJobRequest.class));
     }
 
     @Test
-    void getSecretReturnsNullWhenSecretsNull() {
-        when(client.getSecret(anyString(), anyString(), anyMap())).thenReturn(Mono.empty());
+    void cryptoStreamsThroughThePreviewClient() {
+        when(preview.encrypt(any(EncryptRequestAlpha1.class))).thenReturn(Flux.just(new byte[] {1, 2}, new byte[] {3}));
+        when(preview.decrypt(any(DecryptRequestAlpha1.class))).thenReturn(Flux.just("plain".getBytes(StandardCharsets.UTF_8)));
 
-        assertThat(facade.getSecret("store", "password")).isNull();
+        assertThat(facade.encrypt("crypto", "key1", "RSA-OAEP-256", "x".getBytes(StandardCharsets.UTF_8)))
+                .containsExactly(1, 2, 3);
+        assertThat(new String(facade.decrypt("crypto", new byte[] {1, 2, 3}, "key1"), StandardCharsets.UTF_8))
+                .isEqualTo("plain");
     }
 
-    @Test
-    void getSecretWrapsException() {
-        when(client.getSecret(anyString(), anyString(), anyMap()))
-            .thenThrow(new RuntimeException("boom"));
-
-        assertThatThrownBy(() -> facade.getSecret("store", "password"))
-            .isInstanceOf(DaprFacade.DaprException.class);
-    }
+    // ------------------------------------------------------------------ runtime
 
     @Test
-    void getBulkSecretsFlattensNestedMap() {
-        when(client.getBulkSecret("store")).thenReturn(Mono.just(Map.of(
-            "db", Map.of("password", "p"),
-            "empty", Map.of())));
+    void metadataComesFromTheSidecar() {
+        when(client.getMetadata()).thenReturn(Mono.just(new DaprMetadata("orders", "1.18.3", List.of("SchedulerReminders"),
+                List.of(), Map.of(), List.of(new ComponentMetadata("statestore", "state.redis", "v1", List.of("ETAG"))),
+                List.of(), List.of(new SubscriptionMetadata("pubsub", "orders", Map.of(), List.of(), "orders-dlq")),
+                null)))
+                .thenReturn(Mono.error(sdkError("UNAVAILABLE", "connection refused")));
 
-        Map<String, String> result = facade.getBulkSecrets("store");
-
-        assertThat(result).containsEntry("db", "p").doesNotContainKey("empty");
-    }
-
-    @Test
-    void getBulkSecretsQualifiesMultiKeySecrets() {
-        when(client.getBulkSecret("store")).thenReturn(Mono.just(Map.of(
-            "db", Map.of("username", "u", "password", "p"))));
-
-        Map<String, String> result = facade.getBulkSecrets("store");
-
-        assertThat(result)
-            .containsEntry("db.username", "u")
-            .containsEntry("db.password", "p")
-            .hasSize(2);
-    }
-
-    @Test
-    void getBulkSecretsNestedReturnsFullMaps() {
-        when(client.getBulkSecret("store")).thenReturn(Mono.just(Map.of(
-            "db", Map.of("username", "u", "password", "p"))));
-
-        Map<String, Map<String, String>> result = facade.getBulkSecretsNested("store");
-
-        assertThat(result).containsEntry("db", Map.of("username", "u", "password", "p"));
-    }
-
-    @Test
-    void getBulkSecretsReturnsEmptyWhenNull() {
-        when(client.getBulkSecret("store")).thenReturn(Mono.empty());
-
-        assertThat(facade.getBulkSecrets("store")).isEmpty();
-    }
-
-    @Test
-    void getBulkSecretsWrapsException() {
-        when(client.getBulkSecret("store")).thenThrow(new RuntimeException("boom"));
-
-        assertThatThrownBy(() -> facade.getBulkSecrets("store"))
-            .isInstanceOf(DaprFacade.DaprException.class);
-    }
-
-    // ==================== Configuration ====================
-
-    @Test
-    void getConfigurationSingleKeyReturnsValue() {
-        when(client.getConfiguration(eq("store"), any(String[].class)))
-            .thenReturn(Mono.just(Map.of("key", new ConfigurationItem("key", "val", "v1"))));
-
-        assertThat(facade.getConfiguration("store", "key")).isEqualTo("val");
-    }
-
-    @Test
-    void getConfigurationListReturnsEmptyWhenNull() {
-        when(client.getConfiguration(eq("store"), any(String[].class))).thenReturn(Mono.empty());
-
-        assertThat(facade.getConfiguration("store", List.of("key"))).isEmpty();
-    }
-
-    @Test
-    void getConfigurationListWrapsException() {
-        when(client.getConfiguration(eq("store"), any(String[].class)))
-            .thenThrow(new RuntimeException("boom"));
-
-        assertThatThrownBy(() -> facade.getConfiguration("store", List.of("key")))
-            .isInstanceOf(DaprFacade.DaprException.class);
-    }
-
-    @Test
-    void subscribeConfigurationInvokesCallbackWithChanges() {
-        SubscribeConfigurationResponse response = new SubscribeConfigurationResponse(
-            "id", Map.of("flag", new ConfigurationItem("flag", "on", "v1")));
-        when(client.subscribeConfiguration(eq("store"), any(String[].class)))
-            .thenReturn(Flux.just(response));
-
-        AtomicReference<Map<String, String>> captured = new AtomicReference<>();
-        ConfigurationCallback callback = captured::set;
-
-        facade.subscribeConfiguration("store", List.of("flag"), callback);
-
-        assertThat(captured.get()).containsEntry("flag", "on");
-    }
-
-    @Test
-    void subscribeConfigurationIgnoresNullItems() {
-        SubscribeConfigurationResponse response = mock(SubscribeConfigurationResponse.class);
-        when(response.getItems()).thenReturn(null);
-        when(client.subscribeConfiguration(eq("store"), any(String[].class)))
-            .thenReturn(Flux.just(response));
-
-        AtomicReference<Map<String, String>> captured = new AtomicReference<>();
-        facade.subscribeConfiguration("store", List.of("flag"), captured::set);
-
-        assertThat(captured.get()).isNull();
-    }
-
-    @Test
-    void subscribeConfigurationWrapsException() {
-        when(client.subscribeConfiguration(eq("store"), any(String[].class)))
-            .thenThrow(new RuntimeException("boom"));
-
-        assertThatThrownBy(() -> facade.subscribeConfiguration("store", List.of("flag"), c -> {}))
-            .isInstanceOf(DaprFacade.DaprException.class);
-    }
-
-    // ==================== Unsupported operations ====================
-
-    @Test
-    void distributedLockRequiresPreviewClient() {
-        // This facade was constructed without a preview client, so locking is unavailable.
-        assertThatThrownBy(() -> facade.tryLock("store", "res", "owner", 30))
-            .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> facade.unlock("store", "res", "owner"))
-            .isInstanceOf(IllegalStateException.class);
-    }
-
-    @Test
-    void actorOperationsAreUnsupported() {
-        assertThatThrownBy(() -> facade.invokeActor("Type", "id", "m", null, String.class))
-            .isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> facade.saveActorState("Type", "id", "state", "v"))
-            .isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> facade.getActorState("Type", "id", "state", String.class))
-            .isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> facade.registerActorReminder("Type", "id", "r",
-            Duration.ZERO, Duration.ZERO, "data"))
-            .isInstanceOf(UnsupportedOperationException.class);
-        assertThatThrownBy(() -> facade.registerActorTimer("Type", "id", "t",
-            Duration.ZERO, Duration.ZERO, "cb"))
-            .isInstanceOf(UnsupportedOperationException.class);
-    }
-
-    // ==================== Utilities ====================
-
-    @Test
-    void isAvailableReturnsTrueForInjectedClient() {
-        assertThat(facade.isAvailable()).isTrue();
-    }
-
-    @Test
-    void getMetadataReturnsAvailabilityAndVersion() {
         Map<String, Object> metadata = facade.getMetadata();
+        assertThat(metadata).containsEntry("available", true).containsEntry("id", "orders")
+                .containsEntry("runtimeVersion", "1.18.3");
+        assertThat((List<?>) metadata.get("components")).hasSize(1);
+        assertThat((List<?>) metadata.get("subscriptions")).hasSize(1);
 
-        assertThat(metadata).containsEntry("available", true).containsEntry("version", "1.0.0");
+        Map<String, Object> down = facade.getMetadata();
+        assertThat(down).containsEntry("available", false).containsKey("error");
     }
 
     @Test
-    void shutdownClosesClient() throws Exception {
-        facade.shutdown();
-
+    void closeClosesAClientTheBackendOwns() throws Exception {
+        facade.close();
         verify(client).close();
+        assertThat(facade.isAvailable()).isFalse();
     }
 
     @Test
-    void shutdownSwallowsExceptions() throws Exception {
-        doThrow(new RuntimeException("boom")).when(client).close();
-
-        facade.shutdown();
-
-        verify(client).close();
+    void aClientHandedToTheLegacyConstructorIsNotClosed() throws Exception {
+        DaprFacade legacy = new DaprFacade(client);
+        legacy.shutdown();
+        verify(client, never()).close();
     }
 
     @Test
-    void daprExceptionConstructors() {
-        DaprFacade.DaprException withMessage = new DaprFacade.DaprException("oops");
-        DaprFacade.DaprException withCause = new DaprFacade.DaprException("oops", new IllegalStateException());
+    void shutdownSidecarAsksTheSidecarToStop() {
+        when(client.shutdown()).thenReturn(Mono.empty());
+        facade.shutdownSidecar();
+        verify(client).shutdown();
+    }
 
-        assertThat(withMessage).hasMessage("oops");
-        assertThat(withCause).hasMessage("oops").hasCauseInstanceOf(IllegalStateException.class);
+    // ------------------------------------------------------------------ cross-cutting
+
+    @Test
+    void theCallersTraceContextReachesTheSdkCall() {
+        AtomicReference<String> seen = new AtomicReference<>();
+        when(client.publishEvent(any(PublishEventRequest.class))).thenReturn(Mono.deferContextual(context -> {
+            seen.set(context.getOrDefault("traceparent", null));
+            return Mono.empty();
+        }));
+        trace.set(Map.of("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"));
+
+        facade.publish("orders", "x");
+
+        assertThat(seen.get()).isEqualTo("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
     }
 
     @Test
-    void getInstanceReturnsSingleton() {
-        DaprFacade first = DaprFacade.getInstance();
-        DaprFacade second = DaprFacade.getInstance();
+    void everyCallIsAnObservationTaggedWithItsOutcome() {
+        when(client.saveState(any(), any(), any(), any(), anyMap(), any()))
+                .thenReturn(Mono.empty())
+                .thenReturn(Mono.error(sdkError("ABORTED", "possible etag mismatch")));
 
-        assertThat(first).isNotNull().isSameAs(second);
+        facade.saveState("statestore", "k", "v");
+        facade.saveStateWithETag("statestore", "k", "v", "1");
+
+        assertThat(observed).hasSize(2);
+        assertThat(tags(observed.get(0))).containsEntry("dapr.api", "state").containsEntry("dapr.operation", "save")
+                .containsEntry("dapr.component", "statestore").containsEntry("outcome", "SUCCESS");
+        assertThat(tags(observed.get(1))).containsEntry("outcome", "CONFLICT");
+        assertThat(observed.get(1).getError()).isInstanceOf(DaprError.class);
     }
 
-    @Test
-    void noOpVerifyNeverPublishesOnEmptyBulk() {
-        facade.publishBulkEvents("pubsub", "topic", List.of());
+    private static Map<String, String> tags(Observation.Context context) {
+        Map<String, String> tags = new HashMap<>();
+        context.getLowCardinalityKeyValues().forEach(kv -> tags.put(kv.getKey(), kv.getValue()));
+        return tags;
+    }
 
-        verify(client, never()).publishEvent(anyString(), anyString(), any(), anyMap());
+    private static DaprException sdkError(String code, String message) {
+        return new DaprException(code, message, (Throwable) null);
     }
 }

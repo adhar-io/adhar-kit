@@ -62,6 +62,13 @@ public class DocsProperties {
     private boolean showActuator = false;
 
     /**
+     * Whether Swagger UI shows the OpenAPI documents shipped in the artifact
+     * ({@code api/v<major>/openapi.yaml}, served by adhar-kit-commons) rather than the
+     * document springdoc derives from the code.
+     */
+    private boolean shippedSpecs = true;
+
+    /**
      * Security configuration.
      */
     private Security security = new Security();

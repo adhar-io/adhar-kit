@@ -5,12 +5,16 @@ import java.lang.annotation.*;
 /**
  * Marks a method to invoke another service via Dapr service invocation.
  *
+ * <p>Enforced by {@code DaprInvokeAspect}: the method body is not run. {@code {name}}
+ * placeholders in the endpoint take the argument of that parameter name; the remaining argument
+ * (if any) is the request body; the response is read as the method's (generic) return type. For a
+ * whole API, prefer a typed {@code @HttpExchange} interface from {@code DaprServiceClients}.</p>
+ *
  * <p><b>Example:</b></p>
  * <pre>{@code
- * @DaprInvoke(appId = "order-service", method = "GET", endpoint = "/orders/{orderId}")
+ * @DaprInvoke(appId = "order-service", method = "GET", endpoint = "/api/v1/orders/{orderId}")
  * public Order getOrder(String orderId) {
- *     // Actual invocation handled by annotation processor
- *     return null;
+ *     return null; // never runs
  * }
  * }</pre>
  *

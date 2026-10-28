@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import com.adhar.kit.dapr.state.Concurrency;
+
 import java.util.Map;
 
 /**
@@ -53,6 +55,12 @@ public class StateOperation {
     private Map<String, String> metadata;
 
     /**
+     * Concurrency of this operation, or {@code null} for the store default. {@code FIRST_WRITE}
+     * without an ETag makes an upsert an insert that fails when the key exists.
+     */
+    private Concurrency concurrency;
+
+    /**
      * Creates an operation without metadata (the original four-field shape).
      *
      * @param operation operation type
@@ -61,7 +69,7 @@ public class StateOperation {
      * @param etag ETag, or {@code null}
      */
     public StateOperation(OperationType operation, String key, Object value, String etag) {
-        this(operation, key, value, etag, null);
+        this(operation, key, value, etag, null, null);
     }
 
     /**
@@ -93,6 +101,25 @@ public class StateOperation {
             .key(key)
             .value(value)
             .etag(etag)
+            .build();
+    }
+
+    /**
+     * Create an upsert that succeeds only while the stored ETag still equals {@code etag}, or,
+     * with a {@code null} ETag, only when the key does not exist yet.
+     *
+     * @param key state key
+     * @param value state value
+     * @param etag ETag, or {@code null} for insert-only
+     * @return state operation
+     */
+    public static StateOperation conditionalUpsert(String key, Object value, String etag) {
+        return StateOperation.builder()
+            .operation(OperationType.UPSERT)
+            .key(key)
+            .value(value)
+            .etag(etag)
+            .concurrency(Concurrency.FIRST_WRITE)
             .build();
     }
 

@@ -22,9 +22,9 @@ import java.lang.annotation.*;
 public @interface DaprState {
 
     /**
-     * State store name.
+     * State store name; empty for the service default ({@code adhar.dapr.state-store}).
      */
-    String storeName() default "statestore";
+    String storeName() default "";
 
     /**
      * State key (supports SpEL expressions).

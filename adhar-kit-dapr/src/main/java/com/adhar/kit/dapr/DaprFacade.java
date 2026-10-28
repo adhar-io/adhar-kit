@@ -27,6 +27,7 @@ import com.adhar.kit.dapr.pubsub.ProgrammaticSubscriptions;
 import com.adhar.kit.dapr.pubsub.PublishOptions;
 import com.adhar.kit.dapr.pubsub.SubscribeOptions;
 import com.adhar.kit.dapr.pubsub.TopicEventListener;
+import com.adhar.kit.dapr.resilience.CircuitBreakerOpenException;
 import com.adhar.kit.dapr.resilience.DaprInvocationResilience;
 import com.adhar.kit.dapr.resilience.DaprResilienceRegistry;
 import com.adhar.kit.dapr.resilience.ResilienceSettings;
@@ -895,9 +896,12 @@ public class DaprFacade implements AutoCloseable {
 
     /** Saves actor state. Dapr only accepts this from the app hosting the actor type. */
     public <T> void saveActorState(String actorType, String actorId, String stateName, T value) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("key", stateName);
+        request.put("value", value);
         Map<String, Object> operation = new LinkedHashMap<>();
         operation.put("operation", "upsert");
-        operation.put("request", Map.of("key", stateName, "value", value));
+        operation.put("request", request);
         call("actors", "saveState", actorType, "Failed to save actor state", () -> {
             backend.executeActorStateTransaction(actorType, actorId, List.of(operation));
             return null;
@@ -1143,7 +1147,7 @@ public class DaprFacade implements AutoCloseable {
                 try {
                     return body.get();
                 } catch (DaprError | IllegalArgumentException | IllegalStateException
-                         | UnsupportedOperationException e) {
+                         | UnsupportedOperationException | CircuitBreakerOpenException e) {
                     throw e;
                 } catch (RuntimeException e) {
                     throw DaprError.from(failure, e);
@@ -1285,10 +1289,7 @@ public class DaprFacade implements AutoCloseable {
                             memory.putSecret(store, name, values)));
                     memoryConfiguration.forEach((store, values) -> values.forEach((key, value) ->
                             memory.setConfiguration(store, key, value)));
-                    log.warn("No Dapr sidecar configured (ADHAR_DAPR_MODE={}, DAPR_HTTP_PORT/DAPR_HTTP_ENDPOINT unset): "
-                                    + "state, cache, pub/sub, lock, configuration and secrets run in memory for app '{}'. "
-                                    + "Nothing is shared between replicas or kept across restarts.",
-                            conn.requestedMode().name().toLowerCase(Locale.ROOT), conn.appId());
+                    InMemoryDaprBackend.warnStartup(conn);
                     effective = memory;
                 } else {
                     boolean owned = client == null;

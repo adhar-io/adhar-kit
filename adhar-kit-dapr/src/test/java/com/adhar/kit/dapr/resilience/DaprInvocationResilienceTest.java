@@ -1,11 +1,8 @@
 package com.adhar.kit.dapr.resilience;
 
 import com.adhar.kit.dapr.client.AdharDaprClient;
-import io.dapr.client.DaprClient;
-import io.dapr.client.domain.HttpExtension;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -171,25 +168,22 @@ class DaprInvocationResilienceTest {
     @Test
     @DisplayName("invokeService wraps AdharDaprClient.invokeService with resilience applied")
     void invokeServiceWrapsAdharDaprClient() {
-        DaprClient daprClient = mock(DaprClient.class);
-        when(daprClient.invokeMethod(eq("app"), eq("/endpoint"), any(), any(HttpExtension.class), eq(String.class)))
-                .thenReturn(Mono.just("response"));
-        AdharDaprClient adharDaprClient = new AdharDaprClient(daprClient);
+        AdharDaprClient adharDaprClient = mock(AdharDaprClient.class);
+        when(adharDaprClient.invokeService("app", "POST", "/endpoint", "request", String.class)).thenReturn("response");
         DaprInvocationResilience resilience = new DaprInvocationResilience(fastSettings(3, 5, 1000));
 
         String result = resilience.invokeService(adharDaprClient, "app", "POST", "/endpoint", "request", String.class);
 
         assertThat(result).isEqualTo("response");
-        verify(daprClient, times(1)).invokeMethod(eq("app"), eq("/endpoint"), any(), any(HttpExtension.class), eq(String.class));
+        verify(adharDaprClient, times(1)).invokeService("app", "POST", "/endpoint", "request", String.class);
     }
 
     @Test
     @DisplayName("invokeService with fallback recovers from AdharDaprClient failures")
     void invokeServiceWithFallbackRecoversFromFailure() {
-        DaprClient daprClient = mock(DaprClient.class);
-        when(daprClient.invokeMethod(anyString(), anyString(), any(), any(HttpExtension.class), eq(String.class)))
+        AdharDaprClient adharDaprClient = mock(AdharDaprClient.class);
+        when(adharDaprClient.invokeService(anyString(), anyString(), anyString(), any(), eq(String.class)))
                 .thenThrow(new RuntimeException("boom"));
-        AdharDaprClient adharDaprClient = new AdharDaprClient(daprClient);
         DaprInvocationResilience resilience = new DaprInvocationResilience(fastSettings(2, 5, 1000));
 
         String result = resilience.invokeService(adharDaprClient, "app", "POST", "/endpoint", "request", String.class,

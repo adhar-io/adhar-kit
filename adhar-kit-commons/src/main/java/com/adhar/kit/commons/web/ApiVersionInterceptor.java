@@ -4,8 +4,10 @@ import com.adhar.kit.commons.annotation.ApiVersion;
 import com.adhar.kit.commons.constant.CommonConstants;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.accept.ApiVersionHolder;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.HandlerMapping;
 
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -27,9 +29,20 @@ import java.time.format.DateTimeParseException;
  *       {@code adhar.commons.api-versioning.validate-request-version}).</li>
  * </ul>
  *
+ * <p>It acts only outside the versioned API. On {@code /api/v<major>} paths Spring's
+ * API versioning has resolved a version, and the contract headers ({@code API-Version},
+ * RFC 9745 {@code Deprecation}, {@code Sunset}, the successor {@code Link}) are written
+ * by {@code ApiVersionHeaderFilter} and {@code AdharApiVersionDeprecationHandler}, which
+ * also honour {@code @ApiVersion} there.</p>
+ *
  * @author Adhar Platform Team
  * @since 1.0.0
+ * @deprecated since 0.2.0: an interceptor cannot route between versions; version the API
+ * by path ({@code /api/v<major>}), which the kit configures through Spring's built-in API
+ * versioning. Kept, and still registered, for {@code @ApiVersion} on legacy paths.
  */
+@Deprecated(since = "0.2.0")
+@SuppressWarnings("deprecation")
 public class ApiVersionInterceptor implements HandlerInterceptor {
 
     /** Draft-standard deprecation response header. */
@@ -63,7 +76,7 @@ public class ApiVersionInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws Exception {
-        if (!(handler instanceof HandlerMethod handlerMethod)) {
+        if (!(handler instanceof HandlerMethod handlerMethod) || hasResolvedApiVersion(request)) {
             return true;
         }
         ApiVersion apiVersion = resolveAnnotation(handlerMethod);
@@ -99,6 +112,15 @@ public class ApiVersionInterceptor implements HandlerInterceptor {
     private ApiVersion resolveAnnotation(HandlerMethod handlerMethod) {
         ApiVersion annotation = handlerMethod.getMethodAnnotation(ApiVersion.class);
         return annotation != null ? annotation : handlerMethod.getBeanType().getAnnotation(ApiVersion.class);
+    }
+
+    /**
+     * Whether Spring's API versioning resolved a version for this request, which with
+     * the kit's configuration means the request is under {@code /api/v<major>}.
+     */
+    private static boolean hasResolvedApiVersion(HttpServletRequest request) {
+        return request.getAttribute(HandlerMapping.API_VERSION_ATTRIBUTE) instanceof ApiVersionHolder holder
+            && holder.hasVersion();
     }
 
     /**

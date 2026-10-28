@@ -1,61 +1,86 @@
 package com.adhar.kit.dapr.pubsub;
 
 import io.dapr.client.domain.CloudEvent;
+import io.dapr.utils.TypeRef;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Unit tests for {@link DaprEventDispatcher}: argument resolution (raw data, CloudEvent
- * wrapping, whole-envelope fallback, no-arg handlers) and error-to-{@link DispatchStatus}
+ * Unit tests for {@link DaprEventDispatcher}: argument resolution (payload types, generic types,
+ * the kit's and the SDK's CloudEvent, no-arg handlers) and outcome-to-{@link DispatchStatus}
  * mapping.
  */
 @DisplayName("DaprEventDispatcher Tests")
 class DaprEventDispatcherTest {
 
-    private DaprEventDispatcher dispatcher;
-    private Handlers handlers;
+    record Order(String id, int quantity, Instant placedAt) {
+    }
 
     static class Handlers {
         String receivedString;
-        CloudEvent<?> receivedCloudEvent;
-        Map<String, Object> receivedRaw;
+        Order receivedOrder;
+        List<Order> receivedOrders;
+        DaprCloudEvent<Order> receivedEvent;
+        CloudEvent<Order> receivedSdkEvent;
         boolean noArgCalled;
 
         public void handleString(String payload) {
             this.receivedString = payload;
         }
 
-        public void handleCloudEvent(CloudEvent<String> event) {
-            this.receivedCloudEvent = event;
+        public void handleOrder(Order order) {
+            this.receivedOrder = order;
         }
 
-        public void handleRaw(Map<String, Object> envelope) {
-            this.receivedRaw = envelope;
+        public void handleOrders(List<Order> orders) {
+            this.receivedOrders = orders;
+        }
+
+        public void handleEvent(DaprCloudEvent<Order> event) {
+            this.receivedEvent = event;
+        }
+
+        public void handleSdkEvent(CloudEvent<Order> event) {
+            this.receivedSdkEvent = event;
         }
 
         public void noArg() {
             noArgCalled = true;
         }
 
-        public void throwing(String payload) {
+        public DispatchStatus drop(Order order) {
+            return DispatchStatus.DROP;
+        }
+
+        public boolean notYet(Order order) {
+            return false;
+        }
+
+        public void throwing(Order order) {
             throw new IllegalStateException("handler boom");
         }
 
-        public void wrongArity(String a, String b) {
-            // intentionally requires 2 args, but only 1 is ever resolved by the dispatcher
+        public void refusing(Order order) {
+            throw new DropEventException("order no longer exists");
         }
 
-        private void privateHandler(String payload) {
-            this.receivedString = "private:" + payload;
+        public void wrongArity(String a, String b) {
+            // two parameters: rejected when the invoker is built
         }
     }
+
+    private DaprEventDispatcher dispatcher;
+    private Handlers handlers;
 
     @BeforeEach
     void setUp() {
@@ -63,112 +88,150 @@ class DaprEventDispatcherTest {
         handlers = new Handlers();
     }
 
-    private DaprSubscriptionHandler handlerFor(String methodName, Class<?>... paramTypes) throws NoSuchMethodException {
-        Method method = Handlers.class.getDeclaredMethod(methodName, paramTypes);
-        return new DaprSubscriptionHandler("/dapr/subscribe/pubsub/topic", "pubsub", "topic", null,
-                Map.of(), "handlers", handlers, method);
+    private DispatchStatus invoke(String methodName, Map<String, Object> envelope) throws Exception {
+        Method method = null;
+        for (Method m : Handlers.class.getDeclaredMethods()) {
+            if (m.getName().equals(methodName)) {
+                method = m;
+            }
+        }
+        DaprSubscriptionHandler handler = new DaprSubscriptionHandler("/dapr/events/pubsub/orders", "pubsub",
+                "orders", null, Map.of(), null, 0, null, "handlers", handlers, method,
+                dispatcher.methodInvoker("handlers", handlers, method));
+        return dispatcher.dispatch(handler, envelope).status();
+    }
+
+    private static Map<String, Object> event(Object data) {
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("id", "evt-1");
+        envelope.put("source", "orders-service");
+        envelope.put("type", "io.adhar.orders.order.created");
+        envelope.put("specversion", "1.0");
+        envelope.put("datacontenttype", "application/json");
+        envelope.put("topic", "orders");
+        envelope.put("pubsubname", "pubsub");
+        envelope.put("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+        envelope.put("partitionkey", "42");
+        envelope.put("data", data);
+        return envelope;
+    }
+
+    private static Map<String, Object> orderJson() {
+        return Map.of("id", "o-1", "quantity", 3, "placedAt", "2026-10-28T01:02:03Z");
     }
 
     @Test
-    @DisplayName("resolves a scalar parameter from the CloudEvent's data field")
-    void resolvesScalarFromDataField() throws Exception {
-        DaprSubscriptionHandler handler = handlerFor("handleString", String.class);
+    void convertsTheDataToTheParameterType() throws Exception {
+        assertThat(invoke("handleOrder", event(orderJson()))).isEqualTo(DispatchStatus.SUCCESS);
+        assertThat(handlers.receivedOrder).isEqualTo(new Order("o-1", 3, Instant.parse("2026-10-28T01:02:03Z")));
+    }
 
-        DispatchResult result = dispatcher.dispatch(handler, Map.of("data", "hello"));
+    @Test
+    void honoursGenericParameterTypes() throws Exception {
+        assertThat(invoke("handleOrders", event(List.of(orderJson(), orderJson())))).isEqualTo(DispatchStatus.SUCCESS);
+        assertThat(handlers.receivedOrders).hasSize(2).allSatisfy(o -> assertThat(o).isInstanceOf(Order.class));
+    }
 
-        assertThat(result.status()).isEqualTo(DispatchStatus.SUCCESS);
+    @Test
+    void parsesAJsonDocumentSentAsAString() throws Exception {
+        assertThat(invoke("handleOrder", event("{\"id\":\"o-2\",\"quantity\":1}"))).isEqualTo(DispatchStatus.SUCCESS);
+        assertThat(handlers.receivedOrder.id()).isEqualTo("o-2");
+    }
+
+    @Test
+    void passesStringsThrough() throws Exception {
+        invoke("handleString", event("hello"));
         assertThat(handlers.receivedString).isEqualTo("hello");
     }
 
     @Test
-    @DisplayName("falls back to the whole envelope when there is no data field")
-    void fallsBackToWholeEnvelopeWithoutDataField() throws Exception {
-        DaprSubscriptionHandler handler = handlerFor("handleRaw", Map.class);
-        Map<String, Object> envelope = Map.of("topic", "x", "id", "evt-1");
-
-        DispatchResult result = dispatcher.dispatch(handler, envelope);
-
-        assertThat(result.status()).isEqualTo(DispatchStatus.SUCCESS);
-        assertThat(handlers.receivedRaw).containsEntry("topic", "x").containsEntry("id", "evt-1");
+    void buildsTheKitCloudEventWithTypedDataAndExtensions() throws Exception {
+        invoke("handleEvent", event(orderJson()));
+        DaprCloudEvent<Order> received = handlers.receivedEvent;
+        assertThat(received.id()).isEqualTo("evt-1");
+        assertThat(received.source()).isEqualTo("orders-service");
+        assertThat(received.type()).isEqualTo("io.adhar.orders.order.created");
+        assertThat(received.topic()).isEqualTo("orders");
+        assertThat(received.pubsubname()).isEqualTo("pubsub");
+        assertThat(received.traceparent()).startsWith("00-0af7651916cd43dd");
+        assertThat(received.data()).isInstanceOf(Order.class);
+        assertThat(received.extensions()).containsEntry("partitionkey", "42");
     }
 
     @Test
-    @DisplayName("wraps the envelope into a CloudEvent when the handler declares one")
-    void wrapsEnvelopeIntoCloudEvent() throws Exception {
-        DaprSubscriptionHandler handler = handlerFor("handleCloudEvent", CloudEvent.class);
-        Map<String, Object> envelope = new LinkedHashMap<>();
-        envelope.put("id", "evt-1");
-        envelope.put("source", "order-service");
-        envelope.put("type", "com.example.order.created");
-        envelope.put("specversion", "1.0");
-        envelope.put("datacontenttype", "application/json");
-        envelope.put("pubsubname", "pubsub");
-        envelope.put("topic", "orders.created");
-        envelope.put("data", "payload");
-
-        DispatchResult result = dispatcher.dispatch(handler, envelope);
-
-        assertThat(result.status()).isEqualTo(DispatchStatus.SUCCESS);
-        assertThat(handlers.receivedCloudEvent).isNotNull();
-        assertThat(handlers.receivedCloudEvent.getId()).isEqualTo("evt-1");
-        assertThat(handlers.receivedCloudEvent.getSource()).isEqualTo("order-service");
-        assertThat(handlers.receivedCloudEvent.getType()).isEqualTo("com.example.order.created");
-        assertThat(handlers.receivedCloudEvent.getPubsubName()).isEqualTo("pubsub");
-        assertThat(handlers.receivedCloudEvent.getTopic()).isEqualTo("orders.created");
-        assertThat(handlers.receivedCloudEvent.getData()).isEqualTo("payload");
+    void buildsTheSdkCloudEventWithTypedData() throws Exception {
+        invoke("handleSdkEvent", event(orderJson()));
+        assertThat(handlers.receivedSdkEvent.getId()).isEqualTo("evt-1");
+        assertThat(handlers.receivedSdkEvent.getTraceParent()).startsWith("00-");
+        assertThat(handlers.receivedSdkEvent.getData()).isInstanceOf(Order.class);
     }
 
     @Test
-    @DisplayName("invokes a no-arg handler without any argument resolution")
-    void invokesNoArgHandler() throws Exception {
-        DaprSubscriptionHandler handler = handlerFor("noArg");
-
-        DispatchResult result = dispatcher.dispatch(handler, Map.of("data", "ignored"));
-
-        assertThat(result.status()).isEqualTo(DispatchStatus.SUCCESS);
+    void callsNoArgHandlers() throws Exception {
+        assertThat(invoke("noArg", event(orderJson()))).isEqualTo(DispatchStatus.SUCCESS);
         assertThat(handlers.noArgCalled).isTrue();
     }
 
     @Test
-    @DisplayName("invokes a private handler method, bypassing accessibility checks")
-    void invokesPrivateHandler() throws Exception {
-        DaprSubscriptionHandler handler = handlerFor("privateHandler", String.class);
-
-        DispatchResult result = dispatcher.dispatch(handler, Map.of("data", "secret"));
-
-        assertThat(result.status()).isEqualTo(DispatchStatus.SUCCESS);
-        assertThat(handlers.receivedString).isEqualTo("private:secret");
+    void returnedStatusesAreHonoured() throws Exception {
+        assertThat(invoke("drop", event(orderJson()))).isEqualTo(DispatchStatus.DROP);
+        assertThat(invoke("notYet", event(orderJson()))).isEqualTo(DispatchStatus.RETRY);
     }
 
     @Test
-    @DisplayName("maps a handler exception to RETRY and preserves the cause")
-    void mapsHandlerExceptionToRetry() throws Exception {
-        DaprSubscriptionHandler handler = handlerFor("throwing", String.class);
-
-        DispatchResult result = dispatcher.dispatch(handler, Map.of("data", "x"));
-
-        assertThat(result.status()).isEqualTo(DispatchStatus.RETRY);
-        assertThat(result.cause()).isInstanceOf(IllegalStateException.class).hasMessage("handler boom");
+    void anExceptionAsksForRedelivery() throws Exception {
+        assertThat(invoke("throwing", event(orderJson()))).isEqualTo(DispatchStatus.RETRY);
     }
 
     @Test
-    @DisplayName("maps a reflection invocation failure (not the handler's own exception) to RETRY")
-    void mapsInvocationMismatchToRetry() throws Exception {
-        DaprSubscriptionHandler handler = handlerFor("wrongArity", String.class, String.class);
-
-        DispatchResult result = dispatcher.dispatch(handler, Map.of("data", "x"));
-
-        assertThat(result.status()).isEqualTo(DispatchStatus.RETRY);
-        assertThat(result.cause()).isNotNull();
+    void aDropEventExceptionDrops() throws Exception {
+        assertThat(invoke("refusing", event(orderJson()))).isEqualTo(DispatchStatus.DROP);
     }
 
     @Test
-    @DisplayName("handles a null CloudEvent body gracefully")
-    void handlesNullCloudEventBody() throws Exception {
-        DaprSubscriptionHandler handler = handlerFor("noArg");
+    void unreadableDataIsDroppedBecauseRedeliveryCannotHelp() throws Exception {
+        assertThat(invoke("handleOrder", event("not json at all"))).isEqualTo(DispatchStatus.DROP);
+        assertThat(handlers.receivedOrder).isNull();
+    }
 
-        DispatchResult result = dispatcher.dispatch(handler, null);
+    @Test
+    void decodesBase64DataForByteArrays() {
+        EventDataConverter converter = new EventDataConverter(null);
+        Map<String, Object> envelope = Map.of("data_base64", java.util.Base64.getEncoder().encodeToString(new byte[] {1, 2}));
+        assertThat((byte[]) converter.data(envelope, byte[].class)).containsExactly(1, 2);
+    }
 
-        assertThat(result.status()).isEqualTo(DispatchStatus.SUCCESS);
+    @Test
+    void handlersRegisteredInCodeGetTheTypedEvent() {
+        DaprTopicHandler<Order> handler = event -> {
+            assertThat(event.data().quantity()).isEqualTo(3);
+            return DispatchStatus.SUCCESS;
+        };
+        DaprSubscriptionHandler registered = new DaprSubscriptionHandler("/r", "pubsub", "orders", null, Map.of(),
+                null, 0, null, "code", null, null, dispatcher.handlerInvoker("code", TypeRef.get(Order.class), handler));
+        assertThat(dispatcher.dispatch(registered, event(orderJson())).status()).isEqualTo(DispatchStatus.SUCCESS);
+
+        DaprTopicHandler<Order> failing = event -> {
+            throw new IllegalStateException("downstream down");
+        };
+        DaprSubscriptionHandler failingHandler = new DaprSubscriptionHandler("/r", "pubsub", "orders", null, Map.of(),
+                null, 0, null, "code", null, null, dispatcher.handlerInvoker("code", TypeRef.get(Order.class), failing));
+        assertThat(dispatcher.dispatch(failingHandler, event(orderJson())).status()).isEqualTo(DispatchStatus.RETRY);
+    }
+
+    @Test
+    void handlersWithMoreThanOneParameterAreRejected() throws Exception {
+        Method method = Handlers.class.getDeclaredMethod("wrongArity", String.class, String.class);
+        assertThatThrownBy(() -> dispatcher.methodInvoker("handlers", handlers, method))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("at most one parameter");
+    }
+
+    @Test
+    void statusOfMapsResultValues() {
+        assertThat(DaprEventDispatcher.statusOf(null)).isEqualTo(DispatchStatus.SUCCESS);
+        assertThat(DaprEventDispatcher.statusOf("retry")).isEqualTo(DispatchStatus.RETRY);
+        assertThat(DaprEventDispatcher.statusOf("whatever")).isEqualTo(DispatchStatus.SUCCESS);
+        assertThat(DaprEventDispatcher.statusOf(Boolean.TRUE)).isEqualTo(DispatchStatus.SUCCESS);
     }
 }

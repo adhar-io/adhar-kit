@@ -37,8 +37,10 @@ public class DaprPublishAspect {
                 : resolveParameter(joinPoint, daprPublish.parameterIndex());
 
         if (payload != null) {
-            log.debug("Publishing Dapr event: pubsub={}, topic={}", daprPublish.pubsubName(), daprPublish.topic());
-            daprFacade.publishEvent(daprPublish.pubsubName(), daprPublish.topic(), payload);
+            String pubsub = daprPublish.pubsubName().isBlank()
+                    ? daprFacade.components().pubsub() : daprPublish.pubsubName();
+            log.debug("Publishing Dapr event: pubsub={}, topic={}", pubsub, daprPublish.topic());
+            daprFacade.publishEvent(pubsub, daprPublish.topic(), payload);
         }
         return result;
     }

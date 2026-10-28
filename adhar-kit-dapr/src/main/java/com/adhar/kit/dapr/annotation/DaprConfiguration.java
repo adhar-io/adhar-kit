@@ -5,6 +5,9 @@ import java.lang.annotation.*;
 /**
  * Marks a method to retrieve configuration from Dapr configuration store.
  *
+ * <p>Enforced by {@code DaprConfigurationAspect}: the value is converted to the method's return
+ * type; without a value and without a {@link #defaultValue()} the method body runs.</p>
+ *
  * <p><b>Example:</b></p>
  * <pre>{@code
  * @DaprConfiguration(storeName = "configstore", key = "database.connection-string")
@@ -22,9 +25,9 @@ import java.lang.annotation.*;
 public @interface DaprConfiguration {
 
     /**
-     * Configuration store name.
+     * Configuration store name; empty for the service default ({@code adhar.dapr.config-store}).
      */
-    String storeName() default "configstore";
+    String storeName() default "";
 
     /**
      * Configuration key.
@@ -37,7 +40,7 @@ public @interface DaprConfiguration {
     String defaultValue() default "";
 
     /**
-     * Subscribe to configuration changes.
+     * Keep the value live: subscribe on first use and answer later calls from the subscription.
      */
     boolean subscribe() default false;
 }

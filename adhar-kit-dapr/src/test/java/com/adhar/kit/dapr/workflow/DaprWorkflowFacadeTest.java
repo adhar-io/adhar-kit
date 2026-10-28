@@ -94,7 +94,7 @@ class DaprWorkflowFacadeTest {
 
     @Test
     void purgeDelegates() {
-        when(client.purgeInstance("wf-1")).thenReturn(true);
+        when(client.purgeWorkflow("wf-1")).thenReturn(true);
 
         assertThat(facade.purge("wf-1")).isTrue();
     }
@@ -110,5 +110,39 @@ class DaprWorkflowFacadeTest {
         facade.close();
 
         verify(client).close();
+    }
+
+    @Test
+    void getReadsTheWorkflowState() {
+        io.dapr.workflows.client.WorkflowState state = mock(io.dapr.workflows.client.WorkflowState.class);
+        when(client.getWorkflowState("wf-1", true)).thenReturn(state);
+
+        assertThat(facade.get("wf-1")).isSameAs(state);
+    }
+
+    @Test
+    void pauseAndResumeDelegate() {
+        facade.pause("wf-1", "maintenance");
+        facade.resume("wf-1", "done");
+
+        org.mockito.Mockito.verify(client).suspendWorkflow("wf-1", "maintenance");
+        org.mockito.Mockito.verify(client).resumeWorkflow("wf-1", "done");
+    }
+
+    @Test
+    void waitsDelegateWithInputsAndOutputs() throws Exception {
+        io.dapr.workflows.client.WorkflowState state = mock(io.dapr.workflows.client.WorkflowState.class);
+        when(client.waitForWorkflowStart("wf-1", java.time.Duration.ofSeconds(5), true)).thenReturn(state);
+        when(client.waitForWorkflowCompletion("wf-1", java.time.Duration.ofSeconds(9), true)).thenReturn(state);
+
+        assertThat(facade.waitForStart("wf-1", java.time.Duration.ofSeconds(5))).isSameAs(state);
+        assertThat(facade.waitForCompletion("wf-1", java.time.Duration.ofSeconds(9))).isSameAs(state);
+    }
+
+    @Test
+    void startWithAnInstanceIdIsIdempotentOnTheCallersId() {
+        when(client.scheduleNewWorkflow("OrderWorkflow", "in", "order-42")).thenReturn("order-42");
+
+        assertThat(facade.start("OrderWorkflow", "in", "order-42")).isEqualTo("order-42");
     }
 }

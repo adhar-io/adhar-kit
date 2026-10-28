@@ -42,37 +42,39 @@ public class DaprStateAspect {
     public Object applyState(ProceedingJoinPoint joinPoint, DaprState daprState) throws Throwable {
         Method method = resolveMethod(joinPoint);
         String key = keyResolver.resolveKey(daprState.key(), method, joinPoint.getTarget(), joinPoint.getArgs());
+        String store = daprState.storeName().isBlank() ? daprFacade.components().stateStore() : daprState.storeName();
 
         return switch (daprState.operation()) {
-            case GET -> handleGet(joinPoint, daprState, method, key);
-            case DELETE -> handleDelete(joinPoint, daprState, key);
-            case SAVE -> handleSave(joinPoint, daprState, key);
+            case GET -> handleGet(joinPoint, store, method, key);
+            case DELETE -> handleDelete(joinPoint, store, key);
+            case SAVE -> handleSave(joinPoint, store, key);
         };
     }
 
-    @SuppressWarnings("unchecked")
-    private Object handleGet(ProceedingJoinPoint joinPoint, DaprState daprState, Method method, String key)
+    private Object handleGet(ProceedingJoinPoint joinPoint, String store, Method method, String key)
             throws Throwable {
         Class<?> returnType = method != null ? method.getReturnType() : Object.class;
         if (returnType == void.class || returnType == Void.class) {
             return joinPoint.proceed();
         }
-        log.debug("Fetching Dapr state: store={}, key={}", daprState.storeName(), key);
-        return daprFacade.getState(daprState.storeName(), key, (Class<Object>) returnType);
+        log.debug("Fetching Dapr state: store={}, key={}", store, key);
+        // The generic return type keeps List<Order> a list of orders rather than of maps.
+        java.lang.reflect.Type type = method != null ? method.getGenericReturnType() : Object.class;
+        return daprFacade.getState(store, key, io.dapr.utils.TypeRef.get(type));
     }
 
-    private Object handleDelete(ProceedingJoinPoint joinPoint, DaprState daprState, String key) throws Throwable {
+    private Object handleDelete(ProceedingJoinPoint joinPoint, String store, String key) throws Throwable {
         Object result = joinPoint.proceed();
-        log.debug("Deleting Dapr state: store={}, key={}", daprState.storeName(), key);
-        daprFacade.deleteState(daprState.storeName(), key);
+        log.debug("Deleting Dapr state: store={}, key={}", store, key);
+        daprFacade.deleteState(store, key);
         return result;
     }
 
-    private Object handleSave(ProceedingJoinPoint joinPoint, DaprState daprState, String key) throws Throwable {
+    private Object handleSave(ProceedingJoinPoint joinPoint, String store, String key) throws Throwable {
         Object result = joinPoint.proceed();
         if (result != null) {
-            log.debug("Saving Dapr state: store={}, key={}", daprState.storeName(), key);
-            daprFacade.saveState(daprState.storeName(), key, result);
+            log.debug("Saving Dapr state: store={}, key={}", store, key);
+            daprFacade.saveState(store, key, result);
         }
         return result;
     }
