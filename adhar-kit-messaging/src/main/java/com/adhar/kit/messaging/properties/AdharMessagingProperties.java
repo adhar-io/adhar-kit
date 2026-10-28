@@ -665,9 +665,10 @@ public class AdharMessagingProperties {
         private boolean enabled = true;
 
         /**
-         * Name of the Dapr pub/sub component to publish through.
+         * Name of the Dapr pub/sub component to publish and subscribe through; defaults to the
+         * service's (adhar.dapr.pubsub, "pubsub" on the platform).
          */
-        private String pubsubName = "pubsub";
+        private String pubsubName;
 
         /**
          * Default topic to use when one is not specified.

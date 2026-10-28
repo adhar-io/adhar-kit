@@ -3,30 +3,57 @@ package com.adhar.adharkit.cache.properties;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
- * Configuration properties for the Dapr state-store-backed distributed cache
- * tier ({@code com.adhar.adharkit.cache.multilevel.DaprSecondLevelCache}).
+ * Configuration of the caches kept in a Dapr state store: the Spring {@code CacheManager} of
+ * {@code adhar.cache.provider=dapr} and the distributed L2 of the multi-level cache.
  *
  * <p><b>Configuration Example:</b></p>
  * <pre>{@code
  * adhar:
- *   dapr:
- *     enabled: true          # activates the Dapr L2 (owned by adhar-kit-dapr)
- *   kit:
- *     cache:
- *       dapr:
- *         state-store: statestore
+ *   cache:
+ *     provider: dapr          # @Cacheable goes through Dapr
+ *     time-to-live: 30m
+ *     dapr:
+ *       state-store: statestore   # default: adhar.dapr.state-store
+ *       time-to-live:
+ *         prices: 5m
  * }</pre>
  *
  * @author Adhar Platform Team
  * @since 1.1.0
  */
 @Data
-@ConfigurationProperties(prefix = "adhar.kit.cache.dapr")
+@ConfigurationProperties(prefix = "adhar.cache.dapr")
 public class AdharCacheDaprProperties {
 
     /**
-     * Name of the Dapr state store component used as the distributed L2 cache.
+     * Whether the Dapr-backed caches are wired (needs adhar-kit-dapr, which is on by default).
      */
-    private String stateStore = "statestore";
+    private boolean enabled = true;
+
+    /**
+     * Name of the Dapr state store component holding the caches. Defaults to the service's state
+     * store (adhar.dapr.state-store, statestore on the platform).
+     */
+    private String stateStore;
+
+    /**
+     * Prefix of every cache key in the state store, keeping caches apart from the service's state.
+     */
+    private String keyPrefix = "cache:";
+
+    /**
+     * Time-to-live per cache name, overriding adhar.cache.time-to-live.
+     */
+    private Map<String, Duration> timeToLive = new LinkedHashMap<>();
+
+    /**
+     * How long a replica trusts its view of a cache's generation; a clear() reaches the other
+     * replicas within this time.
+     */
+    private Duration generationTtl = Duration.ofSeconds(2);
 }

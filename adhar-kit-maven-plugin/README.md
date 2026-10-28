@@ -13,9 +13,123 @@
 
 ## 📖 Overview
 
-Enterprise Maven plugin for microservices development, providing versioning, release management, code generation, and standardization features.
+Enterprise Maven plugin for microservices development, providing spec-first OpenAPI code generation, versioning, release management, code generation, and standardization features.
 
 ## 🎯 Features
+
+### 📐 Spec-first OpenAPI (`adhar:openapi`, `adhar:openapi-lint`, `adhar:openapi-diff`, `adhar:catalog`)
+
+A service's API is written first, as one OpenAPI 3.0.3 document per major version at the
+repository root, and the code is generated from it:
+
+```
+api/
+├── v1/openapi.yaml      # paths /api/v1/..., info.version 1.x.y
+└── v2/openapi.yaml      # paths /api/v2/..., info.version 2.x.y
+```
+
+`adhar-kit-parent` binds the goals, so a service only declares the plugin:
+
+```xml
+<plugin>
+    <groupId>com.adhar.kit</groupId>
+    <artifactId>adhar-kit-maven-plugin</artifactId>
+    <configuration>
+        <basePackage>com.example.orders</basePackage>   <!-- default: ${project.groupId} -->
+    </configuration>
+</plugin>
+```
+
+- **`openapi-lint`** (`validate`) fails the build when a spec breaks the API contract.
+- **`openapi`** (`generate-sources`) generates `<basePackage>.api.v<major>` interfaces and
+  `<basePackage>.api.v<major>.model` models into `target/generated-sources/openapi` (added as a
+  source root) and copies each spec into the jar as `api/v<major>/openapi.yaml`, where
+  `adhar-kit-commons` serves it at `GET /api/v<major>/openapi.yaml`. Generation is skipped
+  when neither the specs nor the options changed, and the same spec always produces the same
+  bytes. Without a spec both goals do nothing.
+
+The controller implements the generated interface; a missing operation is a compile error,
+and the spec's constraints (`minLength`, `minimum`, `required`) arrive as Bean Validation:
+
+```java
+@RestController
+public class OrdersController implements com.example.orders.api.v1.OrdersApi {
+    @Override
+    public ResponseEntity<Order> getOrder(Long orderId) { ... }
+}
+```
+
+| Preset | Generator | Generates |
+|---|---|---|
+| `spring` (default) | openapi-generator `spring` | Spring MVC interfaces for Spring Boot 4: Jackson 3, Jakarta, JSpecify, Bean Validation, no default methods, no springdoc/swagger annotations. Needs `spring-boot-starter-webmvc` and `spring-boot-starter-validation` (adhar-kit-core brings both) |
+| `jaxrs` | `jaxrs-spec`, library `quarkus` | `jakarta.ws.rs` interfaces for Quarkus REST (verified against Quarkus 3.15) |
+| `spring-client` | `spring`, library `spring-http-interface` | `@HttpExchange` clients for calling another service, e.g. through the Dapr sidecar (`http://localhost:3500/v1.0/invoke/<app-id>/method`); not linted, not shipped |
+
+Other specs - typically another service's API to call - are configured explicitly; the major
+comes from a `v<major>` directory, else from `info.version`:
+
+```xml
+<configuration>
+    <specs>
+        <spec>
+            <file>${project.basedir}/api-clients/payments/openapi.yaml</file>
+            <preset>spring-client</preset>   <!-- default package: <basePackage>.client.v<major> -->
+        </spec>
+    </specs>
+    <additionalProperties>                     <!-- overrides a preset option; rarely needed -->
+        <useOptional>true</useOptional>
+    </additionalProperties>
+</configuration>
+```
+
+| Property | Default | |
+|---|---|---|
+| `adhar.openapi.skip` | `false` | skip every OpenAPI goal |
+| `adhar.openapi.apiDirectory` | `${project.basedir}/api` | where `v<major>/openapi.yaml` is found |
+| `adhar.openapi.discover` | `true` | find specs by convention |
+| `adhar.openapi.preset` | `spring` | preset of discovered specs |
+| `adhar.openapi.basePackage` | `${project.groupId}` | package prefix (made a valid Java package) |
+| `adhar.openapi.shipSpecs` | `true` | copy the service's specs into the jar |
+| `adhar.openapi.lint.skip` / `.failOnWarnings` | `false` | |
+
+**The API contract `openapi-lint` checks** (errors fail the build):
+
+| Rule | |
+|---|---|
+| `openapi-version` | `openapi: 3.0.x` - every generator in use supports 3.0, not all support 3.1 |
+| `info-version` | a semantic `info.version` whose major is the directory's (`api/v2` → `2.x.y`) |
+| `path-prefix` | every path starts with `/api/v<major>` |
+| `servers` | no server URL with a base path (the paths are already absolute) |
+| `operation-id`, `operation-tags` | a unique operationId (the method) and a tag (the interface, `<Tag>Api`) on every operation |
+| `responses`, `problem-json` | responses declared; every `4xx`, `5xx` and `default` response is `application/problem+json` |
+| `external-ref`, `unresolved-ref` | every `$ref` stays in the document and resolves - the shipped file is the whole contract |
+| `inline-schema` (warning) | bodies `$ref` a schema under `components.schemas` |
+
+**`openapi-diff`** (not bound; a CI step) fails when a spec breaks the clients of its major -
+a removed operation, a new required request field, a changed type. Such a change belongs in
+a new `api/v<major+1>/openapi.yaml`, served alongside. The comparison is openapi-diff's, so a
+new response field is compatible and a new required request field is not; every change is
+written to `target/openapi-diff.md`:
+
+```bash
+mvn adhar:openapi-diff -Dadhar.openapi.diff.against=origin/main      # a git revision
+mvn adhar:openapi-diff -Dadhar.openapi.diff.baseline=1.4.0           # this project's released jar
+mvn adhar:openapi-diff -Dadhar.openapi.diff.baseline=com.example:orders:1.4.0
+mvn adhar:openapi-diff -Dadhar.openapi.diff.against=v1.4.0 -Dadhar.openapi.diff.requireVersionBump=true
+```
+
+**`catalog`** (not bound) declares the APIs in `catalog-info.yaml`: one `kind: API` entity per
+major (`<component>-v<major>`, `spec.definition.$text: ./api/v<major>/openapi.yaml`, owner and
+lifecycle from the Component) and the Component's `spec.providesApis`. Only the entities it
+generated (annotated `adhar.io/generated-by: adhar-kit-maven-plugin`) and the `providesApis`
+entry are rewritten; everything else in the file stays as written.
+
+```bash
+mvn adhar:catalog                               # write catalog-info.yaml
+mvn adhar:catalog -Dadhar.catalog.check=true    # CI: fail when it lags behind the specs
+```
+
+The plugin itself needs a Java 25 JDK; the code it generates does not.
 
 ### 🔢 Semantic Versioning (`adhar:version`)
 Automatic version management based on Conventional Commits:

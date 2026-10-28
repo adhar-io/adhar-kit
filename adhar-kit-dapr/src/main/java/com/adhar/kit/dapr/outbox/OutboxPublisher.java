@@ -44,7 +44,7 @@ public class OutboxPublisher {
     static final String INDEX_KEY = "outbox:index";
     static final String RELAY_LOCK = "outbox:relay";
     private static final int DEFAULT_MAX_ATTEMPTS = 5;
-    private static final int INDEX_RETRIES = 5;
+    private static final int INDEX_RETRIES = 10;
     private static final int RELAY_LOCK_SECONDS = 60;
 
     private final DaprFacade daprFacade;
@@ -124,6 +124,7 @@ public class OutboxPublisher {
                     throw e;
                 }
                 log.debug("Outbox index changed concurrently (attempt {}/{}); retrying", attempt, INDEX_RETRIES);
+                backoff(attempt);
             }
         }
         throw new OptimisticConcurrencyException("Failed to append outbox event after " + INDEX_RETRIES
@@ -219,6 +220,15 @@ public class OutboxPublisher {
      */
     public Optional<OutboxEvent> getEvent(String id) {
         return eventRepo.find(EVENT_KEY_PREFIX + id);
+    }
+
+    /** Randomised so appenders that collided do not collide again in lockstep. */
+    private static void backoff(int attempt) {
+        try {
+            Thread.sleep(java.util.concurrent.ThreadLocalRandom.current().nextLong(1, 10L * Math.min(attempt, 5) + 1));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static boolean isConflict(DaprError e) {

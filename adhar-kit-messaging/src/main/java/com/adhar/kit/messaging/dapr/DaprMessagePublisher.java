@@ -39,19 +39,12 @@ import java.util.concurrent.CompletableFuture;
  *       CloudEvents 1.0 envelope, so plain payloads published through this class are delivered
  *       to subscribers as CloudEvents without any extra work.</li>
  *   <li><b>Async publishing:</b> {@link DaprFacade#publishEvent} is blocking, so the
- *       {@code publishAsync} variants execute the same blocking call on the common
- *       {@link java.util.concurrent.ForkJoinPool} rather than using a broker-native async API.</li>
+ *       {@code publishAsync} variants run the same call on a virtual thread rather than using a
+ *       broker-native async API (and never on the common fork-join pool).</li>
  * </ul>
  *
- * <p><b>Subscribe-side limitation:</b> this module intentionally provides no Dapr-backed
- * {@link com.adhar.kit.messaging.core.MessageListener}. Dapr delivers subscriptions by calling
- * an HTTP endpoint on the application, and the set of subscribed topics is collected by the
- * sidecar at application startup (via the {@code adhar-kit-dapr} module's
- * {@code DaprSubscriptionRegistrar}/{@code @DaprSubscribe} programmatic-subscription support).
- * That model cannot express the {@code MessageListener} SPI's dynamic runtime
- * {@code subscribe}/{@code unsubscribe} contract without coupling this module to the Dapr
- * module's HTTP controller internals, so consumers should subscribe with
- * {@code @DaprSubscribe} from {@code adhar-kit-dapr} instead.</p>
+ * <p>The subscribe side is {@link DaprMessageListener} (streaming subscriptions); services that
+ * know their topics at startup can also use {@code @DaprSubscribe} from {@code adhar-kit-dapr}.</p>
  */
 public class DaprMessagePublisher implements MessagePublisher {
 
@@ -71,6 +64,9 @@ public class DaprMessagePublisher implements MessagePublisher {
             "ce-id", "cloudevent.id",
             "ce-type", "cloudevent.type",
             "ce-source", "cloudevent.source");
+
+    private static final java.util.concurrent.ExecutorService ASYNC =
+            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
 
     private final DaprFacade daprFacade;
     private final String pubsubName;
@@ -176,7 +172,7 @@ public class DaprMessagePublisher implements MessagePublisher {
 
     @Override
     public <T> CompletableFuture<Boolean> publishAsync(String destination, String routingKey, Map<String, Object> headers, T payload) {
-        return CompletableFuture.supplyAsync(() -> publish(destination, routingKey, headers, payload));
+        return CompletableFuture.supplyAsync(() -> publish(destination, routingKey, headers, payload), ASYNC);
     }
 
     /**

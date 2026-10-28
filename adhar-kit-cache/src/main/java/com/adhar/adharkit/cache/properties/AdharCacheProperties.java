@@ -27,6 +27,14 @@ public class AdharCacheProperties {
     private boolean enabled = true;
 
     /**
+     * Which store backs the Spring cache abstraction (@Cacheable): "dapr" puts it in a Dapr state
+     * store through the sidecar; unset (or "auto") keeps the default choice of a Redis/Valkey
+     * connection when the application has one, Kafka-synchronized local caches when
+     * adhar.cache.kafka.enabled is set, and Spring Boot's default otherwise.
+     */
+    private String provider = "auto";
+
+    /**
      * Default time-to-live for cache entries.
      */
     private Duration timeToLive = Duration.ofMinutes(30);

@@ -7,14 +7,19 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionOutcome;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.SpringBootCondition;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
+import org.springframework.context.annotation.ConditionContext;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.core.type.AnnotatedTypeMetadata;
 
 import java.time.Duration;
 
@@ -43,7 +48,22 @@ import java.time.Duration;
 @ConditionalOnClass({RedisConnectionFactory.class, org.springframework.data.redis.cache.RedisCacheManager.class})
 @ConditionalOnProperty(prefix = "adhar.cache", name = "enabled", havingValue = "true", matchIfMissing = true)
 @ConditionalOnProperty(prefix = "adhar.cache.redis", name = "enabled", havingValue = "true", matchIfMissing = true)
+@Conditional(RedisConfig.NotDaprProvider.class)
 public class RedisConfig {
+
+    /**
+     * Steps aside for {@code adhar.cache.provider=dapr}: the caches then live behind the sidecar
+     * and a Redis connection of the service's own (even a fallback one) would be unused.
+     */
+    static class NotDaprProvider extends SpringBootCondition {
+        @Override
+        public ConditionOutcome getMatchOutcome(ConditionContext context, AnnotatedTypeMetadata metadata) {
+            String provider = context.getEnvironment().getProperty("adhar.cache.provider", "auto");
+            return "dapr".equalsIgnoreCase(provider.trim())
+                    ? ConditionOutcome.noMatch("adhar.cache.provider=dapr")
+                    : ConditionOutcome.match("adhar.cache.provider=" + provider);
+        }
+    }
 
     /**
      * Fallback connection from {@code adhar.cache.redis.*}, created only when the

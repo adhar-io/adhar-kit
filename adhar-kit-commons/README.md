@@ -23,10 +23,10 @@ The **adhar-kit-commons** module provides foundational components for building e
 - 📝 **Common Models** - API responses, errors, pagination
 - 🔧 **Enterprise Patterns** - Idempotency, versioning, events
 - ☁️ **CloudEvents Support** - Standard event format and base classes
-- 🚨 **Global Exception Handling** - `SpringGlobalExceptionHandler` (@RestControllerAdvice) mapping the exception hierarchy (via `getHttpStatus()`) plus `@Valid` / constraint violations to `ErrorResponse` bodies
+- 🚨 **Global Exception Handling** - `SpringGlobalExceptionHandler` (@RestControllerAdvice) mapping the exception hierarchy (via `getHttpStatus()`) plus `@Valid` / constraint violations to `ErrorResponse` bodies; Spring MVC's own exceptions keep their status (404 for an unmapped path, 405, 406, 415, 400 for an unreadable body or a wrong parameter type) instead of becoming a 500, and under `/api/v<major>` every error is an RFC 9457 `application/problem+json`
 - 🔁 **Idempotency Runtime** - `IdempotencyAspect` + TTL-aware `InMemoryIdempotencyStore` behind `@Idempotent` (SpEL / `{index}` keys, cached replay, `DuplicateRequestException` for in-flight duplicates)
 - 🧵 **Tenant & Correlation Context** - `TenantContext` / `CorrelationContext` ThreadLocals with servlet filters populating SLF4J MDC from `X-Tenant-ID` / `X-Correlation-ID` / `X-Request-ID` and echoing ids on responses
-- 🏷️ **API Versioning Runtime** - `ApiVersionInterceptor` emitting `Deprecation` / `Sunset` headers for `@ApiVersion` handlers, with optional `X-API-Version` request validation
+- 🏷️ **API Versioning** - the major version is the path (`/api/v<major>/...`), resolved by Spring Framework 7's built-in API versioning; every response reports the full version in `API-Version`, deprecations are announced with RFC 9745 `Deprecation`, RFC 8594 `Sunset` and a `successor-version` `Link`, a contradicting `API-Version` request header is a 400 problem, and `GET /api` / `GET /api/v<major>/openapi.yaml` expose the versions and the specs shipped in the artifact (see [API Versioning](#api-versioning))
 - ✅ **`@NotNullOrEmpty` Validator** - Jakarta `ConstraintValidator` for strings, collections, maps, arrays and optionals
 - ⚙️ **Spring Boot Auto-Configuration** - all runtime beans registered conditionally, overridable via `@ConditionalOnMissingBean`, toggleable under `adhar.commons.*`
 
@@ -336,30 +336,65 @@ public class PaymentService {
 }
 ```
 
-#### @ApiVersion
+#### API Versioning
+
+The major version is part of the path, because it is the only change a client must
+opt into: `/api/v1/...` and `/api/v2/...` are served side by side, each from its own
+`api/v<major>/openapi.yaml` (generated with `adhar-kit-maven-plugin`'s `openapi` goal,
+which also ships the spec in the jar). Minor and patch releases keep the path and only
+move the version every response reports.
+
+The kit configures Spring Framework 7's built-in API versioning for this: the version
+is resolved from the path segment, only for paths shaped `/api/v<major>` (actuator,
+`/dapr/*` and every other path need no version), and the majors the service serves are
+the supported versions. Controllers may still declare `version = "..."` on mappings.
+
+| On every response under `/api/v<major>` | |
+|---|---|
+| `API-Version: 1.4.2` | the full version: `info.version` of the shipped spec, or `adhar.commons.api-versioning.versions.v1.version` |
+| `Deprecation: @1788220800` | RFC 9745, once a deprecation is announced (`@0` when no date is given) |
+| `Sunset: Sun, 31 Jan 2027 00:00:00 GMT` | RFC 8594, with a deprecation |
+| `Link: </api/v2>; rel="successor-version"` | with a deprecation; defaults to the next major the service serves |
+
+A request whose `API-Version` header names another major than its path (`API-Version: 2`
+on `/api/v1/orders`) is refused with a 400 `application/problem+json` naming the
+supported version - the client was written against an API this path does not serve.
+
+```yaml
+adhar:
+  commons:
+    api-versioning:
+      enabled: true                    # the whole feature
+      reject-mismatched-major: true    # the 400 above
+      spec-locations: classpath*:api/v*/openapi.yaml
+      endpoints:
+        enabled: true                  # GET /api and GET /api/v<major>/openapi.yaml
+      versions:
+        v1:
+          deprecated: 2026-09-01       # ISO date / date-time, epoch seconds, or true
+          sunset: 2027-01-31
+          successor: /api/v2           # default: the next major
+          deprecation-link: https://docs.example.com/orders/v1-retirement
+```
+
+`GET /api` lists the versions - `[{"major":1,"version":"1.4.2","status":"deprecated","sunset":"2027-01-31T00:00:00Z","spec":"/api/v1/openapi.yaml"}]` -
+and `GET /api/v1/openapi.yaml` serves the shipped spec with an `ETag`. Errors under
+`/api/v<major>` are RFC 9457 problem details (`title`, `status`, `detail`, `instance`,
+plus `code`, `requestId` and `fieldErrors`); other paths keep the `ErrorResponse` body
+unless `adhar.commons.exception-handler.problem-details` is `always` (or `never` to
+switch problem details off). `ProblemDetails` builds and writes the same body for code
+that runs outside Spring MVC.
+
+`@ApiVersion` is **deprecated**: it never routed requests (two handlers on one path fail
+with an ambiguous mapping). It still marks a single endpoint deprecated - on
+`/api/v<major>` with the RFC 9745/8594 headers, elsewhere with the legacy
+`X-API-Version` / `Deprecation: true` headers of `ApiVersionInterceptor`:
 
 ```java
-@RestController
-@RequestMapping("/api")
-public class UserController {
-    
-    @ApiVersion(
-        version = "1.0",
-        deprecated = true,
-        deprecationMessage = "Use v2.0",
-        sunsetDate = "2026-12-31"
-    )
-    @GetMapping("/users/{id}")
-    public UserV1 getUserV1(@PathVariable String id) {
-        return userService.findById(id);
-    }
-    
-    @ApiVersion(version = "2.0")
-    @GetMapping("/v2/users/{id}")
-    public UserV2 getUserV2(@PathVariable String id) {
-        return userService.findByIdV2(id);
-    }
-}
+@ApiVersion(version = "1", deprecated = true, deprecationDate = "2026-09-01",
+            sunsetDate = "2027-01-31", deprecationMessage = "Use GET /api/v1/orders?status=open")
+@GetMapping("/api/v1/open-orders")
+public List<Order> openOrders() { ... }
 ```
 
 #### @NotNullOrEmpty
@@ -692,7 +727,7 @@ ValidationUtils.requireNotEquals(obj1, obj2, "Objects must differ");
 | `@DomainService` | DDD | Mark domain services |
 | `@PublishEvent` | Events | Auto-publish domain events |
 | `@Idempotent` | Enterprise | Idempotent operations |
-| `@ApiVersion` | Versioning | API version management |
+| `@ApiVersion` | Versioning (deprecated) | Deprecate a single endpoint; versions are paths (`/api/v<major>`) |
 | `@NotNullOrEmpty` | Validation | Validate non-empty fields |
 
 **Total:** 8 DDD & Enterprise Annotations
@@ -781,23 +816,27 @@ public class OrderService {
 
 ### Pattern 4: Versioned API
 
+Each major is a spec, `api/v1/openapi.yaml` and `api/v2/openapi.yaml`, from which
+`adhar-kit-maven-plugin` generates a `ProductsApi` interface in `<basePackage>.api.v1`
+and one in `.api.v2`; the controllers implement them and the kit does the rest:
+
 ```java
 @RestController
-@RequestMapping("/api")
-public class ProductController {
-    
-    @ApiVersion(version = "1.0", deprecated = true)
-    @GetMapping("/products/{id}")
-    public ProductV1 getProductV1(@PathVariable String id) {
-        return productService.findByIdV1(id);
-    }
-    
-    @ApiVersion(version = "2.0")
-    @GetMapping("/v2/products/{id}")
-    public ProductV2 getProductV2(@PathVariable String id) {
-        return productService.findByIdV2(id);
-    }
+public class ProductsV1Controller implements com.example.shop.api.v1.ProductsApi {
+    @Override
+    public ResponseEntity<com.example.shop.api.v1.model.Product> getProduct(String id) { ... }
 }
+
+@RestController
+public class ProductsV2Controller implements com.example.shop.api.v2.ProductsApi {
+    @Override
+    public ResponseEntity<com.example.shop.api.v2.model.Product> getProduct(String id) { ... }
+}
+```
+
+```yaml
+adhar.commons.api-versioning.versions.v1.deprecated: 2026-09-01
+adhar.commons.api-versioning.versions.v1.sunset: 2027-01-31
 ```
 
 ---
@@ -944,7 +983,8 @@ public class Order {
 ✅ **SpringGlobalExceptionHandler** - HTTP status mapping for the exception hierarchy (400/404/409/422/500/502)  
 ✅ **Idempotency** - `IdempotencyStore` + `IdempotencyAspect` for `@Idempotent`  
 ✅ **Context Propagation** - `TenantContextFilter` + `CorrelationIdFilter` with MDC support  
-✅ **API Versioning** - `ApiVersionInterceptor` for `@ApiVersion` (Deprecation/Sunset headers)  
+✅ **API Versioning** - path-major versions on Spring's built-in API versioning: `API-Version`, RFC 9745/8594 deprecation headers, `GET /api`, shipped specs at `/api/v<major>/openapi.yaml`  
+✅ **Problem Details** - RFC 9457 `application/problem+json` errors under `/api/v<major>`  
 ✅ **Toggles** - `adhar.commons.{exception-handler,idempotency,correlation,tenant,api-versioning}.enabled`  
 
 **Perfect for:**

@@ -85,20 +85,34 @@ implementation 'com.adhar.kit:adhar-kit-docs:0.1.0-SNAPSHOT'
 
 ### 2. Configure Application
 
+Nothing is required: the document is titled after `spring.application.name` and
+versioned after the build (`BuildProperties`, from `spring-boot-maven-plugin`'s
+`build-info` goal). To set them explicitly:
+
 **application.yml:**
 ```yaml
 adhar:
   docs:
     enabled: true
-    info:
-      title: "Order Service API"
-      version: "1.0.0"
-      description: "Microservice for order management"
-    security:
-      jwt-enabled: true
+    title: "Order Service API"        # default: spring.application.name
+    version: "1.0.0"                  # default: the build's version
+    description: "Microservice for order management"
+    shipped-specs: true               # Swagger UI shows api/v<major>/openapi.yaml when shipped
 ```
 
+### Spec-first services: the shipped spec is the documentation
+
+A service generated from `api/v<major>/openapi.yaml` (adhar-kit-maven-plugin's `openapi`
+goal) ships that file, and adhar-kit-commons serves it at `/api/v<major>/openapi.yaml`.
+With both modules present Swagger UI lists those files - one entry per major, the
+highest selected - instead of the document springdoc derives from the code, which lacks
+the spec's descriptions, examples and problem schemas. `/v3/api-docs` stays available
+for tools. Explicit `springdoc.swagger-ui.url`/`urls`, or
+`adhar.docs.shipped-specs=false`, leave Swagger UI as configured.
+
 ### 3. Add OpenAPI Bean (Spring Boot)
+
+The module's `OpenAPI` bean backs off when the application defines its own:
 
 ```java
 @Configuration

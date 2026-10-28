@@ -305,7 +305,7 @@ public class OrderService {
 | 📜 **event-sourcing** | Event sourcing (`getEventStore()`) | Event store, aggregates, CQRS, domain event bus |
 | ⚡ **perf-profiler** | Profiling (`getProfiler()`) | Method tracing, hotspots, memory, Actuator endpoint |
 | 🚀 **starter** | Unified integration | AdharFacade with 40+ convenience shortcuts |
-| 🔌 **maven-plugin** | Build tooling | Release management, code generation (DTO, Controller) |
+| 🔌 **maven-plugin** | Build tooling | Spec-first OpenAPI (generate, lint, breaking-change diff, catalog), release management, code generation (DTO, Controller) |
 | 🔄 **rewrite** | Code modernization (`getRewrite()`) | 26 OpenRewrite recipes, 5 framework migrations, cross-framework |
 
 </details>

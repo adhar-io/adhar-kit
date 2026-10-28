@@ -438,8 +438,11 @@ public class SidecarDaprBackend implements DaprBackend {
 
     @Override
     public byte[] invokeBinding(String name, String operation, Object data, Map<String, String> metadata) {
+        // Text goes out as-is, as the sidecar's HTTP API sends it: the SDK would JSON-quote it,
+        // and an email body or a file would arrive wrapped in quotes.
+        Object payload = data instanceof String text ? text.getBytes(java.nio.charset.StandardCharsets.UTF_8) : data;
         InvokeBindingRequest request = new InvokeBindingRequest(name, operation)
-                .setData(data)
+                .setData(payload)
                 .setMetadata(metadata);
         return block(client.invokeBinding(request, TypeRef.BYTE_ARRAY));
     }

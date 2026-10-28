@@ -17,8 +17,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are spans, and W3C `traceparent` is injected/extracted. Incoming WebFlux requests get SERVER
   spans too; the servlet `TracingServerSpanFilter` defers to Boot's server observation instead
   of nesting a duplicate SERVER span.
+- **adhar-kit-maven-plugin** — spec-first OpenAPI. `adhar:openapi` generates code from
+  `api/v<major>/openapi.yaml` through openapi-generator 7.26.0 with three presets: `spring`
+  (Spring MVC interfaces for Boot 4 - Jackson 3, JSpecify, Bean Validation, no default
+  methods, so a missing operation is a compile error), `jaxrs` (Quarkus REST) and
+  `spring-client` (`@HttpExchange` clients for calling another service through Dapr). Output
+  lands in `<basePackage>.api.v<major>`, is byte-for-byte reproducible, is skipped when nothing
+  changed, and the spec ships in the jar as `api/v<major>/openapi.yaml`. `adhar:openapi-lint`
+  enforces the API contract: OpenAPI 3.0.x, a semantic `info.version` whose major is the
+  directory's, every path under `/api/v<major>`, an operationId and a tag on every operation,
+  `application/problem+json` for every 4xx/5xx, no `$ref` leaving the document.
+  `adhar:openapi-diff` fails on a change that breaks a major's clients, compared with a git
+  revision or a released jar (openapi-diff), and `adhar:catalog` declares a `kind: API` entity
+  per major and the Component's `providesApis` in `catalog-info.yaml`.
+- **adhar-kit-parent** — manages `adhar-kit-maven-plugin` with `openapi-lint` (validate) and
+  `openapi` (generate-sources) executions: a service declares the plugin and nothing else.
+  JaCoCo no longer counts generated models (`**/api/v*/model/**`, `**/client/v*/model/**`).
+- **adhar-kit-commons** — API versioning on Spring Framework 7's built-in API versioning. The
+  version is the major in the path (`/api/v<major>/...`); every response below it carries
+  `API-Version` (the shipped spec's `info.version`); a deprecated major
+  (`adhar.commons.api-versioning.versions.v<major>.deprecated|sunset|successor`) answers with
+  RFC 9745 `Deprecation`, RFC 8594 `Sunset` and a `successor-version` `Link` through
+  `StandardApiVersionDeprecationHandler`; an `API-Version` request header naming another major
+  is a 400 problem; `GET /api` lists the versions and `GET /api/v<major>/openapi.yaml` serves
+  the shipped spec with an ETag. Errors under `/api/v<major>` are RFC 9457
+  `application/problem+json` (`adhar.commons.exception-handler.problem-details`:
+  `versioned-api` | `always` | `never`); `ProblemDetails` writes the same body outside MVC.
+- **adhar-kit-docs** — Swagger UI shows the shipped `api/v<major>/openapi.yaml` (served by
+  adhar-kit-commons) instead of the document derived from the code. The default `OpenAPI` bean
+  is titled after `spring.application.name`, versioned after the build, and backs off when the
+  application defines its own.
+
+### Changed
+
+- **adhar-kit-commons** — `ApiVersionInterceptor` is no longer the versioning mechanism: it
+  acts only outside `/api/v<major>`, where its legacy headers and the opt-in
+  `validate-request-version` check are unchanged. The contract check under `/api/v<major>` is
+  `adhar.commons.api-versioning.reject-mismatched-major` (default `true`).
+
+### Deprecated
+
+- **adhar-kit-commons** — `@ApiVersion` and `ApiVersionInterceptor`: an interceptor cannot
+  route between versions (two handlers on one path fail with an ambiguous mapping); version
+  the API by path. `@ApiVersion` still marks a single endpoint deprecated and gains
+  `deprecationDate`.
 
 ### Fixed
+
+- **adhar-kit-commons** — Spring MVC's own exceptions no longer turn into a 500 behind
+  `SpringGlobalExceptionHandler`'s catch-all: a path nothing maps is a 404 (the templates
+  documented "answers 404, which adhar-kit reports as a 500"), a wrong method a 405 with
+  `Allow`, media types 415/406, an unreadable body or a parameter of the wrong type a 400,
+  `ResponseStatusException` its own status, and Spring's built-in parameter validation a 400
+  with field errors.
+- **adhar-kit-core, -docs, -config, -grpc, -health, -kubernetes, -persistence, -resilience,
+  -analytics, -perf-profiler, -starter** — no longer ship an `application.properties`. Spring
+  loads the first one on the classpath, so in a service configured with `application.yml`
+  alone, whichever of these jars came first became the service's configuration
+  (`spring.application.name=adhar-kit-perf-profiler`, persistence's JPA settings). Defaults
+  belong to the modules' `@ConfigurationProperties`.
 
 - **adhar-kit-metrics / adhar-kit-tracing** — inside a pod, a hard-coded
   `deployment.environment=local` in `OTEL_RESOURCE_ATTRIBUTES` (older scaffolds' base Rollout)

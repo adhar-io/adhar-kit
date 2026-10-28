@@ -34,6 +34,13 @@ public class ProblemDetailsResponseAdvice implements ResponseBodyAdvice<Object> 
     private final ProblemDetailsScope scope;
 
     /**
+     * Creates the advice for the versioned API only, the default scope.
+     */
+    public ProblemDetailsResponseAdvice() {
+        this(ProblemDetailsScope.VERSIONED_API);
+    }
+
+    /**
      * Creates the advice.
      *
      * @param scope which error responses become problem details
