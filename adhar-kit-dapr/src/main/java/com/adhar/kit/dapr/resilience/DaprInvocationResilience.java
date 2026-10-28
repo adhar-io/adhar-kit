@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -116,6 +117,73 @@ public class DaprInvocationResilience {
             }
         }
         return applyFallbackOrThrow(lastFailure, fallback);
+    }
+
+    /**
+     * Runs a call on the caller's thread: fails fast while the breaker is open, retries the
+     * failures {@code retryable} accepts (linear backoff, up to {@code maxAttempts}) and counts
+     * every failure toward the breaker. Unlike {@link #execute}, no timeout is imposed, because the
+     * HTTP clients that use this carry their own.
+     *
+     * @param call      the call
+     * @param retryable which failures may be retried (non-idempotent requests pass {@code t -> false})
+     * @param <R>       the result type
+     * @return the call's result
+     * @throws CircuitBreakerOpenException while the breaker is open
+     */
+    public <R> R call(Supplier<R> call, Predicate<Throwable> retryable) {
+        Objects.requireNonNull(call, "call must not be null");
+        if (!allowRequest()) {
+            throw new CircuitBreakerOpenException("Circuit breaker is open; rejecting call");
+        }
+        RuntimeException lastFailure = null;
+        for (int attempt = 1; attempt <= settings.maxAttempts(); attempt++) {
+            try {
+                R result = call.get();
+                onSuccess();
+                return result;
+            } catch (RuntimeException e) {
+                lastFailure = e;
+                onFailure();
+                boolean retry = attempt < settings.maxAttempts() && retryable != null && retryable.test(e)
+                        && state.get() != CircuitState.OPEN;
+                log.debug("Dapr call attempt {}/{} failed (retry={}): {}", attempt, settings.maxAttempts(), retry,
+                        e.toString());
+                if (!retry) {
+                    break;
+                }
+                sleepQuietly(settings.retryBackoff().multipliedBy(attempt));
+            }
+        }
+        throw lastFailure;
+    }
+
+    /**
+     * Records the outcome of a call that was made without this helper (a response the caller
+     * inspected itself), so it still moves the breaker.
+     *
+     * @param success whether the call succeeded
+     */
+    public void record(boolean success) {
+        if (success) {
+            onSuccess();
+        } else {
+            onFailure();
+        }
+    }
+
+    /**
+     * Whether the breaker currently admits a call. A call admitted while half-open is the trial.
+     *
+     * @return {@code true} when a call may proceed
+     */
+    public boolean tryAcquire() {
+        return allowRequest();
+    }
+
+    /** The settings this resilience was built with. */
+    public ResilienceSettings settings() {
+        return settings;
     }
 
     /**

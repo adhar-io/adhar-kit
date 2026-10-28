@@ -30,6 +30,7 @@
         <javapoet.version>1.13.0</javapoet.version>
         <jgit.version>7.7.0.202606012155-r</jgit.version>
         <semver4j.version>3.1.0</semver4j.version>
+        <openapi-generator.version>7.26.0</openapi-generator.version>
     </properties>
 
     <dependencies>
@@ -100,6 +101,31 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
+        <!-- YAML OpenAPI specs (openapi-lint reads the raw document) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
+        </dependency>
+
+        <!-- Spec-first code generation (adhar:openapi), through openapi-generator's
+             Java API so the presets live in this plugin rather than in every service's
+             pom. slf4j-simple would be a second SLF4J provider next to Maven's own, and
+             Lombok arrives only because adhar-kit-parent manages its version. -->
+        <dependency>
+            <groupId>org.openapitools</groupId>
+            <artifactId>openapi-generator</artifactId>
+            <version>${openapi-generator.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-simple</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.projectlombok</groupId>
+                    <artifactId>lombok</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
 
         <!-- Adhar Kit Commons -->
         <dependency>
@@ -135,6 +161,14 @@
             <groupId>org.apache.maven.plugin-testing</groupId>
             <artifactId>maven-plugin-testing-harness</artifactId>
             <version>3.3.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- The OpenAPI tests compile what the spring and spring-client presets
+             generate, against the same APIs a service compiles it with
+             (jakarta.validation-api already arrives through adhar-kit-commons). -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

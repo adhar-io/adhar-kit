@@ -11,7 +11,7 @@
     </parent>
     <artifactId>adhar-kit-dapr</artifactId>
     <name>Adhar Kit Dapr</name>
-    <description>Comprehensive Dapr integration - State, Pub/Sub, Service Invocation, Bindings, Actors, Secrets, Configuration</description>
+    <description>Dapr for Spring services - every building block (state, pub/sub, invocation, bindings, secrets, configuration, lock, jobs, workflows, actors, crypto) through one sidecar client, with an in-memory mode for running without Dapr</description>
 
     <properties>
         <dapr-sdk.version>1.18.0</dapr-sdk.version>
@@ -25,11 +25,14 @@
             <version>${dapr-sdk.version}</version>
         </dependency>
 
-        <dependency>
-            <groupId>io.dapr</groupId>
-            <artifactId>dapr-sdk-springboot</artifactId>
-            <version>${dapr-sdk.version}</version>
-        </dependency>
+        <!-- dapr-sdk-springboot is deliberately NOT a dependency. Its DaprController claims
+             GET /dapr/subscribe and only advertises the SDK's own @Topic methods, so kit
+             @DaprSubscribe/@DaprTopic handlers were discovered but never delivered; it also
+             maps /healthz (an ambiguous-mapping clash with the services' own health endpoint)
+             and drags dapr-sdk-actors onto every classpath. The kit serves the app callback
+             endpoints itself (DaprAppCallbackHandlerMapping) and still advertises @io.dapr.Topic
+             methods. It stays on the test classpath to prove the two coexist when an
+             application adds the SDK starter itself. -->
 
         <!-- Dapr Actors SDK (optional) - actor runtime registration + typed actor proxies.
              Optional so that consumers not using actors don't pull it transitively; it is
@@ -77,10 +80,35 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- Jackson for JSON -->
+        <!-- Jackson for JSON (the Dapr SDK serializes with Jackson 2) -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <!-- java.time support for state values and event payloads: the SDK's own mapper has
+             none, so a record carrying an Instant could not be saved or published. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+
+        <!-- One observation per Dapr call (component, operation, outcome) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-observation</artifactId>
+        </dependency>
+        <!-- Optional: W3C trace context of the current span for calls made through the SDK -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- Optional: Dapr sidecar HealthIndicator when actuator health is present -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-health</artifactId>
+            <optional>true</optional>
         </dependency>
 
         <!-- Lombok -->
@@ -94,6 +122,14 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- The SDK's Spring Boot integration, only to prove the kit's callback endpoints win
+             over its DaprController when an application brings it in (see above). -->
+        <dependency>
+            <groupId>io.dapr</groupId>
+            <artifactId>dapr-sdk-springboot</artifactId>
+            <version>${dapr-sdk.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

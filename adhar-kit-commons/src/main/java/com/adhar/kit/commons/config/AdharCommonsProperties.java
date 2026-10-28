@@ -3,6 +3,12 @@ package com.adhar.kit.commons.config;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * Configuration properties for the adhar-kit-commons auto-configuration.
  *
@@ -12,6 +18,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *   commons:
  *     exception-handler:
  *       enabled: true
+ *       problem-details: versioned-api   # always | never
  *     idempotency:
  *       enabled: true
  *     correlation:
@@ -20,7 +27,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *       enabled: true
  *     api-versioning:
  *       enabled: true
- *       validate-request-version: false
+ *       reject-mismatched-major: true
+ *       versions:
+ *         v1:
+ *           deprecated: 2026-09-01
+ *           sunset: 2027-01-31
+ *           successor: /api/v2
  *     error-catalog:
  *       enabled: true
  * </pre>
@@ -44,7 +56,7 @@ public class AdharCommonsProperties {
     /** Tenant-context filter settings. */
     private final Tenant tenant = new Tenant();
 
-    /** API versioning interceptor settings. */
+    /** API versioning settings. */
     private final ApiVersioning apiVersioning = new ApiVersioning();
 
     /** Error catalog (i18n) settings. */
@@ -55,6 +67,24 @@ public class AdharCommonsProperties {
     public static class ExceptionHandler {
         /** Whether the global exception handler is registered. */
         private boolean enabled = true;
+        /**
+         * Which error responses are RFC 9457 problem details
+         * ({@code application/problem+json}) rather than the {@code ErrorResponse} body.
+         */
+        private ProblemDetailsScope problemDetails = ProblemDetailsScope.VERSIONED_API;
+    }
+
+    /** Which error responses are written as RFC 9457 problem details. */
+    public enum ProblemDetailsScope {
+        /**
+         * Responses to {@code /api/v<major>} requests, whose specs declare every error as
+         * {@code application/problem+json}; other paths keep the {@code ErrorResponse} body.
+         */
+        VERSIONED_API,
+        /** Every error response. */
+        ALWAYS,
+        /** None: the {@code ErrorResponse} body everywhere. */
+        NEVER
     }
 
     /** Toggle for the idempotency store and aspect beans. */
@@ -78,13 +108,62 @@ public class AdharCommonsProperties {
         private boolean enabled = true;
     }
 
-    /** Settings for the API versioning interceptor. */
+    /**
+     * Settings for API versioning: the major version is the path segment of
+     * {@code /api/v<major>}, and every response below it carries the full version.
+     */
     @Data
     public static class ApiVersioning {
-        /** Whether the {@code ApiVersionInterceptor} is registered. */
+        /**
+         * Whether API versioning is configured: Spring's path-segment version resolution,
+         * the {@code API-Version}/{@code Deprecation}/{@code Sunset}/{@code Link} headers,
+         * {@code GET /api} and the spec endpoints.
+         */
         private boolean enabled = true;
-        /** Whether a mismatching {@code X-API-Version} request header is rejected with 400. */
+        /**
+         * Whether a request whose {@code API-Version} header names another major than its
+         * {@code /api/v<major>} path is rejected with a 400 problem.
+         */
+        private boolean rejectMismatchedMajor = true;
+        /**
+         * Legacy: whether the deprecated {@code @ApiVersion} interceptor rejects a
+         * mismatching {@code X-API-Version} header with 400 (paths outside
+         * {@code /api/v<major>} only).
+         */
         private boolean validateRequestVersion = false;
+        /** Where the OpenAPI documents shipped in the artifact are found, one per major. */
+        private List<String> specLocations = new ArrayList<>(List.of("classpath*:api/v*/openapi.yaml"));
+        /** The {@code GET /api} index and {@code GET /api/v<major>/openapi.yaml}. */
+        private final Endpoints endpoints = new Endpoints();
+        /** Per-major settings, keyed {@code v1}, {@code v2}, ... */
+        private final Map<String, Version> versions = new LinkedHashMap<>();
+
+        /** Toggle for the versioning endpoints. */
+        @Data
+        public static class Endpoints {
+            /** Whether {@code GET /api} and the spec endpoints are served. */
+            private boolean enabled = true;
+        }
+
+        /** What is announced about one major version. */
+        @Data
+        public static class Version {
+            /** Full semantic version reported for the major; defaults to the shipped spec's {@code info.version}. */
+            private String version;
+            /**
+             * When the major was (or will be) deprecated: an ISO-8601 date or date-time,
+             * epoch seconds, or {@code true} when no date is stated.
+             */
+            private String deprecated;
+            /** When the major stops answering (RFC 8594 {@code Sunset}); same formats. */
+            private String sunset;
+            /** URL of the version replacing it; defaults to the next major the service serves. */
+            private String successor;
+            /** Documentation about the deprecation, linked with {@code rel="deprecation"}. */
+            private URI deprecationLink;
+            /** Documentation about the sunset, linked with {@code rel="sunset"}. */
+            private URI sunsetLink;
+        }
     }
 
     /** Toggle for the localized {@code ErrorCatalog} bean. */

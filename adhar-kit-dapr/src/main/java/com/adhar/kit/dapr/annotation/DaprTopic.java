@@ -3,7 +3,8 @@ package com.adhar.kit.dapr.annotation;
 import java.lang.annotation.*;
 
 /**
- * Marks a method to subscribe to a Dapr pub/sub topic.
+ * Subscribes a bean method to a Dapr pub/sub topic, like {@link DaprSubscribe} with the
+ * attribute names of the Dapr SDK's {@code @Topic}.
  *
  * <p><b>Example:</b></p>
  * <pre>{@code
@@ -11,14 +12,9 @@ import java.lang.annotation.*;
  * public class OrderEventHandler {
  *
  *     @DaprTopic(pubsubName = "pubsub", name = "orders.created")
- *     public void handleOrderCreated(CloudEvent<OrderCreatedEvent> event) {
- *         OrderCreatedEvent data = event.getData();
+ *     public void handleOrderCreated(DaprCloudEvent<OrderCreatedEvent> event) {
+ *         OrderCreatedEvent data = event.data();
  *         log.info("Processing order: {}", data.getOrderId());
- *     }
- *
- *     @DaprTopic(pubsubName = "pubsub", name = "orders.cancelled")
- *     public void handleOrderCancelled(CloudEvent<OrderCancelledEvent> event) {
- *         // Handle cancellation
  *     }
  * }
  * }</pre>
@@ -32,9 +28,9 @@ import java.lang.annotation.*;
 public @interface DaprTopic {
 
     /**
-     * The pub/sub component name.
+     * The pub/sub component name; empty for the service default.
      */
-    String pubsubName();
+    String pubsubName() default "";
 
     /**
      * The topic name to subscribe to.
@@ -47,8 +43,7 @@ public @interface DaprTopic {
     String deadLetterTopic() default "";
 
     /**
-     * Metadata for subscription.
+     * Metadata for subscription, as {@code key=value} pairs.
      */
     String[] metadata() default {};
 }
-

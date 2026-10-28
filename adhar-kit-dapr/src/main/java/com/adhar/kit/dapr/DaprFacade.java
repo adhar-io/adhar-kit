@@ -3,309 +3,131 @@ package com.adhar.kit.dapr;
 import com.adhar.kit.dapr.api.ConfigurationCallback;
 import com.adhar.kit.dapr.api.StateOperation;
 import com.adhar.kit.dapr.api.StateWithETag;
+import com.adhar.kit.dapr.backend.DaprBackend;
+import com.adhar.kit.dapr.backend.SidecarDaprBackend;
+import com.adhar.kit.dapr.bindings.BindingResponse;
+import com.adhar.kit.dapr.configuration.ConfigItem;
+import com.adhar.kit.dapr.http.DaprHttpClient;
+import com.adhar.kit.dapr.invoke.HttpVerb;
+import com.adhar.kit.dapr.invoke.InvokeOptions;
+import com.adhar.kit.dapr.invoke.InvokeResponse;
+import com.adhar.kit.dapr.jobs.JobDetails;
+import com.adhar.kit.dapr.jobs.JobOptions;
+import com.adhar.kit.dapr.lock.UnlockStatus;
+import com.adhar.kit.dapr.memory.InMemoryDaprBackend;
+import com.adhar.kit.dapr.observation.DaprObservations;
+import com.adhar.kit.dapr.observation.DaprTraceContext;
+import com.adhar.kit.dapr.pubsub.BulkPublishResult;
+import com.adhar.kit.dapr.pubsub.DaprCloudEvent;
+import com.adhar.kit.dapr.pubsub.DaprTopicHandler;
+import com.adhar.kit.dapr.pubsub.DispatchStatus;
+import com.adhar.kit.dapr.pubsub.DropEventException;
+import com.adhar.kit.dapr.pubsub.EventDataConverter;
+import com.adhar.kit.dapr.pubsub.ProgrammaticSubscriptions;
+import com.adhar.kit.dapr.pubsub.PublishOptions;
+import com.adhar.kit.dapr.pubsub.SubscribeOptions;
+import com.adhar.kit.dapr.pubsub.TopicEventListener;
 import com.adhar.kit.dapr.resilience.DaprInvocationResilience;
+import com.adhar.kit.dapr.resilience.DaprResilienceRegistry;
+import com.adhar.kit.dapr.resilience.ResilienceSettings;
+import com.adhar.kit.dapr.serialization.DaprJsonSerializer;
+import com.adhar.kit.dapr.state.DeleteOptions;
+import com.adhar.kit.dapr.state.GetOptions;
+import com.adhar.kit.dapr.state.SaveOptions;
+import com.adhar.kit.dapr.state.StateEntry;
+import com.adhar.kit.dapr.state.StateItem;
+import com.adhar.kit.dapr.state.StateQueryResult;
 import io.dapr.client.DaprClient;
 import io.dapr.client.DaprClientBuilder;
 import io.dapr.client.DaprPreviewClient;
-import io.dapr.client.domain.*;
+import io.dapr.client.domain.ComponentMetadata;
+import io.dapr.client.domain.DaprMetadata;
 import io.dapr.utils.TypeRef;
+import io.micrometer.observation.ObservationRegistry;
 import lombok.extern.slf4j.Slf4j;
-import reactor.core.publisher.Mono;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.function.Supplier;
 
 /**
- * Universal Dapr facade providing comprehensive distributed application runtime capabilities.
+ * The one way a service talks to Dapr: every building block through a single sidecar client
+ * built from {@code adhar.dapr.*} (or the environment the Dapr injector sets), with the same
+ * concepts and names as the adhar-kit for TypeScript, Go and Python.
  *
- * <p>This facade provides a framework-agnostic interface to all Dapr building blocks:</p>
+ * <p>In a Spring application the facade is a bean and {@link #getInstance()} returns that bean;
+ * outside Spring {@link #getInstance()} builds one from the environment. With no sidecar
+ * ({@code ADHAR_DAPR_MODE=memory}, or {@code auto} without {@code DAPR_HTTP_PORT}) state, cache,
+ * pub/sub, lock, configuration and secrets run in-process (see {@link InMemoryDaprBackend}) and
+ * one warning is logged; the remaining building blocks fail with a {@link DaprError}.</p>
+ *
+ * <p>Two ways to call it:</p>
  * <ul>
- *   <li><b>State Management</b> - Distributed state with strong/eventual consistency</li>
- *   <li><b>Pub/Sub</b> - At-least-once event delivery across services</li>
- *   <li><b>Service Invocation</b> - Reliable service-to-service calls with retry</li>
- *   <li><b>Bindings</b> - Connect to external systems (queues, DBs, etc.)</li>
- *   <li><b>Actors</b> - Stateful virtual actors with timers and reminders</li>
- *   <li><b>Secrets</b> - Secure secret management from any secret store</li>
- *   <li><b>Configuration</b> - Dynamic configuration with change notifications</li>
- *   <li><b>Distributed Lock</b> - Coordination across distributed systems</li>
+ *   <li>by building block, mirroring the other kits:
+ *       {@code dapr.state().get("cart:42", Cart.class)}, {@code dapr.publish("orders", order)},
+ *       {@code dapr.invoke("inventory", "api/v1/items", InvokeOptions.get())},
+ *       {@code dapr.secrets().get("db")}, {@code dapr.lock().tryLock("report", owner, 60)}
+ *       &mdash; the default components ({@code statestore}, {@code pubsub}, ...) are the ones the
+ *       platform provides in every environment;</li>
+ *   <li>with explicit component names, the original API: {@code dapr.getState("statestore",
+ *       "cart:42", Cart.class)}, {@code dapr.publishEvent("pubsub", "orders", order)}.</li>
  * </ul>
  *
- * <p><b>Usage Examples:</b></p>
- *
- * <p><b>1. State Management with Shopping Cart:</b></p>
- * <pre>{@code
- * @Service
- * public class ShoppingCartService {
- *     private final DaprFacade dapr = DaprFacade.getInstance();
- *
- *     public void addToCart(String userId, Product product) {
- *         String key = "cart:" + userId;
- *
- *         // Get current cart with ETag for optimistic concurrency
- *         StateWithETag<Cart> cartState = dapr.getStateWithETag(
- *             "statestore", key, Cart.class);
- *
- *         Cart cart = cartState.getValue();
- *         if (cart == null) {
- *             cart = new Cart(userId);
- *         }
- *
- *         cart.addProduct(product);
- *
- *         // Save with ETag to prevent concurrent modifications
- *         boolean saved = dapr.saveStateWithETag(
- *             "statestore", key, cart, cartState.getEtag());
- *
- *         if (!saved) {
- *             throw new ConcurrentModificationException("Cart was modified");
- *         }
- *     }
- *
- *     public void checkout(String userId) {
- *         String cartKey = "cart:" + userId;
- *         String orderKey = "order:" + UUID.randomUUID();
- *
- *         // Execute transaction - atomically move cart to order
- *         dapr.executeStateTransaction("statestore", List.of(
- *             StateOperation.upsert(orderKey, getCart(userId)),
- *             StateOperation.delete(cartKey)
- *         ));
- *     }
- * }
- * }</pre>
- *
- * <p><b>2. Pub/Sub Event-Driven Architecture:</b></p>
- * <pre>{@code
- * @Service
- * public class OrderService {
- *     private final DaprFacade dapr = DaprFacade.getInstance();
- *
- *     public Order createOrder(OrderRequest request) {
- *         Order order = processOrder(request);
- *
- *         // Publish event - Dapr guarantees delivery
- *         dapr.publishEvent("pubsub", "orders.created",
- *             new OrderCreatedEvent(order.getId(), order.getTotal()));
- *
- *         return order;
- *     }
- *
- *     // In another service - automatic subscription
- *     @Topic(name = "orders.created", pubsubName = "pubsub")
- *     public void handleOrderCreated(CloudEvent<OrderCreatedEvent> event) {
- *         OrderCreatedEvent data = event.getData();
- *         log.info("Order created: {}", data.getOrderId());
- *
- *         // Send notification
- *         emailService.sendOrderConfirmation(data);
- *     }
- * }
- * }</pre>
- *
- * <p><b>3. Service-to-Service Invocation:</b></p>
- * <pre>{@code
- * @Service
- * public class PaymentService {
- *     private final DaprFacade dapr = DaprFacade.getInstance();
- *
- *     public void processPayment(Payment payment) {
- *         // Invoke fraud detection service - Dapr handles discovery,
- *         // load balancing, and retries
- *         FraudCheckResponse fraudCheck = dapr.invokeService(
- *             "fraud-detection-service",
- *             "/api/check-fraud",
- *             "POST",
- *             payment,
- *             FraudCheckResponse.class
- *         );
- *
- *         if (fraudCheck.isFraudulent()) {
- *             throw new FraudException("Fraudulent transaction detected");
- *         }
- *
- *         // Async invocation for non-blocking operations
- *         dapr.invokeServiceAsync(
- *             "notification-service",
- *             "/api/notify",
- *             new PaymentNotification(payment.getId()),
- *             Void.class
- *         );
- *     }
- * }
- * }</pre>
- *
- * <p><b>4. Bindings - External System Integration:</b></p>
- * <pre>{@code
- * @Service
- * public class NotificationService {
- *     private final DaprFacade dapr = DaprFacade.getInstance();
- *
- *     public void sendSMS(String phoneNumber, String message) {
- *         // Send to Twilio via output binding
- *         dapr.invokeBinding("twilio", "create", Map.of(
- *             "to", phoneNumber,
- *             "body", message
- *         ));
- *     }
- *
- *     public void sendEmail(String to, String subject, String body) {
- *         // Send to SendGrid via output binding
- *         dapr.invokeBinding("sendgrid", "create", Map.of(
- *             "to", to,
- *             "subject", subject,
- *             "body", body
- *         ), Map.of("category", "transactional"));
- *     }
- * }
- * }</pre>
- *
- * <p><b>5. Actor Pattern - Stateful Services:</b></p>
- * <pre>{@code
- * @Service
- * public class GameService {
- *     private final DaprFacade dapr = DaprFacade.getInstance();
- *
- *     public void startGame(String gameId) {
- *         // Invoke game actor to start
- *         dapr.invokeActor(
- *             "GameActor",
- *             gameId,
- *             "start",
- *             null,
- *             Void.class
- *         );
- *
- *         // Register timer to end game after 30 minutes
- *         dapr.registerActorTimer(
- *             "GameActor",
- *             gameId,
- *             "endGameTimer",
- *             Duration.ofMinutes(30),
- *             Duration.ZERO,
- *             "endGame"
- *         );
- *     }
- *
- *     public GameState getGameState(String gameId) {
- *         return dapr.getActorState(
- *             "GameActor",
- *             gameId,
- *             "state",
- *             GameState.class
- *         );
- *     }
- * }
- * }</pre>
- *
- * <p><b>6. Distributed Lock - Coordination:</b></p>
- * <pre>{@code
- * @Service
- * public class ReportGenerator {
- *     private final DaprFacade dapr = DaprFacade.getInstance();
- *
- *     public void generateDailyReport() {
- *         String lockOwner = UUID.randomUUID().toString();
- *
- *         // Try to acquire lock - ensures only one instance generates report
- *         if (dapr.tryLock("lockstore", "daily-report", lockOwner, 300)) {
- *             try {
- *                 generateReport();
- *             } finally {
- *                 dapr.unlock("lockstore", "daily-report", lockOwner);
- *             }
- *         } else {
- *             log.info("Another instance is generating the report");
- *         }
- *     }
- * }
- * }</pre>
- *
- * <p><b>7. Secrets Management:</b></p>
- * <pre>{@code
- * @Configuration
- * public class DatabaseConfig {
- *     private final DaprFacade dapr = DaprFacade.getInstance();
- *
- *     @Bean
- *     public DataSource dataSource() {
- *         // Get secrets from Azure Key Vault, AWS Secrets Manager, etc.
- *         String dbPassword = dapr.getSecret("local-secret-store", "db-password");
- *         String apiKey = dapr.getSecret("local-secret-store", "api-key");
- *
- *         return DataSourceBuilder.create()
- *             .password(dbPassword)
- *             .build();
- *     }
- * }
- * }</pre>
- *
- * <p><b>8. Configuration Management with Change Notifications:</b></p>
- * <pre>{@code
- * @Service
- * public class FeatureFlagService {
- *     private final DaprFacade dapr = DaprFacade.getInstance();
- *     private volatile Map<String, String> featureFlags = new HashMap<>();
- *
- *     @PostConstruct
- *     public void init() {
- *         // Subscribe to configuration changes
- *         dapr.subscribeConfiguration(
- *             "configstore",
- *             List.of("feature-flags"),
- *             changedConfig -> {
- *                 log.info("Feature flags updated: {}", changedConfig);
- *                 featureFlags = changedConfig;
- *             }
- *         );
- *     }
- *
- *     public boolean isFeatureEnabled(String featureName) {
- *         return Boolean.parseBoolean(featureFlags.get(featureName));
- *     }
- * }
- * }</pre>
+ * <p>Every call is a Micrometer observation ({@code adhar.dapr}: building block, operation,
+ * component, outcome) and carries the caller's trace context to the sidecar. Failures are
+ * {@link DaprError}s with Dapr's status, error code, message and details.</p>
  *
  * @author Adhar Platform Team
  * @since 1.0.0
  */
 @Slf4j
-public class DaprFacade {
+public class DaprFacade implements AutoCloseable {
+
+    private static final ExecutorService ASYNC = Executors.newVirtualThreadPerTaskExecutor();
+    private static final Duration PROBE_INTERVAL = Duration.ofMillis(250);
 
     private static volatile DaprFacade instance;
-    private final DaprClient daprClient;
-    private final DaprPreviewClient previewClient;
-    private final DaprInvocationResilience resilience = new DaprInvocationResilience();
-    private volatile boolean available = false;
 
-    private DaprFacade() {
-        log.info("Initializing Dapr Facade v1.0.0");
-        try {
-            DaprClientBuilder builder = new DaprClientBuilder();
-            this.daprClient = builder.build();
-            // Preview client exposes the (stable-in-runtime) distributed-lock building block.
-            this.previewClient = builder.buildPreviewClient();
+    private final DaprBackend backend;
+    private final DaprConnectionDetails connection;
+    private final DaprComponents components;
+    private final DaprJsonSerializer serializer;
+    private final DaprObservations observations;
+    private final DaprResilienceRegistry resilience;
+    private final EventDataConverter eventData;
+    private final AtomicBoolean connectedLogged = new AtomicBoolean();
+    private volatile boolean available;
+    private volatile ProgrammaticSubscriptions programmaticSubscriptions;
 
-            // Check if Dapr is available
-            this.available = true;
-
-            log.info("Dapr sidecar connected successfully");
-        } catch (Exception e) {
-            log.warn("Dapr sidecar not available: {}", e.getMessage());
-            throw new RuntimeException("Dapr not available", e);
-        }
-    }
+    private final DaprStateOperations stateOperations;
+    private final DaprCacheOperations cacheOperations;
+    private final DaprSecretOperations secretOperations;
+    private final DaprConfigurationOperations configurationOperations;
+    private final DaprBindingOperations bindingOperations;
+    private final DaprLockOperations lockOperations;
+    private final DaprJobOperations jobOperations;
+    private final DaprActorOperations actorOperations;
 
     /**
-     * Constructor for injecting a Dapr client directly - typically a mock in tests, or a
-     * pre-configured client in production/DI scenarios where the default
-     * {@link DaprClientBuilder#build()} construction in {@link #getInstance()} isn't desired.
+     * Wraps an existing SDK client (typically a mock in tests). Service invocation and actor calls
+     * need the sidecar's HTTP API and use the endpoint resolved from the environment.
      *
-     * <p>No {@link DaprPreviewClient} is supplied, so the distributed-lock methods
-     * ({@link #tryLock}/{@link #unlock}) are unavailable; use
-     * {@link #DaprFacade(DaprClient, DaprPreviewClient)} to enable them.</p>
+     * <p>No {@link DaprPreviewClient} is used unless one is passed, so the distributed-lock methods
+     * fail with {@link IllegalStateException}; use {@link #DaprFacade(DaprClient, DaprPreviewClient)}
+     * to enable them.</p>
      *
      * @param daprClient the Dapr client
      */
@@ -314,255 +136,550 @@ public class DaprFacade {
     }
 
     /**
-     * Constructor for injecting both the standard and preview Dapr clients directly - typically
-     * mocks in tests, or pre-configured clients in DI scenarios. The preview client backs the
-     * distributed-lock building block.
+     * Wraps existing SDK clients. The preview client backs lock, state query, crypto and
+     * streaming subscriptions.
      *
      * @param daprClient    the Dapr client
-     * @param previewClient the Dapr preview client (may be {@code null} to disable locking)
+     * @param previewClient the preview client (may be {@code null} to disable those)
      */
     public DaprFacade(DaprClient daprClient, DaprPreviewClient previewClient) {
-        this.daprClient = daprClient;
-        this.previewClient = previewClient;
+        this(legacyBackend(daprClient, previewClient), DaprConnectionDetails.fromEnvironment(),
+                DaprComponents.fromEnvironment(), new DaprJsonSerializer(), DaprObservations.NOOP,
+                new DaprResilienceRegistry());
         this.available = true;
     }
 
+    /**
+     * The full constructor; prefer {@link #builder()}.
+     *
+     * @param backend      what the building blocks run on
+     * @param connection   the resolved sidecar connection
+     * @param components   the default component names
+     * @param serializer   the payload serializer
+     * @param observations the observation helper
+     * @param resilience   per-target invocation resilience
+     */
+    public DaprFacade(DaprBackend backend, DaprConnectionDetails connection, DaprComponents components,
+                      DaprJsonSerializer serializer, DaprObservations observations,
+                      DaprResilienceRegistry resilience) {
+        this.backend = Objects.requireNonNull(backend, "backend must not be null");
+        this.connection = connection != null ? connection : DaprConnectionDetails.fromEnvironment();
+        this.components = components != null ? components : DaprComponents.defaults();
+        this.serializer = serializer != null ? serializer : new DaprJsonSerializer();
+        this.observations = observations != null ? observations : DaprObservations.NOOP;
+        this.resilience = resilience != null ? resilience : new DaprResilienceRegistry();
+        this.eventData = new EventDataConverter(this.serializer);
+        this.available = backend.mode() == DaprMode.MEMORY;
+        this.stateOperations = new DaprStateOperations(this, this.components.stateStore());
+        this.cacheOperations = new DaprCacheOperations(this, this.components.stateStore());
+        this.secretOperations = new DaprSecretOperations(this, this.components.secretStore());
+        this.configurationOperations = new DaprConfigurationOperations(this, this.components.configStore());
+        this.bindingOperations = new DaprBindingOperations(this);
+        this.lockOperations = new DaprLockOperations(this, this.components.lockStore());
+        this.jobOperations = new DaprJobOperations(this);
+        this.actorOperations = new DaprActorOperations(this);
+    }
+
+    private static DaprBackend legacyBackend(DaprClient client, DaprPreviewClient preview) {
+        DaprConnectionDetails connection = DaprConnectionDetails.fromEnvironment();
+        return new SidecarDaprBackend(client, preview,
+                new DaprHttpClient(connection, Duration.ofSeconds(60), DaprTraceContext.NONE),
+                new DaprJsonSerializer(), DaprTraceContext.NONE, false);
+    }
+
+    /**
+     * A builder for a facade with explicit settings.
+     *
+     * @return a new builder
+     */
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /**
+     * The shared facade: the Spring bean when running in a Spring context, otherwise one built
+     * from the environment on first use.
+     *
+     * @return the shared facade
+     */
     public static DaprFacade getInstance() {
-        if (instance == null) {
+        DaprFacade current = instance;
+        if (current == null) {
             synchronized (DaprFacade.class) {
                 if (instance == null) {
-                    instance = new DaprFacade();
+                    instance = builder().build();
                 }
+                current = instance;
             }
         }
-        return instance;
+        return current;
+    }
+
+    /**
+     * Makes {@code facade} the one {@link #getInstance()} returns (the Spring auto-configuration
+     * registers its bean here so code calling {@code getInstance()} shares the bean's client).
+     *
+     * @param facade the facade, or {@code null} to clear
+     */
+    public static void setInstance(DaprFacade facade) {
+        synchronized (DaprFacade.class) {
+            instance = facade;
+        }
+    }
+
+    // ==================== Building-block views (contract names) ====================
+
+    /** State on the default state store ({@code statestore}). */
+    public DaprStateOperations state() {
+        return stateOperations;
+    }
+
+    /** A TTL cache on the default state store, keys namespaced {@code cache:}. */
+    public DaprCacheOperations cache() {
+        return cacheOperations;
+    }
+
+    /** Secrets from the default secret store ({@code secretstore}). */
+    public DaprSecretOperations secrets() {
+        return secretOperations;
+    }
+
+    /** Configuration from the default configuration store ({@code configstore}). */
+    public DaprConfigurationOperations configuration() {
+        return configurationOperations;
+    }
+
+    /** Output bindings. */
+    public DaprBindingOperations bindings() {
+        return bindingOperations;
+    }
+
+    /** Distributed lock on the default lock store ({@code lockstore}). */
+    public DaprLockOperations lock() {
+        return lockOperations;
+    }
+
+    /** Dapr Jobs (scheduler). */
+    public DaprJobOperations jobs() {
+        return jobOperations;
+    }
+
+    /** Actor calls from outside the actor. */
+    public DaprActorOperations actors() {
+        return actorOperations;
     }
 
     // ==================== State Management ====================
 
     public <T> void saveState(String storeName, String key, T value) {
-        try {
-            daprClient.saveState(storeName, key, value).block();
-            log.debug("Saved state: store={}, key={}", storeName, key);
-        } catch (Exception e) {
-            log.error("Failed to save state: store={}, key={}", storeName, key, e);
-            throw new DaprException("Failed to save state", e);
-        }
+        saveState(storeName, key, value, SaveOptions.none());
+    }
+
+    /**
+     * Saves a value with options (ETag, TTL, concurrency, consistency, metadata). A conflicting
+     * ETag fails with a {@link DaprError} whose {@link DaprError#isConflict()} is {@code true}.
+     */
+    public <T> void saveState(String storeName, String key, T value, SaveOptions options) {
+        SaveOptions opts = options == null ? SaveOptions.none() : options;
+        call("state", "save", storeName, "Failed to save state", () -> {
+            backend.saveState(storeName, key, value, opts);
+            return null;
+        });
+        log.debug("Saved state: store={}, key={}", storeName, key);
     }
 
     public <T> boolean saveStateWithETag(String storeName, String key, T value, String etag) {
         try {
-            StateOptions options = new StateOptions(null, StateOptions.Concurrency.FIRST_WRITE);
-            daprClient.saveState(storeName, key, etag, value, options).block();
-            log.debug("Saved state with ETag: store={}, key={}", storeName, key);
+            saveState(storeName, key, value, SaveOptions.etag(etag));
             return true;
-        } catch (Exception e) {
+        } catch (DaprError e) {
             if (isEtagConflict(e)) {
                 log.warn("ETag mismatch for state: store={}, key={}", storeName, key);
                 return false;
             }
-            log.error("Failed to save state with ETag: store={}, key={}", storeName, key, e);
-            throw new DaprException("Failed to save state", e);
+            throw e;
         }
     }
 
     public <T> void saveStateWithTTL(String storeName, String key, T value, Duration ttl) {
-        try {
-            if (ttl == null || ttl.isZero() || ttl.isNegative()) {
-                daprClient.saveState(storeName, key, value).block();
-            } else {
-                Map<String, String> metadata =
-                        Map.of("ttlInSeconds", String.valueOf(Math.max(1L, ttl.toSeconds())));
-                daprClient.saveState(storeName, key, null, value, metadata, null).block();
-            }
-            log.debug("Saved state with TTL: store={}, key={}, ttl={}", storeName, key, ttl);
-        } catch (Exception e) {
-            log.error("Failed to save state with TTL: store={}, key={}", storeName, key, e);
-            throw new DaprException("Failed to save state", e);
+        saveState(storeName, key, value, ttl == null || ttl.isZero() || ttl.isNegative()
+                ? SaveOptions.none() : SaveOptions.ttl(ttl));
+    }
+
+    public void saveBulkState(String storeName, Map<String, ?> values) {
+        List<StateItem> items = new ArrayList<>(values.size());
+        values.forEach((key, value) -> items.add(StateItem.of(key, value)));
+        saveBulkState(storeName, items);
+    }
+
+    /** Saves many values in one call (not atomic: use a transaction for all-or-nothing). */
+    public void saveBulkState(String storeName, List<StateItem> items) {
+        if (items.isEmpty()) {
+            return;
         }
+        call("state", "saveBulk", storeName, "Failed to save state in bulk", () -> {
+            backend.saveBulkState(storeName, items);
+            return null;
+        });
     }
 
     public <T> T getState(String storeName, String key, Class<T> clazz) {
-        try {
-            State<T> state = daprClient.getState(storeName, key, clazz).block();
-            T value = (state != null) ? state.getValue() : null;
-            log.debug("Retrieved state: store={}, key={}, found={}", storeName, key, value != null);
-            return value;
-        } catch (Exception e) {
-            log.error("Failed to get state: store={}, key={}", storeName, key, e);
-            throw new DaprException("Failed to get state", e);
-        }
+        return getState(storeName, key, TypeRef.get(clazz), GetOptions.none());
+    }
+
+    /** Reads a value of a generic type, e.g. {@code new TypeRef<List<Order>>() {}}. */
+    public <T> T getState(String storeName, String key, TypeRef<T> type) {
+        return getState(storeName, key, type, GetOptions.none());
+    }
+
+    public <T> T getState(String storeName, String key, Class<T> clazz, GetOptions options) {
+        return getState(storeName, key, TypeRef.get(clazz), options);
+    }
+
+    public <T> T getState(String storeName, String key, TypeRef<T> type, GetOptions options) {
+        T value = getStateEntry(storeName, key, type, options).value();
+        log.debug("Retrieved state: store={}, key={}, found={}", storeName, key, value != null);
+        return value;
+    }
+
+    /** Reads a value with its ETag. */
+    public <T> StateEntry<T> getStateEntry(String storeName, String key, TypeRef<T> type, GetOptions options) {
+        GetOptions opts = options == null ? GetOptions.none() : options;
+        return call("state", "get", storeName, "Failed to get state",
+                () -> backend.getState(storeName, key, type, opts));
     }
 
     public <T> StateWithETag<T> getStateWithETag(String storeName, String key, Class<T> clazz) {
-        try {
-            State<T> state = daprClient.getState(storeName, key, clazz).block();
-            if (state == null) {
-                return new StateWithETag<>(null, null);
-            }
-            return new StateWithETag<>(state.getValue(), state.getEtag());
-        } catch (Exception e) {
-            log.error("Failed to get state with ETag: store={}, key={}", storeName, key, e);
-            throw new DaprException("Failed to get state", e);
-        }
+        StateEntry<T> entry = getStateEntry(storeName, key, TypeRef.get(clazz), GetOptions.none());
+        return new StateWithETag<>(entry.value(), entry.etag());
     }
 
     public <T> Map<String, T> getBulkState(String storeName, List<String> keys, Class<T> clazz) {
-        try {
-            List<State<T>> states = daprClient.getBulkState(storeName, keys, clazz).block();
-            if (states == null) {
-                return Collections.emptyMap();
+        Map<String, T> values = new LinkedHashMap<>();
+        for (StateEntry<T> entry : getBulkStateEntries(storeName, keys, TypeRef.get(clazz))) {
+            if (entry.value() != null) {
+                values.put(entry.key(), entry.value());
             }
-            return states.stream()
-                .filter(s -> s.getValue() != null)
-                .collect(Collectors.toMap(State::getKey, State::getValue));
-        } catch (Exception e) {
-            log.error("Failed to get bulk state: store={}", storeName, e);
-            throw new DaprException("Failed to get bulk state", e);
         }
+        return values;
+    }
+
+    /** Reads many keys in one call, with ETags; missing keys come back with a {@code null} value. */
+    public <T> List<StateEntry<T>> getBulkStateEntries(String storeName, List<String> keys, TypeRef<T> type) {
+        if (keys.isEmpty()) {
+            return List.of();
+        }
+        return call("state", "getBulk", storeName, "Failed to get bulk state",
+                () -> backend.getBulkState(storeName, keys, type, Map.of()));
     }
 
     public void deleteState(String storeName, String key) {
-        try {
-            daprClient.deleteState(storeName, key).block();
-            log.debug("Deleted state: store={}, key={}", storeName, key);
-        } catch (Exception e) {
-            log.error("Failed to delete state: store={}, key={}", storeName, key, e);
-            throw new DaprException("Failed to delete state", e);
-        }
+        deleteState(storeName, key, DeleteOptions.none());
+    }
+
+    public void deleteState(String storeName, String key, DeleteOptions options) {
+        DeleteOptions opts = options == null ? DeleteOptions.none() : options;
+        call("state", "delete", storeName, "Failed to delete state", () -> {
+            backend.deleteState(storeName, key, opts);
+            return null;
+        });
+        log.debug("Deleted state: store={}, key={}", storeName, key);
     }
 
     public boolean deleteStateWithETag(String storeName, String key, String etag) {
         try {
-            StateOptions options = new StateOptions(null, StateOptions.Concurrency.FIRST_WRITE);
-            daprClient.deleteState(storeName, key, etag, options).block();
-            log.debug("Deleted state with ETag: store={}, key={}", storeName, key);
+            deleteState(storeName, key, DeleteOptions.etag(etag));
             return true;
-        } catch (Exception e) {
+        } catch (DaprError e) {
             if (isEtagConflict(e)) {
                 log.warn("ETag mismatch for delete: store={}, key={}", storeName, key);
                 return false;
             }
-            log.error("Failed to delete state with ETag: store={}, key={}", storeName, key, e);
-            throw new DaprException("Failed to delete state", e);
+            throw e;
         }
     }
 
     public void executeStateTransaction(String storeName, List<StateOperation> operations) {
-        try {
-            List<TransactionalStateOperation<?>> daprOps = operations.stream()
-                .map(op -> {
-                    if (op.getOperation() == StateOperation.OperationType.UPSERT) {
-                        return new TransactionalStateOperation<>(
-                            TransactionalStateOperation.OperationType.UPSERT,
-                            new State<>(op.getKey(), op.getValue(), op.getEtag(), null, null)
-                        );
-                    } else {
-                        return new TransactionalStateOperation<>(
-                            TransactionalStateOperation.OperationType.DELETE,
-                            new State<>(op.getKey())
-                        );
-                    }
-                })
-                .collect(Collectors.toList());
-
-            daprClient.executeStateTransaction(storeName, daprOps).block();
-            log.debug("Executed state transaction: store={}, operations={}", storeName, operations.size());
-        } catch (Exception e) {
-            log.error("Failed to execute state transaction: store={}", storeName, e);
-            throw new DaprException("Failed to execute state transaction", e);
-        }
+        executeStateTransaction(storeName, operations, Map.of());
     }
 
+    /**
+     * Applies upserts and deletes atomically. On a store configured with Dapr's transactional
+     * outbox ({@code outboxPublishPubsub}), the same transaction publishes the change: add a
+     * {@link StateOperation#projection} to choose what subscribers receive.
+     */
+    public void executeStateTransaction(String storeName, List<StateOperation> operations,
+                                        Map<String, String> metadata) {
+        call("state", "transact", storeName, "Failed to execute state transaction", () -> {
+            backend.executeStateTransaction(storeName, operations, metadata == null ? Map.of() : metadata);
+            return null;
+        });
+        log.debug("Executed state transaction: store={}, operations={}", storeName, operations.size());
+    }
+
+    /**
+     * Runs a state query (Dapr alpha query API) and returns the matching values of the first page.
+     *
+     * @param query the query JSON ({@code {"filter": {"EQ": {"status": "open"}}, "page": {"limit": 10}}})
+     */
     public <T> List<T> queryState(String storeName, String query, Class<T> clazz) {
-        // Note: Query state API is alpha in Dapr and may not be available in all SDK versions
-        // Consider using direct HTTP calls to Dapr API if this feature is needed
-        throw new UnsupportedOperationException(
-            "Query state API is not fully supported in Dapr SDK 1.11.0. " +
-            "Consider using direct Dapr HTTP API or upgrading to a newer SDK version.");
+        return queryStatePage(storeName, query, TypeRef.get(clazz), Map.of()).values();
+    }
+
+    /** Runs a state query and returns one page with keys, ETags and the continuation token. */
+    public <T> StateQueryResult<T> queryStatePage(String storeName, String query, TypeRef<T> type,
+                                                  Map<String, String> metadata) {
+        return call("state", "query", storeName, "Failed to query state",
+                () -> backend.queryState(storeName, query, type, metadata == null ? Map.of() : metadata));
     }
 
     // ==================== Pub/Sub ====================
 
+    /** Publishes to the default pub/sub component. */
+    public void publish(String topic, Object data) {
+        publish(topic, data, PublishOptions.none());
+    }
+
+    /** Publishes with options (component, CloudEvent attributes, TTL, partition key, ...). */
+    public void publish(String topic, Object data, PublishOptions options) {
+        PublishOptions opts = options == null ? PublishOptions.none() : options;
+        String pubsub = opts.pubsub() != null ? opts.pubsub() : components.pubsub();
+        call("pubsub", "publish", pubsub, "Failed to publish event", () -> {
+            backend.publishEvent(pubsub, topic, data, opts);
+            return null;
+        });
+        log.debug("Published event: pubsub={}, topic={}", pubsub, topic);
+    }
+
     public <T> void publishEvent(String pubsubName, String topicName, T event) {
-        publishEvent(pubsubName, topicName, event, Collections.emptyMap());
+        publish(topicName, event, PublishOptions.none().withPubsub(pubsubName));
     }
 
     public <T> void publishEvent(String pubsubName, String topicName, T event, Map<String, String> metadata) {
-        try {
-            daprClient.publishEvent(pubsubName, topicName, event, metadata).block();
-            log.debug("Published event: pubsub={}, topic={}", pubsubName, topicName);
-        } catch (Exception e) {
-            log.error("Failed to publish event: pubsub={}, topic={}", pubsubName, topicName, e);
-            throw new DaprException("Failed to publish event", e);
-        }
+        publish(topicName, event, new PublishOptions(pubsubName, metadata, null));
     }
 
+    /** Publishes many events in one broker call; each entry is accepted or rejected on its own. */
+    public BulkPublishResult publishBulk(String topic, List<?> events) {
+        return publishBulk(topic, events, PublishOptions.none());
+    }
+
+    public BulkPublishResult publishBulk(String topic, List<?> events, PublishOptions options) {
+        PublishOptions opts = options == null ? PublishOptions.none() : options;
+        String pubsub = opts.pubsub() != null ? opts.pubsub() : components.pubsub();
+        if (events.isEmpty()) {
+            return new BulkPublishResult(0, List.of());
+        }
+        return call("pubsub", "publishBulk", pubsub, "Failed to publish events in bulk",
+                () -> backend.publishEvents(pubsub, topic, events, opts));
+    }
+
+    /**
+     * Publishes many events with the broker's native bulk publish.
+     *
+     * @throws DaprError when the broker rejected any entry (the count is on the message)
+     */
     public <T> void publishBulkEvents(String pubsubName, String topicName, List<T> events) {
+        BulkPublishResult result = publishBulk(topicName, events, PublishOptions.none().withPubsub(pubsubName));
+        if (!result.allSucceeded()) {
+            throw new DaprError("Failed to publish bulk events: " + result.failed().size() + " of " + events.size()
+                    + " rejected (first: " + result.failed().getFirst().error() + ")", 500,
+                    "ERR_PUBSUB_PUBLISH_MESSAGE", result.failed().getFirst().error());
+        }
+        log.debug("Published {} events: pubsub={}, topic={}", events.size(), pubsubName, topicName);
+    }
+
+    /**
+     * Subscribes a handler to a topic on the default pub/sub component.
+     *
+     * @see #subscribe(String, TypeRef, DaprTopicHandler, SubscribeOptions)
+     */
+    public <T> DaprSubscription subscribe(String topic, Class<T> type, DaprTopicHandler<T> handler) {
+        return subscribe(topic, TypeRef.get(type), handler, SubscribeOptions.none());
+    }
+
+    /**
+     * Subscribes a handler. In a Spring MVC application the handler is advertised to the sidecar
+     * on {@code GET /dapr/subscribe} like an annotated one (register it while the application
+     * starts: Dapr reads the list once); elsewhere it becomes a streaming subscription. In memory
+     * mode it receives this process's own publishes.
+     */
+    public <T> DaprSubscription subscribe(String topic, TypeRef<T> type, DaprTopicHandler<T> handler,
+                                          SubscribeOptions options) {
+        SubscribeOptions opts = options == null ? SubscribeOptions.none() : options;
+        String pubsub = opts.pubsub() != null ? opts.pubsub() : components.pubsub();
+        SubscribeOptions resolved = opts.withPubsub(pubsub);
+        ProgrammaticSubscriptions programmatic = programmaticSubscriptions;
+        if (programmatic != null) {
+            return programmatic.register(topic, type, handler, resolved);
+        }
+        return subscribeStreaming(pubsub, topic, resolved.deadLetterTopic(), resolved.metadata(),
+                envelope -> dispatch(envelope, type, handler));
+    }
+
+    /**
+     * Subscribes a raw listener at runtime (a streaming subscription on the sidecar, a local one
+     * in memory mode), for subscribers whose topics are only known after startup.
+     */
+    public DaprSubscription subscribeStreaming(String pubsubName, String topic, String deadLetterTopic,
+                                               Map<String, String> metadata, TopicEventListener listener) {
+        return call("pubsub", "subscribe", pubsubName, "Failed to subscribe to " + topic,
+                () -> backend.subscribeTopic(pubsubName, topic, deadLetterTopic,
+                        metadata == null ? Map.of() : metadata, listener));
+    }
+
+    /**
+     * Installs where {@link #subscribe} registers handlers (done by the Spring MVC integration).
+     *
+     * @param subscriptions the registration target, or {@code null}
+     */
+    public void setProgrammaticSubscriptions(ProgrammaticSubscriptions subscriptions) {
+        this.programmaticSubscriptions = subscriptions;
+    }
+
+    private <T> DispatchStatus dispatch(Map<String, Object> envelope, TypeRef<T> type, DaprTopicHandler<T> handler) {
         try {
-            // Dapr SDK doesn't have native bulk publish yet, so we publish sequentially
-            // In production, consider using reactive streams for better performance
-            events.forEach(event -> publishEvent(pubsubName, topicName, event));
-            log.debug("Published {} events: pubsub={}, topic={}", events.size(), pubsubName, topicName);
+            @SuppressWarnings("unchecked")
+            T data = (T) eventData.data(envelope, type.getType());
+            DispatchStatus status = handler.handle(DaprCloudEvent.of(envelope, data));
+            return status == null ? DispatchStatus.SUCCESS : status;
+        } catch (DropEventException e) {
+            log.warn("Dropping event {} on topic {}: {}", envelope.get("id"), envelope.get("topic"), e.getMessage());
+            return DispatchStatus.DROP;
         } catch (Exception e) {
-            log.error("Failed to publish bulk events: pubsub={}, topic={}", pubsubName, topicName, e);
-            throw new DaprException("Failed to publish bulk events", e);
+            log.warn("Handler for topic {} failed on event {}; asking for redelivery", envelope.get("topic"),
+                    envelope.get("id"), e);
+            return DispatchStatus.RETRY;
         }
     }
 
     // ==================== Service Invocation ====================
 
+    /**
+     * Invokes a method of another app through the sidecar's HTTP API
+     * ({@code /v1.0/invoke/<appId>/method/<method>}) with any verb, headers, query and timeout.
+     * Calls are guarded by a circuit breaker per target app id, and idempotent verbs are retried
+     * on connection failures and 502/503/504.
+     *
+     * @return the 2xx response; any other status throws a {@link DaprError} carrying it and the body
+     */
+    public InvokeResponse invoke(String appId, String method, InvokeOptions options) {
+        InvokeOptions opts = options == null ? InvokeOptions.of(HttpVerb.POST) : options;
+        DaprBackend.InvokeRequest request = toInvokeRequest(opts);
+        DaprInvocationResilience target = resilience.forTarget(appId);
+        return call("invoke", opts.verb().name().toLowerCase(Locale.ROOT), appId,
+                "Failed to invoke " + appId + "/" + method,
+                () -> target.call(() -> backend.invoke(appId, method, request),
+                        failure -> opts.verb().isIdempotent() && isTransient(failure)));
+    }
+
+    /** Invokes and reads the JSON response as {@code responseType}. */
+    public <T> T invoke(String appId, String method, InvokeOptions options, Class<T> responseType) {
+        return readBody(invoke(appId, method, options), TypeRef.get(responseType));
+    }
+
+    /** Invokes and reads the JSON response as a generic type. */
+    public <T> T invoke(String appId, String method, InvokeOptions options, TypeRef<T> responseType) {
+        return readBody(invoke(appId, method, options), responseType);
+    }
+
+    /** Invokes with {@code POST}. */
     public <T, R> R invokeService(String appId, String methodName, T request, Class<R> responseClass) {
         return invokeService(appId, methodName, "POST", request, responseClass);
     }
 
-    public <T, R> CompletableFuture<R> invokeServiceAsync(String appId, String methodName, T request, Class<R> responseClass) {
-        return CompletableFuture.supplyAsync(() ->
-            invokeService(appId, methodName, "POST", request, responseClass));
-    }
-
-    public <T, R> R invokeService(String appId, String methodName, String httpMethod, T request, Class<R> responseClass) {
-        try {
-            io.dapr.client.domain.HttpExtension httpExtension = getHttpExtension(httpMethod.toUpperCase());
-
-            Mono<R> response = daprClient.invokeMethod(appId, methodName, request, httpExtension, responseClass);
-            R result = response.block();
-
-            log.debug("Invoked service: appId={}, method={}, httpMethod={}", appId, methodName, httpMethod);
-            return result;
-        } catch (Exception e) {
-            log.error("Failed to invoke service: appId={}, method={}", appId, methodName, e);
-            throw new DaprException("Failed to invoke service", e);
-        }
+    public <T, R> CompletableFuture<R> invokeServiceAsync(String appId, String methodName, T request,
+                                                          Class<R> responseClass) {
+        return CompletableFuture.supplyAsync(
+                () -> invokeService(appId, methodName, "POST", request, responseClass), ASYNC);
     }
 
     /**
-     * Invokes a service with retry, per-attempt timeout, and circuit-breaker protection applied
-     * (see {@link DaprInvocationResilience}), throwing on final failure.
-     *
-     * @see #invokeServiceResilient(String, String, String, Object, Class, Function)
+     * Invokes with the given verb ({@code GET}, {@code POST}, {@code PUT}, {@code PATCH},
+     * {@code DELETE}, {@code HEAD}, {@code OPTIONS}); an unknown verb is rejected.
+     */
+    public <T, R> R invokeService(String appId, String methodName, String httpMethod, T request,
+                                  Class<R> responseClass) {
+        HttpVerb verb = HttpVerb.parse(httpMethod);
+        InvokeOptions options = InvokeOptions.of(verb);
+        if (request != null && verb != HttpVerb.GET && verb != HttpVerb.HEAD) {
+            options = options.withBody(request);
+        }
+        R result = invoke(appId, methodName, options, responseClass);
+        log.debug("Invoked service: appId={}, method={}, httpMethod={}", appId, methodName, verb);
+        return result;
+    }
+
+    /**
+     * Invokes with retry, per-attempt timeout and the target's circuit breaker applied, throwing on
+     * final failure.
      */
     public <T, R> R invokeServiceResilient(String appId, String methodName, T request, Class<R> responseClass) {
         return invokeServiceResilient(appId, methodName, "POST", request, responseClass, null);
     }
 
     /**
-     * Invokes a service with retry, per-attempt timeout, and circuit-breaker protection applied
-     * (see {@link DaprInvocationResilience}), falling back to {@code fallback} instead of
-     * throwing on final failure (or when the circuit breaker is open).
-     *
-     * @param appId         target app ID
-     * @param methodName    method/endpoint name
-     * @param httpMethod    HTTP method (GET/POST/PUT/DELETE)
-     * @param request       request payload
-     * @param responseClass response type
-     * @param fallback      invoked with the failure cause instead of throwing, or {@code null}
-     *                      to propagate the failure
-     * @return the response, or the fallback's result
+     * Invokes with retry (every verb), per-attempt timeout and the target's circuit breaker
+     * applied, falling back to {@code fallback} instead of throwing on final failure (or while
+     * the breaker is open).
      */
     public <T, R> R invokeServiceResilient(String appId, String methodName, String httpMethod, T request,
                                            Class<R> responseClass, Function<Throwable, R> fallback) {
-        return resilience.execute(() -> invokeService(appId, methodName, httpMethod, request, responseClass), fallback);
+        return resilience.forTarget(appId).execute(
+                () -> invokeService(appId, methodName, httpMethod, request, responseClass), fallback);
+    }
+
+    /** The per-target resilience (breakers) used for invocation. */
+    public DaprResilienceRegistry resilience() {
+        return resilience;
+    }
+
+    private DaprBackend.InvokeRequest toInvokeRequest(InvokeOptions options) {
+        byte[] body = null;
+        String contentType = options.contentType();
+        Object raw = options.body();
+        if (raw instanceof byte[] bytes) {
+            body = bytes;
+            contentType = contentType != null ? contentType : "application/octet-stream";
+        } else if (raw instanceof String text) {
+            body = text.getBytes(StandardCharsets.UTF_8);
+            contentType = contentType != null ? contentType : "text/plain; charset=utf-8";
+        } else if (raw != null) {
+            body = serializer.toBytes(raw);
+            contentType = contentType != null ? contentType : "application/json";
+        }
+        return new DaprBackend.InvokeRequest(options.verb().name(), body, contentType, options.headers(),
+                options.query(), options.timeout());
+    }
+
+    private <T> T readBody(InvokeResponse response, TypeRef<T> type) {
+        if (type.getType() == Void.class || type.getType() == void.class || response.body().length == 0) {
+            return null;
+        }
+        if (type.getType() == byte[].class) {
+            @SuppressWarnings("unchecked")
+            T bytes = (T) response.body();
+            return bytes;
+        }
+        if (type.getType() == String.class && !isJson(response.header("content-type"))) {
+            @SuppressWarnings("unchecked")
+            T text = (T) response.bodyAsString();
+            return text;
+        }
+        try {
+            return serializer.fromBytes(response.body(), type);
+        } catch (RuntimeException e) {
+            throw new DaprError("Failed to read the invocation response as " + type.getType().getTypeName(),
+                    response.status(), "ERR_DESERIALIZE", e.getMessage(), Map.of(), response.body(), e);
+        }
+    }
+
+    private static boolean isJson(String contentType) {
+        return contentType == null || contentType.toLowerCase(Locale.ROOT).contains("json");
+    }
+
+    private static boolean isTransient(Throwable failure) {
+        return failure instanceof DaprError error && error.isUnavailable();
     }
 
     // ==================== Bindings ====================
@@ -572,257 +689,434 @@ public class DaprFacade {
     }
 
     public <T> void invokeBinding(String bindingName, String operation, T data, Map<String, String> metadata) {
-        try {
-            InvokeBindingRequest request = new InvokeBindingRequest(bindingName, operation)
-                .setData(data)
-                .setMetadata(metadata);
-            daprClient.invokeBinding(request, TypeRef.BYTE_ARRAY).block();
-            log.debug("Invoked binding: binding={}, operation={}", bindingName, operation);
-        } catch (Exception e) {
-            log.error("Failed to invoke binding: binding={}, operation={}", bindingName, operation, e);
-            throw new DaprException("Failed to invoke binding", e);
-        }
+        call("bindings", "invoke", bindingName, "Failed to invoke binding", () ->
+                backend.invokeBinding(bindingName, operation, data, metadata == null ? Map.of() : metadata));
+        log.debug("Invoked binding: binding={}, operation={}", bindingName, operation);
+    }
+
+    /** Invokes an output binding and reads its response data as {@code responseType}. */
+    public <T> T invokeBinding(String bindingName, String operation, Object data, Map<String, String> metadata,
+                               Class<T> responseType) {
+        return invokeBinding(bindingName, operation, data, metadata, TypeRef.get(responseType));
+    }
+
+    public <T> T invokeBinding(String bindingName, String operation, Object data, Map<String, String> metadata,
+                               TypeRef<T> responseType) {
+        byte[] response = call("bindings", "invoke", bindingName, "Failed to invoke binding", () ->
+                backend.invokeBinding(bindingName, operation, data, metadata == null ? Map.of() : metadata));
+        return response == null || response.length == 0 ? null : serializer.fromBytes(response, responseType);
+    }
+
+    /** Invokes an output binding and returns its data together with its response metadata. */
+    public BindingResponse invokeBindingWithResponse(String bindingName, String operation, Object data,
+                                                     Map<String, String> metadata) {
+        return call("bindings", "invoke", bindingName, "Failed to invoke binding", () ->
+                backend.invokeBindingWithResponse(bindingName, operation, data, metadata == null ? Map.of() : metadata));
     }
 
     // ==================== Secrets ====================
 
+    /**
+     * The value of a secret: the entry named like the secret (local file and env stores), or the
+     * only entry of a single-key secret.
+     */
     public String getSecret(String secretStoreName, String secretKey) {
         return getSecret(secretStoreName, secretKey, Collections.emptyMap());
     }
 
     public String getSecret(String secretStoreName, String secretKey, Map<String, String> metadata) {
-        try {
-            Map<String, String> secrets = daprClient.getSecret(secretStoreName, secretKey, metadata).block();
-            String value = (secrets != null) ? secrets.get(secretKey) : null;
-            log.debug("Retrieved secret: store={}, key={}, found={}", secretStoreName, secretKey, value != null);
-            return value;
-        } catch (Exception e) {
-            log.error("Failed to get secret: store={}, key={}", secretStoreName, secretKey, e);
-            throw new DaprException("Failed to get secret", e);
+        Map<String, String> secret = getSecretValues(secretStoreName, secretKey, metadata);
+        String value = secret.get(secretKey);
+        if (value == null && secret.size() == 1) {
+            value = secret.values().iterator().next();
         }
+        log.debug("Retrieved secret: store={}, key={}, found={}", secretStoreName, secretKey, value != null);
+        return value;
     }
 
-    public Map<String, String> getBulkSecrets(String secretStoreName) {
-        try {
-            Map<String, Map<String, String>> secrets = daprClient.getBulkSecret(secretStoreName).block();
-            log.debug("Retrieved bulk secrets: store={}, count={}",
-                secretStoreName, secrets != null ? secrets.size() : 0);
-            if (secrets == null) {
-                return Collections.emptyMap();
-            }
-            // Flatten losslessly: a single-entry secret keeps its name, a
-            // multi-entry secret contributes one "name.key" entry per value.
-            Map<String, String> result = new HashMap<>();
-            secrets.forEach((name, valueMap) -> {
-                if (valueMap == null || valueMap.isEmpty()) {
-                    return;
-                }
-                if (valueMap.size() == 1) {
-                    result.put(name, valueMap.values().iterator().next());
-                } else {
-                    valueMap.forEach((k, v) -> result.put(name + "." + k, v));
-                }
-            });
-            return result;
-        } catch (Exception e) {
-            log.error("Failed to get bulk secrets: store={}", secretStoreName, e);
-            throw new DaprException("Failed to get bulk secrets", e);
-        }
+    /** Every key/value pair of a secret (a Kubernetes secret carries several). */
+    public Map<String, String> getSecretValues(String secretStoreName, String secretName) {
+        return getSecretValues(secretStoreName, secretName, Map.of());
+    }
+
+    public Map<String, String> getSecretValues(String secretStoreName, String secretName,
+                                               Map<String, String> metadata) {
+        return call("secrets", "get", secretStoreName, "Failed to get secret", () ->
+                backend.getSecret(secretStoreName, secretName, metadata == null ? Map.of() : metadata));
     }
 
     /**
-     * Returns every secret in the store with its full key/value map, without
-     * any flattening.
+     * Every secret of a store, flattened losslessly: a single-entry secret keeps its name, a
+     * multi-entry secret contributes one {@code name.key} entry per value.
      */
+    public Map<String, String> getBulkSecrets(String secretStoreName) {
+        Map<String, String> result = new LinkedHashMap<>();
+        getBulkSecretsNested(secretStoreName).forEach((name, valueMap) -> {
+            if (valueMap == null || valueMap.isEmpty()) {
+                return;
+            }
+            if (valueMap.size() == 1) {
+                result.put(name, valueMap.values().iterator().next());
+            } else {
+                valueMap.forEach((k, v) -> result.put(name + "." + k, v));
+            }
+        });
+        return result;
+    }
+
+    /** Every secret in the store with its full key/value map. */
     public Map<String, Map<String, String>> getBulkSecretsNested(String secretStoreName) {
-        try {
-            Map<String, Map<String, String>> secrets = daprClient.getBulkSecret(secretStoreName).block();
-            return secrets != null ? secrets : Collections.emptyMap();
-        } catch (Exception e) {
-            log.error("Failed to get bulk secrets: store={}", secretStoreName, e);
-            throw new DaprException("Failed to get bulk secrets", e);
-        }
+        return call("secrets", "getBulk", secretStoreName, "Failed to get bulk secrets",
+                () -> backend.getBulkSecret(secretStoreName, Map.of()));
     }
 
     // ==================== Configuration ====================
 
     public String getConfiguration(String configStoreName, String key) {
-        Map<String, String> config = getConfiguration(configStoreName, List.of(key));
-        return config.get(key);
+        return getConfiguration(configStoreName, List.of(key)).get(key);
     }
 
     public Map<String, String> getConfiguration(String configStoreName, List<String> keys) {
-        try {
-            Map<String, ConfigurationItem> items = daprClient.getConfiguration(configStoreName, keys.toArray(new String[0])).block();
-            if (items == null) {
-                return Collections.emptyMap();
+        Map<String, String> values = new LinkedHashMap<>();
+        getConfigurationItems(configStoreName, keys).forEach((key, item) -> {
+            if (item.value() != null) {
+                values.put(key, item.value());
             }
-            return items.entrySet().stream()
-                .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().getValue()));
-        } catch (Exception e) {
-            log.error("Failed to get configuration: store={}", configStoreName, e);
-            throw new DaprException("Failed to get configuration", e);
-        }
+        });
+        return values;
     }
 
-    public void subscribeConfiguration(String configStoreName, List<String> keys, ConfigurationCallback callback) {
-        try {
-            daprClient.subscribeConfiguration(configStoreName, keys.toArray(new String[0]))
-                .subscribe(response -> {
-                    Map<String, ConfigurationItem> items = response.getItems();
-                    if (items != null) {
-                        Map<String, String> changedConfig = items.entrySet().stream()
-                            .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().getValue()));
-                        callback.onConfigurationChange(changedConfig);
-                    }
-                });
-            log.debug("Subscribed to configuration changes: store={}, keys={}", configStoreName, keys);
-        } catch (Exception e) {
-            log.error("Failed to subscribe to configuration: store={}", configStoreName, e);
-            throw new DaprException("Failed to subscribe to configuration", e);
-        }
+    /** Configuration items with their versions and metadata. */
+    public Map<String, ConfigItem> getConfigurationItems(String configStoreName, List<String> keys) {
+        return call("configuration", "get", configStoreName, "Failed to get configuration",
+                () -> backend.getConfiguration(configStoreName, keys, Map.of()));
+    }
+
+    /**
+     * Subscribes to changes of {@code keys} (all keys when empty). The callback receives the
+     * changed keys; a deleted key arrives with a {@code null} value.
+     *
+     * @return the subscription; {@link DaprSubscription#unsubscribe()} ends it
+     */
+    public DaprSubscription subscribeConfiguration(String configStoreName, List<String> keys,
+                                                   ConfigurationCallback callback) {
+        DaprSubscription subscription = call("configuration", "subscribe", configStoreName,
+                "Failed to subscribe to configuration", () -> backend.subscribeConfiguration(configStoreName,
+                        keys, Map.of(), changed -> {
+                            Map<String, String> values = new HashMap<>();
+                            changed.forEach((key, item) -> values.put(key, item.value()));
+                            callback.onConfigurationChange(values);
+                        },
+                        error -> log.warn("Configuration subscription on store '{}' ended: {}",
+                                configStoreName, error.getMessage())));
+        log.debug("Subscribed to configuration changes: store={}, keys={}", configStoreName, keys);
+        return subscription;
+    }
+
+    /**
+     * Subscribes to changes with the full items (value, version, metadata).
+     *
+     * @return the subscription; {@link DaprSubscription#unsubscribe()} ends it
+     */
+    public DaprSubscription subscribeConfigurationItems(String configStoreName, List<String> keys,
+                                                        java.util.function.Consumer<Map<String, ConfigItem>> onChange) {
+        return call("configuration", "subscribe", configStoreName, "Failed to subscribe to configuration",
+                () -> backend.subscribeConfiguration(configStoreName, keys, Map.of(), onChange,
+                        error -> log.warn("Configuration subscription on store '{}' ended: {}",
+                                configStoreName, error.getMessage())));
     }
 
     // ==================== Distributed Lock ====================
-    // Backed by the Dapr preview client's lock building block (SDK 1.18).
 
     /**
-     * Attempts to acquire a distributed lock on {@code resourceId} for {@code lockOwner}. The
-     * lock auto-expires after {@code expiryInSeconds}. Returns immediately (non-blocking) with
-     * {@code false} if the resource is already locked by someone else.
-     *
-     * @param storeName       lock store component name
-     * @param resourceId      the resource to lock
-     * @param lockOwner       an owner identifier (must be presented again to {@link #unlock})
-     * @param expiryInSeconds lock time-to-live in seconds
-     * @return {@code true} if the lock was acquired
-     * @throws IllegalStateException if this facade was created without a preview client
+     * Tries to take a lock for {@code expiryInSeconds}; returns immediately with {@code false} if
+     * someone else holds it. Locks are not re-entrant.
      */
     public boolean tryLock(String storeName, String resourceId, String lockOwner, int expiryInSeconds) {
-        requirePreviewClient();
-        try {
-            Boolean acquired = previewClient.tryLock(
-                new LockRequest(storeName, resourceId, lockOwner, expiryInSeconds)).block();
-            boolean result = Boolean.TRUE.equals(acquired);
-            log.debug("tryLock: store={}, resource={}, owner={}, acquired={}",
-                storeName, resourceId, lockOwner, result);
-            return result;
-        } catch (Exception e) {
-            log.error("Failed to acquire lock: store={}, resource={}", storeName, resourceId, e);
-            throw new DaprException("Failed to acquire lock", e);
-        }
+        boolean acquired = call("lock", "tryLock", storeName, "Failed to acquire lock",
+                () -> backend.tryLock(storeName, resourceId, lockOwner, expiryInSeconds));
+        log.debug("tryLock: store={}, resource={}, owner={}, acquired={}", storeName, resourceId, lockOwner, acquired);
+        return acquired;
     }
 
-    /**
-     * Releases a distributed lock previously acquired via {@link #tryLock}.
-     *
-     * @param storeName  lock store component name
-     * @param resourceId the locked resource
-     * @param lockOwner  the owner identifier used to acquire the lock
-     * @return {@code true} if the lock was released (status {@code SUCCESS}); {@code false} if
-     *         the lock did not exist or belonged to another owner
-     * @throws IllegalStateException if this facade was created without a preview client
-     */
+    /** Releases a lock; {@code true} only when it was held by {@code lockOwner}. */
     public boolean unlock(String storeName, String resourceId, String lockOwner) {
-        requirePreviewClient();
+        return unlockStatus(storeName, resourceId, lockOwner) == UnlockStatus.SUCCESS;
+    }
+
+    /** Releases a lock and reports why it was or was not released. */
+    public UnlockStatus unlockStatus(String storeName, String resourceId, String lockOwner) {
+        UnlockStatus status = call("lock", "unlock", storeName, "Failed to release lock",
+                () -> backend.unlock(storeName, resourceId, lockOwner));
+        log.debug("unlock: store={}, resource={}, owner={}, status={}", storeName, resourceId, lockOwner, status);
+        return status;
+    }
+
+    // ==================== Jobs ====================
+
+    /** Schedules (or with {@link JobOptions#overwriting()} replaces) a Dapr job. */
+    public void scheduleJob(String name, JobOptions options) {
+        call("jobs", "schedule", name, "Failed to schedule job '" + name + "'", () -> {
+            backend.scheduleJob(name, options);
+            return null;
+        });
+    }
+
+    /** The job, or {@code null} when no job of that name exists. */
+    public JobDetails getJob(String name) {
         try {
-            UnlockResponseStatus status = previewClient.unlock(
-                new UnlockRequest(storeName, resourceId, lockOwner)).block();
-            boolean released = status == UnlockResponseStatus.SUCCESS;
-            log.debug("unlock: store={}, resource={}, owner={}, status={}",
-                storeName, resourceId, lockOwner, status);
-            return released;
-        } catch (Exception e) {
-            log.error("Failed to release lock: store={}, resource={}", storeName, resourceId, e);
-            throw new DaprException("Failed to release lock", e);
+            return call("jobs", "get", name, "Failed to get job '" + name + "'", () -> backend.getJob(name));
+        } catch (DaprError e) {
+            if (e.isNotFound() || containsIgnoreCase(e.getDaprMessage(), "not found")) {
+                return null;
+            }
+            throw e;
         }
     }
 
-    private void requirePreviewClient() {
-        if (previewClient == null) {
-            throw new IllegalStateException(
-                "Distributed lock requires a DaprPreviewClient. Construct DaprFacade via "
-                    + "getInstance() or new DaprFacade(daprClient, previewClient) to enable it.");
-        }
+    public void deleteJob(String name) {
+        call("jobs", "delete", name, "Failed to delete job '" + name + "'", () -> {
+            backend.deleteJob(name);
+            return null;
+        });
     }
 
     // ==================== Actors ====================
-    // Note: Actor operations require the Dapr Actors SDK (dapr-sdk-actors)
-    // These methods are placeholders - actual actor invocation should use ActorProxyBuilder
 
+    /** Invokes an actor method from outside the actor; the data and response are JSON. */
     public <T, R> R invokeActor(String actorType, String actorId, String methodName, T data, Class<R> responseClass) {
-        // Actor invocation requires ActorProxyBuilder from dapr-sdk-actors
-        // Example usage:
-        // ActorProxyBuilder<MyActor> builder = new ActorProxyBuilder<>(MyActor.class, actorClient);
-        // MyActor actor = builder.build(new ActorId(actorId));
-        // return actor.methodName(data);
-        throw new UnsupportedOperationException(
-            "Actor invocation requires ActorProxyBuilder. Use dapr-sdk-actors directly.");
+        byte[] response = call("actors", "invoke", actorType, "Failed to invoke actor " + actorType,
+                () -> backend.invokeActor(actorType, actorId, methodName, data == null ? null : serializer.toBytes(data)));
+        if (response == null || response.length == 0 || responseClass == Void.class) {
+            return null;
+        }
+        return serializer.fromBytes(response, TypeRef.get(responseClass));
     }
 
+    /** Saves actor state. Dapr only accepts this from the app hosting the actor type. */
     public <T> void saveActorState(String actorType, String actorId, String stateName, T value) {
-        // Actor state management is handled internally by the actor runtime
-        throw new UnsupportedOperationException(
-            "Actor state is managed by the actor runtime. Access state from within actor implementation.");
+        Map<String, Object> operation = new LinkedHashMap<>();
+        operation.put("operation", "upsert");
+        operation.put("request", Map.of("key", stateName, "value", value));
+        call("actors", "saveState", actorType, "Failed to save actor state", () -> {
+            backend.executeActorStateTransaction(actorType, actorId, List.of(operation));
+            return null;
+        });
     }
 
+    /** Reads actor state, or {@code null}. Dapr only accepts this from the app hosting the actor type. */
     public <T> T getActorState(String actorType, String actorId, String stateName, Class<T> clazz) {
-        // Actor state management is handled internally by the actor runtime
-        throw new UnsupportedOperationException(
-            "Actor state is managed by the actor runtime. Access state from within actor implementation.");
+        byte[] state = call("actors", "getState", actorType, "Failed to get actor state",
+                () -> backend.getActorState(actorType, actorId, stateName));
+        return state == null || state.length == 0 ? null : serializer.fromBytes(state, TypeRef.get(clazz));
     }
 
+    /** Registers a persistent reminder on an actor. */
     public void registerActorReminder(String actorType, String actorId, String reminderName,
                                       Duration dueTime, Duration period, Object data) {
-        // Actor reminders are registered from within the actor implementation
-        throw new UnsupportedOperationException(
-            "Actor reminders must be registered from within actor implementation using ActorRuntime.");
+        call("actors", "registerReminder", actorType, "Failed to register actor reminder", () -> {
+            backend.registerActorReminder(actorType, actorId, reminderName, dueTime, period, data);
+            return null;
+        });
     }
 
+    /** Registers a timer on an actor. Dapr only accepts this from the app hosting the actor type. */
     public void registerActorTimer(String actorType, String actorId, String timerName,
                                    Duration dueTime, Duration period, String callback) {
-        // Actor timers are registered from within the actor implementation
-        throw new UnsupportedOperationException(
-            "Actor timers must be registered from within actor implementation using ActorRuntime.");
+        call("actors", "registerTimer", actorType, "Failed to register actor timer", () -> {
+            backend.registerActorTimer(actorType, actorId, timerName, dueTime, period, callback, null);
+            return null;
+        });
     }
 
-    // ==================== Utilities ====================
+    // ==================== Cryptography ====================
 
+    /**
+     * Encrypts with a key held by a Dapr cryptography component (the key never reaches the app).
+     *
+     * @param component        the crypto component
+     * @param keyName          the key name in that component
+     * @param keyWrapAlgorithm the key wrap algorithm (for example {@code RSA-OAEP-256}, {@code A256KW})
+     * @param plaintext        the data
+     * @return the ciphertext (Dapr's envelope format; decrypt with {@link #decrypt})
+     */
+    public byte[] encrypt(String component, String keyName, String keyWrapAlgorithm, byte[] plaintext) {
+        return call("crypto", "encrypt", component, "Failed to encrypt",
+                () -> backend.encrypt(component, keyName, keyWrapAlgorithm, plaintext));
+    }
+
+    /**
+     * Decrypts data produced by {@link #encrypt}.
+     *
+     * @param keyName the key name, or {@code null} to use the one recorded in the ciphertext
+     */
+    public byte[] decrypt(String component, byte[] ciphertext, String keyName) {
+        return call("crypto", "decrypt", component, "Failed to decrypt",
+                () -> backend.decrypt(component, ciphertext, keyName));
+    }
+
+    // ==================== Runtime ====================
+
+    /**
+     * Polls the sidecar's outbound health ({@code GET /v1.0/healthz/outbound}) until it answers
+     * or {@code timeout} passes. Logs once when the sidecar is first reached.
+     *
+     * @return {@code true} when the sidecar is ready (always in memory mode)
+     */
+    public boolean waitForSidecar(Duration timeout) {
+        if (backend.mode() == DaprMode.MEMORY) {
+            available = true;
+            return true;
+        }
+        long deadline = System.nanoTime() + timeout.toNanos();
+        do {
+            long remaining = Math.max(1, (deadline - System.nanoTime()) / 1_000_000);
+            if (backend.probe(Duration.ofMillis(Math.min(remaining, 2000)))) {
+                available = true;
+                if (connectedLogged.compareAndSet(false, true)) {
+                    log.info("Dapr sidecar connected successfully ({}, app id '{}')", connection.httpEndpoint(),
+                            connection.appId());
+                }
+                return true;
+            }
+            try {
+                Thread.sleep(Math.min(PROBE_INTERVAL.toMillis(), remaining));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        } while (System.nanoTime() < deadline);
+        available = false;
+        return false;
+    }
+
+    /**
+     * Whether the sidecar was reachable the last time the kit looked (startup wait, health check
+     * or the last call). Never blocks.
+     */
     public boolean isAvailable() {
         return available;
     }
 
-    public Map<String, Object> getMetadata() {
-        try {
-            Map<String, Object> metadata = new HashMap<>();
-            // Note: Actual metadata retrieval depends on Dapr SDK version
-            metadata.put("available", available);
-            metadata.put("version", "1.0.0");
-            return metadata;
-        } catch (Exception e) {
-            log.error("Failed to get metadata", e);
-            return Collections.emptyMap();
-        }
+    /** Probes the sidecar once ({@code /v1.0/healthz/outbound}) and records the result. */
+    public boolean checkSidecar(Duration timeout) {
+        boolean healthy = backend.probe(timeout);
+        available = healthy;
+        return healthy;
     }
 
-    public void shutdown() {
+    /** The sidecar's metadata: app id, runtime version, components, subscriptions, ... */
+    public DaprMetadata metadata() {
+        return call("metadata", "get", "sidecar", "Failed to get Dapr metadata", backend::metadata);
+    }
+
+    /**
+     * The sidecar's metadata as a plain map (for diagnostics endpoints). Never throws: an
+     * unreachable sidecar yields {@code available=false} and the error.
+     */
+    public Map<String, Object> getMetadata() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("mode", backend.mode().name().toLowerCase(Locale.ROOT));
+        result.put("appId", connection.appId());
+        result.put("httpEndpoint", connection.httpEndpoint());
+        try {
+            DaprMetadata metadata = metadata();
+            result.put("available", true);
+            result.put("id", metadata.getId());
+            result.put("runtimeVersion", metadata.getRuntimeVersion());
+            result.put("enabledFeatures", metadata.getEnabledFeatures());
+            List<Map<String, Object>> componentList = new ArrayList<>();
+            for (ComponentMetadata component : metadata.getComponents()) {
+                Map<String, Object> c = new LinkedHashMap<>();
+                c.put("name", component.getName());
+                c.put("type", component.getType());
+                c.put("version", component.getVersion());
+                c.put("capabilities", component.getCapabilities());
+                componentList.add(c);
+            }
+            result.put("components", componentList);
+            List<Map<String, Object>> subscriptionList = new ArrayList<>();
+            metadata.getSubscriptions().forEach(s -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("pubsubname", s.getPubsubname());
+                m.put("topic", s.getTopic());
+                m.put("deadLetterTopic", s.getDeadLetterTopic());
+                subscriptionList.add(m);
+            });
+            result.put("subscriptions", subscriptionList);
+        } catch (RuntimeException e) {
+            result.put("available", false);
+            result.put("error", e.getMessage());
+        }
+        return result;
+    }
+
+    /** Asks the sidecar to shut down gracefully ({@code POST /v1.0/shutdown}); used by jobs that end. */
+    public void shutdownSidecar() {
+        call("runtime", "shutdown", "sidecar", "Failed to shut down the Dapr sidecar", () -> {
+            backend.shutdownSidecar();
+            return null;
+        });
+    }
+
+    /** The effective mode: sidecar or memory. */
+    public DaprMode mode() {
+        return backend.mode();
+    }
+
+    /** The resolved sidecar connection. */
+    public DaprConnectionDetails connection() {
+        return connection;
+    }
+
+    /** The default component names. */
+    public DaprComponents components() {
+        return components;
+    }
+
+    /** The serializer used for payloads. */
+    public DaprJsonSerializer serializer() {
+        return serializer;
+    }
+
+    /** What the building blocks run on. */
+    public DaprBackend backend() {
+        return backend;
+    }
+
+    /**
+     * The underlying SDK client, for an SDK API the kit does not wrap.
+     *
+     * @throws IllegalStateException in memory mode
+     */
+    public DaprClient client() {
+        if (backend instanceof SidecarDaprBackend sidecar) {
+            return sidecar.client();
+        }
+        throw new IllegalStateException("No Dapr client in " + backend.mode() + " mode");
+    }
+
+    /** The in-memory backend (memory mode only), to seed secrets or change configuration in tests. */
+    public InMemoryDaprBackend memory() {
+        if (backend instanceof InMemoryDaprBackend memory) {
+            return memory;
+        }
+        throw new IllegalStateException("Dapr runs in " + backend.mode() + " mode, not memory");
+    }
+
+    /**
+     * Closes the client this facade created (a client handed in by Spring is closed by Spring).
+     * Does not touch the sidecar: see {@link #shutdownSidecar()}.
+     */
+    @Override
+    public void close() {
         available = false;
         try {
-            if (daprClient != null) {
-                daprClient.close();
-                log.info("Dapr client shut down successfully");
-            }
-        } catch (Exception e) {
+            backend.close();
+            log.info("Dapr client shut down successfully");
+        } catch (RuntimeException e) {
             log.error("Error shutting down Dapr client", e);
         }
-        try {
-            if (previewClient != null) {
-                previewClient.close();
-            }
-        } catch (Exception e) {
-            log.error("Error shutting down Dapr preview client", e);
-        }
-        // Never hand a closed singleton to the next getInstance() caller.
         synchronized (DaprFacade.class) {
             if (instance == this) {
                 instance = null;
@@ -831,40 +1125,55 @@ public class DaprFacade {
     }
 
     /**
-     * Detects an optimistic-concurrency (ETag) conflict anywhere in the cause chain.
-     * The sidecar reports these as gRPC ABORTED with a lowercase "etag mismatch"
-     * message, so match on error code or a case-insensitive "etag" mention rather
-     * than an exact string.
+     * Closes the local client.
+     *
+     * @deprecated renamed {@link #close()} to make clear it does not stop the sidecar
+     *     (that is {@link #shutdownSidecar()}).
      */
-    private static boolean isEtagConflict(Throwable e) {
-        for (Throwable t = e; t != null; t = t.getCause()) {
-            if (t instanceof io.dapr.exceptions.DaprException daprEx
-                    && "ABORTED".equalsIgnoreCase(daprEx.getErrorCode())) {
-                return true;
+    @Deprecated(since = "0.2.0")
+    public void shutdown() {
+        close();
+    }
+
+    // ==================== Internals ====================
+
+    <T> T call(String api, String operation, String component, String failure, Supplier<T> body) {
+        try {
+            T result = observations.observe(api, operation, component, () -> {
+                try {
+                    return body.get();
+                } catch (DaprError | IllegalArgumentException | IllegalStateException
+                         | UnsupportedOperationException e) {
+                    throw e;
+                } catch (RuntimeException e) {
+                    throw DaprError.from(failure, e);
+                }
+            });
+            if (backend.mode() == DaprMode.SIDECAR) {
+                available = true;
             }
-            String msg = t.getMessage();
-            if (msg != null && msg.toLowerCase(Locale.ROOT).contains("etag")) {
-                return true;
+            return result;
+        } catch (DaprError e) {
+            if (e.getStatus() == DaprError.NO_RESPONSE) {
+                available = false;
             }
+            log.debug("{} (store/target '{}'): {}", failure, component, e.getMessage());
+            throw e;
         }
-        return false;
+    }
+
+    static boolean isEtagConflict(DaprError e) {
+        return e.isConflict() || containsIgnoreCase(e.getDaprMessage(), "etag")
+                || containsIgnoreCase(e.getMessage(), "etag");
+    }
+
+    private static boolean containsIgnoreCase(String text, String part) {
+        return text != null && text.toLowerCase(Locale.ROOT).contains(part);
     }
 
     /**
-     * Helper method to get HttpExtension from HTTP method string.
-     */
-    private io.dapr.client.domain.HttpExtension getHttpExtension(String httpMethod) {
-        switch (httpMethod) {
-            case "GET": return io.dapr.client.domain.HttpExtension.GET;
-            case "POST": return io.dapr.client.domain.HttpExtension.POST;
-            case "PUT": return io.dapr.client.domain.HttpExtension.PUT;
-            case "DELETE": return io.dapr.client.domain.HttpExtension.DELETE;
-            default: return io.dapr.client.domain.HttpExtension.POST;
-        }
-    }
-
-    /**
-     * Custom exception for Dapr operations.
+     * Custom exception for Dapr operations. Failures are raised as its subclass {@link DaprError},
+     * which carries what Dapr reported.
      */
     public static class DaprException extends RuntimeException {
         public DaprException(String message) {
@@ -875,5 +1184,139 @@ public class DaprFacade {
             super(message, cause);
         }
     }
-}
 
+    /**
+     * Builds a facade. Without explicit settings it resolves everything from the environment: the
+     * connection ({@link DaprConnectionDetails#fromEnvironment()}), the component names, and the
+     * mode, building one SDK client (which is both the client and the preview client) in sidecar
+     * mode.
+     */
+    public static final class Builder {
+        private DaprConnectionDetails connection;
+        private DaprComponents components;
+        private DaprClient client;
+        private DaprPreviewClient previewClient;
+        private DaprBackend backend;
+        private ObservationRegistry observationRegistry = ObservationRegistry.NOOP;
+        private DaprTraceContext traceContext = DaprTraceContext.NONE;
+        private ResilienceSettings resilienceSettings = ResilienceSettings.defaults();
+        private DaprJsonSerializer serializer;
+        private Duration httpTimeout = Duration.ofSeconds(60);
+        private final Map<String, Map<String, Map<String, String>>> memorySecrets = new LinkedHashMap<>();
+        private final Map<String, Map<String, String>> memoryConfiguration = new LinkedHashMap<>();
+
+        private Builder() {
+        }
+
+        public Builder connection(DaprConnectionDetails value) {
+            this.connection = value;
+            return this;
+        }
+
+        public Builder components(DaprComponents value) {
+            this.components = value;
+            return this;
+        }
+
+        /** Uses an existing client (not closed by the facade). Implies sidecar mode. */
+        public Builder client(DaprClient value) {
+            this.client = value;
+            return this;
+        }
+
+        public Builder previewClient(DaprPreviewClient value) {
+            this.previewClient = value;
+            return this;
+        }
+
+        /** Uses a ready backend, ignoring client settings. */
+        public Builder backend(DaprBackend value) {
+            this.backend = value;
+            return this;
+        }
+
+        public Builder observationRegistry(ObservationRegistry value) {
+            this.observationRegistry = value == null ? ObservationRegistry.NOOP : value;
+            return this;
+        }
+
+        public Builder traceContext(DaprTraceContext value) {
+            this.traceContext = value == null ? DaprTraceContext.NONE : value;
+            return this;
+        }
+
+        public Builder resilience(ResilienceSettings value) {
+            this.resilienceSettings = value == null ? ResilienceSettings.defaults() : value;
+            return this;
+        }
+
+        public Builder serializer(DaprJsonSerializer value) {
+            this.serializer = value;
+            return this;
+        }
+
+        /** Default timeout of sidecar HTTP API calls (invocation, actors) without their own. */
+        public Builder httpTimeout(Duration value) {
+            this.httpTimeout = value;
+            return this;
+        }
+
+        /** Seeds a secret for memory mode. */
+        public Builder memorySecret(String store, String name, Map<String, String> values) {
+            memorySecrets.computeIfAbsent(store, s -> new LinkedHashMap<>()).put(name, values);
+            return this;
+        }
+
+        /** Seeds a configuration value for memory mode. */
+        public Builder memoryConfiguration(String store, String key, String value) {
+            memoryConfiguration.computeIfAbsent(store, s -> new LinkedHashMap<>()).put(key, value);
+            return this;
+        }
+
+        public DaprFacade build() {
+            DaprConnectionDetails conn = connection != null ? connection : DaprConnectionDetails.fromEnvironment();
+            DaprComponents comps = components != null ? components : DaprComponents.fromEnvironment();
+            DaprJsonSerializer json = serializer != null ? serializer : new DaprJsonSerializer();
+            DaprBackend effective = backend;
+            if (effective == null) {
+                if (client == null && conn.isMemory()) {
+                    InMemoryDaprBackend memory = new InMemoryDaprBackend(json, conn.appId());
+                    memorySecrets.forEach((store, secrets) -> secrets.forEach((name, values) ->
+                            memory.putSecret(store, name, values)));
+                    memoryConfiguration.forEach((store, values) -> values.forEach((key, value) ->
+                            memory.setConfiguration(store, key, value)));
+                    log.warn("No Dapr sidecar configured (ADHAR_DAPR_MODE={}, DAPR_HTTP_PORT/DAPR_HTTP_ENDPOINT unset): "
+                                    + "state, cache, pub/sub, lock, configuration and secrets run in memory for app '{}'. "
+                                    + "Nothing is shared between replicas or kept across restarts.",
+                            conn.requestedMode().name().toLowerCase(Locale.ROOT), conn.appId());
+                    effective = memory;
+                } else {
+                    boolean owned = client == null;
+                    DaprClient sdkClient = client != null ? client : newClient(conn, json);
+                    DaprPreviewClient preview = previewClient != null ? previewClient
+                            : sdkClient instanceof DaprPreviewClient p ? p : null;
+                    effective = new SidecarDaprBackend(sdkClient, preview,
+                            new DaprHttpClient(conn, httpTimeout, traceContext), json, traceContext, owned);
+                }
+            }
+            return new DaprFacade(effective, conn, comps, json, new DaprObservations(observationRegistry),
+                    new DaprResilienceRegistry(resilienceSettings));
+        }
+
+        /**
+         * Builds the SDK client for a connection: the kit serializer for objects and state, and
+         * the resolved endpoint and token as SDK property overrides.
+         *
+         * @param connection the connection
+         * @param serializer the serializer
+         * @return a client that also implements {@link DaprPreviewClient}
+         */
+        public static DaprClient newClient(DaprConnectionDetails connection, DaprJsonSerializer serializer) {
+            return new DaprClientBuilder()
+                    .withObjectSerializer(serializer)
+                    .withStateSerializer(serializer)
+                    .withPropertyOverrides(connection.sdkOverrides())
+                    .build();
+        }
+    }
+}

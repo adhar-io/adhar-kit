@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.Map;
+
 /**
  * State operation for transactional state management.
  *
@@ -46,6 +48,23 @@ public class StateOperation {
     private String etag;
 
     /**
+     * Per-operation metadata (for example {@code ttlInSeconds}, or {@code outbox.projection}).
+     */
+    private Map<String, String> metadata;
+
+    /**
+     * Creates an operation without metadata (the original four-field shape).
+     *
+     * @param operation operation type
+     * @param key state key
+     * @param value state value (for UPSERT)
+     * @param etag ETag, or {@code null}
+     */
+    public StateOperation(OperationType operation, String key, Object value, String etag) {
+        this(operation, key, value, etag, null);
+    }
+
+    /**
      * Create an upsert operation.
      *
      * @param key state key
@@ -74,6 +93,24 @@ public class StateOperation {
             .key(key)
             .value(value)
             .etag(etag)
+            .build();
+    }
+
+    /**
+     * Create an upsert whose value is what Dapr's transactional outbox publishes in place of the
+     * stored value ({@code outbox.projection=true}). Pair it with a plain upsert of the same key in
+     * the same transaction: the store keeps the full value, subscribers receive the projection.
+     *
+     * @param key state key (the same key as the stored upsert)
+     * @param projection the event payload to publish
+     * @return state operation
+     */
+    public static StateOperation projection(String key, Object projection) {
+        return StateOperation.builder()
+            .operation(OperationType.UPSERT)
+            .key(key)
+            .value(projection)
+            .metadata(Map.of("outbox.projection", "true"))
             .build();
     }
 

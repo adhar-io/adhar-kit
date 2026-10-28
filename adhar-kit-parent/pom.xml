@@ -577,6 +577,15 @@
                             <exclude>**/micronaut/**</exclude>
                             <exclude>**/helidon/**</exclude>
                             <exclude>**/vertx/**</exclude>
+                            <!-- Models adhar:openapi generates from a spec
+                                 (<basePackage>.api|client.v<major>.model): accessors,
+                                 equals and toString derived from the spec, which would
+                                 hold a well-tested service under the 80% gate. The
+                                 generated interfaces have no bytecode to cover. -->
+                            <exclude>**/api/v?/model/**</exclude>
+                            <exclude>**/api/v??/model/**</exclude>
+                            <exclude>**/client/v?/model/**</exclude>
+                            <exclude>**/client/v??/model/**</exclude>
                         </excludes>
                     </configuration>
                     <executions>
@@ -763,6 +772,43 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-deploy-plugin</artifactId>
                     <version>${maven-deploy-plugin.version}</version>
+                </plugin>
+
+                <!-- ============================================================= -->
+                <!-- Adhar Kit Maven Plugin - spec-first OpenAPI                   -->
+                <!-- ============================================================= -->
+                <!-- A service declares only groupId and artifactId and gets
+                     openapi-lint at validate and openapi at generate-sources: the
+                     API contract is checked, then api/v<major>/openapi.yaml becomes
+                     <basePackage>.api.v<major> interfaces and models and ships in
+                     the jar. Both goals do nothing without a spec. The code they
+                     generate needs spring-boot-starter-webmvc and
+                     spring-boot-starter-validation (adhar-kit-core brings both);
+                     every version involved is managed by the Spring Boot BOM.
+
+                     Managed here and never bound in <build><plugins>: this parent
+                     also builds adhar-kit-maven-plugin, which would then have to be
+                     built before itself. -->
+                <plugin>
+                    <groupId>com.adhar.kit</groupId>
+                    <artifactId>adhar-kit-maven-plugin</artifactId>
+                    <version>${adhar-kit.version}</version>
+                    <executions>
+                        <execution>
+                            <id>adhar-openapi-lint</id>
+                            <phase>validate</phase>
+                            <goals>
+                                <goal>openapi-lint</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>adhar-openapi</id>
+                            <phase>generate-sources</phase>
+                            <goals>
+                                <goal>openapi</goal>
+                            </goals>
+                        </execution>
+                    </executions>
                 </plugin>
             </plugins>
         </pluginManagement>
