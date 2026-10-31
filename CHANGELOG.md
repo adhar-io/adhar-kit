@@ -54,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   acts only outside `/api/v<major>`, where its legacy headers and the opt-in
   `validate-request-version` check are unchanged. The contract check under `/api/v<major>` is
   `adhar.commons.api-versioning.reject-mismatched-major` (default `true`).
+- **adhar-kit-graphql** — `graphql-java` is optional, as Spring GraphQL already was, so
+  `adhar-kit-starter` no longer puts it into every service. Every graphql-java release up to
+  26.1 shades its own Guava 32.1.2-jre (HIGH CVE-2026-102554), which no version pin reaches.
+  The module was already inert without Spring GraphQL; a service with a GraphQL API adds
+  `spring-boot-starter-graphql`, which brings both.
 
 ### Deprecated
 
@@ -108,6 +113,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   JWT decoder only when an issuer/JWK set is configured, health/info endpoints open for
   Kubernetes probes, CSRF off by default for the stateless API, and a single CORS source
   that does not combine credentials with the `*` origin.
+
+### Security
+
+- **adhar-kit-parent** — security floors in `dependencyManagement` that every module and
+  every service on the parent inherits: Guava 33.7.2-jre (HIGH CVE-2026-102554; the Vert.x
+  BOM managed it at 32.1.2-jre, below the 33.4.0-jre adhar-kit-core asked for) and
+  snappy-java 1.1.10.9 (HIGH CVE-2026-108106 and CVE-2026-93451, brought at 1.1.10.7 by
+  kafka-clients 4.2.1). adhar-kit-core takes Guava's version from the parent instead of
+  declaring its own.
 
 ## [1.0.0] - 2026-04-04
 

@@ -75,11 +75,16 @@
             <artifactId>commons-codec</artifactId>
         </dependency>
 
-        <!-- Guava for utilities -->
+        <!-- Guava for utilities. No version here on purpose: it comes from the
+             security floor in adhar-kit-parent's dependencyManagement (HIGH
+             CVE-2026-102554, fixed in 33.7.2-jre), which also outranks the
+             Vert.x BOM that would otherwise manage Guava at 32.1.2-jre. A
+             version declared here only governed this module's own build and
+             drifted from what every service actually resolved (33.4.0-jre
+             here, 32.1.2-jre in the image). -->
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
-            <version>33.4.0-jre</version>
         </dependency>
 
         <!-- Lombok -->

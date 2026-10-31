@@ -40,11 +40,21 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- GraphQL Java -->
+        <!-- GraphQL Java. Optional, like spring-boot-starter-graphql above:
+             adhar-kit-starter depends on this module, so a hard dependency put
+             graphql-java into every service image, GraphQL or not. Every
+             graphql-java release up to 26.1 (the newest) shades Guava
+             32.1.2-jre, which fails the image scan on HIGH CVE-2026-102554 and
+             which no version pin can reach. Nothing is lost by making it
+             optional: GraphQlAutoConfiguration is @ConditionalOnClass on
+             graphql-java AND spring-graphql, and GraphQlFacade needs both, so a
+             service turns GraphQL on by adding spring-boot-starter-graphql,
+             which brings graphql-java with it. -->
         <dependency>
             <groupId>com.graphql-java</groupId>
             <artifactId>graphql-java</artifactId>
             <version>${graphql-java.version}</version>
+            <optional>true</optional>
         </dependency>
 
         <!-- Adhar Kit Commons -->

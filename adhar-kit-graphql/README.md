@@ -22,7 +22,17 @@
     <artifactId>adhar-kit-graphql</artifactId>
     <version>0.1.0-SNAPSHOT</version>
 </dependency>
+<!-- Spring GraphQL and graphql-java. Both are optional in adhar-kit-graphql
+     (and so in adhar-kit-starter): the module stays inert without them. -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-graphql</artifactId>
+</dependency>
 ```
+
+graphql-java is optional because every release up to 26.1 shades its own Guava
+32.1.2-jre (HIGH CVE-2026-102554), so a hard dependency put that finding into
+every service built on adhar-kit-starter, GraphQL or not.
 
 ## Quick Start
 

@@ -423,6 +423,32 @@
                 <artifactId>client-java</artifactId>
                 <version>27.0.0</version>
             </dependency>
+            <!-- HIGH CVE-2026-102554: Guava before 33.7.2. The Vert.x BOM
+                 imported above (vertx-stack-depchain -> vertx-dependencies
+                 5.1.2) manages Guava at 32.1.2-jre, and as the first import to
+                 name it, it set the version for every module and every app on
+                 this parent: adhar-kit-core asked for 33.4.0-jre, services
+                 resolved 32.1.2-jre, and a scaffolded springboot-web-service
+                 failed its image scan on it (2026-10-30). An explicit entry
+                 outranks every imported BOM; failureaccess is managed by none
+                 of them, so Guava's own 1.0.3 comes with it. graphql-java
+                 shades a Guava 32.1.2-jre of its own that no pin reaches, which
+                 is why adhar-kit-graphql keeps graphql-java optional. -->
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>33.7.2-jre</version>
+            </dependency>
+            <!-- HIGH CVE-2026-108106 / CVE-2026-93451 and MEDIUM CVE-2026-116590:
+                 snappy-java before 1.1.10.9. kafka-clients 4.2.1 (Spring Boot
+                 4.1.0, through spring-kafka in adhar-kit-messaging) brings
+                 1.1.10.7 and no imported BOM manages it, the same way it brings
+                 lz4-java above. -->
+            <dependency>
+                <groupId>org.xerial.snappy</groupId>
+                <artifactId>snappy-java</artifactId>
+                <version>1.1.10.9</version>
+            </dependency>
 
             <!-- ================================================================= -->
             <!-- Streaming & Analytics                                             -->
