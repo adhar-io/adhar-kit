@@ -1,128 +1,90 @@
 package com.adhar.kit.batch.listener;
 
 import com.adhar.kit.batch.event.BatchJobFailedEvent;
-import com.adhar.kit.batch.metrics.BatchMetrics;
+import com.adhar.kit.batch.params.ParameterMasking;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.listener.JobExecutionListener;
 import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
- * A Spring Batch {@link JobExecutionListener} that logs job execution details,
- * records execution metrics, and publishes a failure event when a job fails.
+ * The kit's {@link JobExecutionListener}, attached to every job by {@link BatchListenerAttacher}.
  *
- * <p>This listener provides comprehensive observability for batch job lifecycle
- * events:</p>
- * <ul>
- *   <li>Structured SLF4J logging of start, completion, and failure details</li>
- *   <li>Duration and success/failure metrics via an optional {@link BatchMetrics}</li>
- *   <li>A {@link BatchJobFailedEvent} published via an optional
- *       {@link ApplicationEventPublisher} on failure, enabling decoupled
- *       failure notifications</li>
- * </ul>
- *
- * <p>Both collaborators are optional; when {@code null} the corresponding
- * behaviour is silently skipped, so the listener remains fully functional in a
- * bare Spring Batch setup.</p>
+ * <p>It logs the start and the end of a run without its parameters (they are logged masked, at
+ * DEBUG: see {@link ParameterMasking}), publishes a {@link BatchJobFailedEvent} when a run ends
+ * unsuccessfully, and notifies the {@link BatchRunObserver}s.</p>
  *
  * @author Adhar Platform Team
- * @since 1.0.0
+ * @since 0.1.0
  */
 @Slf4j
 public class AdharJobExecutionListener implements JobExecutionListener {
 
-    private final BatchMetrics batchMetrics;
     private final ApplicationEventPublisher eventPublisher;
+    private final BatchRunObservers observers;
 
     /**
-     * Creates a listener with no metrics or event publishing (logging only).
+     * @param eventPublisher publishes {@link BatchJobFailedEvent}, may be {@code null}
+     * @param observers      notified of every start and end
      */
-    public AdharJobExecutionListener() {
-        this(null, null);
-    }
-
-    /**
-     * Creates a listener that records metrics and publishes failure events.
-     *
-     * @param batchMetrics   the metrics collector, may be {@code null}
-     * @param eventPublisher the application event publisher, may be {@code null}
-     */
-    public AdharJobExecutionListener(BatchMetrics batchMetrics, ApplicationEventPublisher eventPublisher) {
-        this.batchMetrics = batchMetrics;
+    public AdharJobExecutionListener(ApplicationEventPublisher eventPublisher, List<BatchRunObserver> observers) {
         this.eventPublisher = eventPublisher;
+        this.observers = new BatchRunObservers(observers);
     }
 
     @Override
     public void beforeJob(JobExecution jobExecution) {
-        var jobName = jobExecution.getJobInstance().getJobName();
-        var jobId = jobExecution.getId();
-        var startTime = jobExecution.getStartTime();
-
-        log.info("Job [{}] (id={}) starting at {}", jobName, jobId, startTime);
-        log.info("Job [{}] parameters: {}", jobName, jobExecution.getJobParameters());
+        String jobName = jobExecution.getJobInstance().getJobName();
+        log.info("Job [{}] starting (execution {}, instance {})", jobName, jobExecution.getId(),
+                jobExecution.getJobInstance().getInstanceId());
+        if (log.isDebugEnabled()) {
+            log.debug("Job [{}] parameters {}", jobName, ParameterMasking.describe(jobExecution.getJobParameters()));
+        }
+        observers.notify("jobStarted", observer -> observer.jobStarted(jobExecution));
     }
 
     @Override
     public void afterJob(JobExecution jobExecution) {
-        var jobName = jobExecution.getJobInstance().getJobName();
-        var jobId = jobExecution.getId();
-        var startTime = jobExecution.getStartTime();
-        var endTime = jobExecution.getEndTime();
-        var status = jobExecution.getStatus();
-        var exitCode = jobExecution.getExitStatus().getExitCode();
-        var exitDescription = jobExecution.getExitStatus().getExitDescription();
-
-        var duration = (startTime != null && endTime != null)
-                ? Duration.between(startTime, endTime)
-                : Duration.ZERO;
-        var durationMs = duration.toMillis();
-        var success = !status.isUnsuccessful();
-
-        if (!success) {
-            log.error("Job [{}] (id={}) FAILED - Status: {}, Exit Code: {}, Duration: {}ms",
-                    jobName, jobId, status, exitCode, durationMs);
-            if (exitDescription != null && !exitDescription.isBlank()) {
-                log.error("Job [{}] failure description: {}", jobName, exitDescription);
+        String jobName = jobExecution.getJobInstance().getJobName();
+        BatchStatus status = jobExecution.getStatus();
+        long durationMs = durationMs(jobExecution);
+        String exitCode = jobExecution.getExitStatus().getExitCode();
+        if (status.isUnsuccessful()) {
+            log.error("Job [{}] {} (execution {}, exit code {}, {} ms)", jobName, status, jobExecution.getId(),
+                    exitCode, durationMs);
+            for (Throwable failure : jobExecution.getAllFailureExceptions()) {
+                log.error("Job [{}] failure", jobName, failure);
             }
-            var exceptions = jobExecution.getFailureExceptions();
-            if (!exceptions.isEmpty()) {
-                exceptions.forEach(ex ->
-                        log.error("Job [{}] exception: {}", jobName, ex.getMessage(), ex));
-            }
-            publishFailureEvent(jobExecution, jobName, jobId, status, exitCode, exitDescription, durationMs);
+            publishFailure(jobExecution, jobName, status, exitCode, durationMs);
         } else {
-            log.info("Job [{}] (id={}) completed - Status: {}, Exit Code: {}, Start: {}, End: {}, Duration: {}ms",
-                    jobName, jobId, status, exitCode, startTime, endTime, durationMs);
+            log.info("Job [{}] {} (execution {}, exit code {}, {} ms)", jobName, status, jobExecution.getId(),
+                    exitCode, durationMs);
         }
-
-        recordMetrics(jobName, durationMs, success);
+        observers.notify("jobFinished", observer -> observer.jobFinished(jobExecution));
     }
 
-    private void recordMetrics(String jobName, long durationMs, boolean success) {
-        if (batchMetrics == null) {
-            return;
+    private static long durationMs(JobExecution execution) {
+        if (execution.getStartTime() == null || execution.getEndTime() == null) {
+            return 0;
         }
-        try {
-            batchMetrics.recordJobExecution(jobName, durationMs, success);
-        } catch (RuntimeException ex) {
-            log.warn("Failed to record job metrics for [{}]: {}", jobName, ex.getMessage());
-        }
+        return Duration.between(execution.getStartTime(), execution.getEndTime()).toMillis();
     }
 
-    private void publishFailureEvent(JobExecution jobExecution, String jobName, Long jobId,
-                                     org.springframework.batch.core.BatchStatus status,
-                                     String exitCode, String exitDescription, long durationMs) {
+    private void publishFailure(JobExecution jobExecution, String jobName, BatchStatus status, String exitCode,
+                                long durationMs) {
         if (eventPublisher == null) {
             return;
         }
         try {
-            eventPublisher.publishEvent(new BatchJobFailedEvent(
-                    this, jobName, jobId, status, exitCode, exitDescription,
-                    durationMs, jobExecution.getFailureExceptions()));
+            eventPublisher.publishEvent(new BatchJobFailedEvent(this, jobName, jobExecution.getId(), status,
+                    exitCode, jobExecution.getExitStatus().getExitDescription(), durationMs,
+                    jobExecution.getAllFailureExceptions()));
         } catch (RuntimeException ex) {
-            log.warn("Failed to publish BatchJobFailedEvent for [{}]: {}", jobName, ex.getMessage());
+            log.warn("Could not publish BatchJobFailedEvent for job [{}]: {}", jobName, ex.getMessage());
         }
     }
 }

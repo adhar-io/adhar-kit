@@ -1,0 +1,98 @@
+-- Spring Batch 6.0 JobRepository schema for PostgreSQL (adhar-kit-batch, design 0025 section 5.8).
+--
+-- Source: org/springframework/batch/core/schema-postgresql.sql of spring-batch-core 6.0.4, with
+--   * the table prefix as a placeholder (adhar.batch.repository.table-prefix, default BATCH_);
+--     Flyway runs this with the kit's schema (adhar.batch.repository.schema, default batch) as
+--     the default schema, so the tables are <schema>.<prefix>JOB_INSTANCE and so on;
+--   * the unique constraint named after the prefix, because its index name is unique per schema;
+--   * the indexes Spring Batch's own queries need on PostgreSQL, which the upstream script omits.
+-- A released migration never changes (Flyway checksums it): a later framework schema change
+-- becomes a new versioned migration, as 6.0's BATCH_JOB_SEQ -> BATCH_JOB_INSTANCE_SEQ rename did.
+
+CREATE TABLE ${tablePrefix}JOB_INSTANCE (
+    JOB_INSTANCE_ID BIGINT NOT NULL PRIMARY KEY,
+    VERSION BIGINT,
+    JOB_NAME VARCHAR(100) NOT NULL,
+    JOB_KEY VARCHAR(32) NOT NULL,
+    CONSTRAINT ${tablePrefix}JOB_INST_UN UNIQUE (JOB_NAME, JOB_KEY)
+);
+
+CREATE TABLE ${tablePrefix}JOB_EXECUTION (
+    JOB_EXECUTION_ID BIGINT NOT NULL PRIMARY KEY,
+    VERSION BIGINT,
+    JOB_INSTANCE_ID BIGINT NOT NULL,
+    CREATE_TIME TIMESTAMP NOT NULL,
+    START_TIME TIMESTAMP DEFAULT NULL,
+    END_TIME TIMESTAMP DEFAULT NULL,
+    STATUS VARCHAR(10),
+    EXIT_CODE VARCHAR(2500),
+    EXIT_MESSAGE VARCHAR(2500),
+    LAST_UPDATED TIMESTAMP,
+    CONSTRAINT JOB_INST_EXEC_FK FOREIGN KEY (JOB_INSTANCE_ID)
+        REFERENCES ${tablePrefix}JOB_INSTANCE (JOB_INSTANCE_ID)
+);
+
+CREATE TABLE ${tablePrefix}JOB_EXECUTION_PARAMS (
+    JOB_EXECUTION_ID BIGINT NOT NULL,
+    PARAMETER_NAME VARCHAR(100) NOT NULL,
+    PARAMETER_TYPE VARCHAR(100) NOT NULL,
+    PARAMETER_VALUE VARCHAR(2500),
+    IDENTIFYING CHAR(1) NOT NULL,
+    CONSTRAINT JOB_EXEC_PARAMS_FK FOREIGN KEY (JOB_EXECUTION_ID)
+        REFERENCES ${tablePrefix}JOB_EXECUTION (JOB_EXECUTION_ID)
+);
+
+CREATE TABLE ${tablePrefix}STEP_EXECUTION (
+    STEP_EXECUTION_ID BIGINT NOT NULL PRIMARY KEY,
+    VERSION BIGINT NOT NULL,
+    STEP_NAME VARCHAR(100) NOT NULL,
+    JOB_EXECUTION_ID BIGINT NOT NULL,
+    CREATE_TIME TIMESTAMP NOT NULL,
+    START_TIME TIMESTAMP DEFAULT NULL,
+    END_TIME TIMESTAMP DEFAULT NULL,
+    STATUS VARCHAR(10),
+    COMMIT_COUNT BIGINT,
+    READ_COUNT BIGINT,
+    FILTER_COUNT BIGINT,
+    WRITE_COUNT BIGINT,
+    READ_SKIP_COUNT BIGINT,
+    WRITE_SKIP_COUNT BIGINT,
+    PROCESS_SKIP_COUNT BIGINT,
+    ROLLBACK_COUNT BIGINT,
+    EXIT_CODE VARCHAR(2500),
+    EXIT_MESSAGE VARCHAR(2500),
+    LAST_UPDATED TIMESTAMP,
+    CONSTRAINT JOB_EXEC_STEP_FK FOREIGN KEY (JOB_EXECUTION_ID)
+        REFERENCES ${tablePrefix}JOB_EXECUTION (JOB_EXECUTION_ID)
+);
+
+CREATE TABLE ${tablePrefix}STEP_EXECUTION_CONTEXT (
+    STEP_EXECUTION_ID BIGINT NOT NULL PRIMARY KEY,
+    SHORT_CONTEXT VARCHAR(2500) NOT NULL,
+    SERIALIZED_CONTEXT TEXT,
+    CONSTRAINT STEP_EXEC_CTX_FK FOREIGN KEY (STEP_EXECUTION_ID)
+        REFERENCES ${tablePrefix}STEP_EXECUTION (STEP_EXECUTION_ID)
+);
+
+CREATE TABLE ${tablePrefix}JOB_EXECUTION_CONTEXT (
+    JOB_EXECUTION_ID BIGINT NOT NULL PRIMARY KEY,
+    SHORT_CONTEXT VARCHAR(2500) NOT NULL,
+    SERIALIZED_CONTEXT TEXT,
+    CONSTRAINT JOB_EXEC_CTX_FK FOREIGN KEY (JOB_EXECUTION_ID)
+        REFERENCES ${tablePrefix}JOB_EXECUTION (JOB_EXECUTION_ID)
+);
+
+CREATE SEQUENCE ${tablePrefix}STEP_EXECUTION_SEQ MAXVALUE 9223372036854775807 NO CYCLE;
+CREATE SEQUENCE ${tablePrefix}JOB_EXECUTION_SEQ MAXVALUE 9223372036854775807 NO CYCLE;
+CREATE SEQUENCE ${tablePrefix}JOB_INSTANCE_SEQ MAXVALUE 9223372036854775807 NO CYCLE;
+
+-- Executions of an instance (restart, getLastJobExecution, getJobExecutions).
+CREATE INDEX ${tablePrefix}JOB_EXEC_INST_IDX ON ${tablePrefix}JOB_EXECUTION (JOB_INSTANCE_ID);
+-- Running executions (findRunningJobExecutions) and recent history by status.
+CREATE INDEX ${tablePrefix}JOB_EXEC_STATUS_IDX ON ${tablePrefix}JOB_EXECUTION (STATUS, START_TIME);
+-- Parameters of an execution (the table has no primary key).
+CREATE INDEX ${tablePrefix}JOB_EXEC_PARAMS_IDX ON ${tablePrefix}JOB_EXECUTION_PARAMS (JOB_EXECUTION_ID);
+-- Step executions of a job execution.
+CREATE INDEX ${tablePrefix}STEP_EXEC_JOB_EXEC_IDX ON ${tablePrefix}STEP_EXECUTION (JOB_EXECUTION_ID);
+-- Instances of a job, newest first (getJobInstances); the unique constraint covers name + key only.
+CREATE INDEX ${tablePrefix}JOB_INST_NAME_IDX ON ${tablePrefix}JOB_INSTANCE (JOB_NAME, JOB_INSTANCE_ID);

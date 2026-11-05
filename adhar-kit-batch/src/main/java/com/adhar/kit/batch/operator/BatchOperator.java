@@ -1,119 +1,262 @@
 package com.adhar.kit.batch.operator;
 
+import com.adhar.kit.batch.metrics.BatchJobStats;
+import com.adhar.kit.batch.params.ParameterMasking;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.job.JobInstance;
+import org.springframework.batch.core.job.parameters.InvalidJobParametersException;
+import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.launch.JobExecutionAlreadyRunningException;
 import org.springframework.batch.core.launch.JobExecutionNotRunningException;
 import org.springframework.batch.core.launch.JobInstanceAlreadyCompleteException;
 import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.launch.JobRestartException;
-import org.springframework.batch.core.launch.NoSuchJobException;
-import org.springframework.batch.core.launch.NoSuchJobExecutionException;
-import org.springframework.batch.core.job.parameters.InvalidJobParametersException;
 import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.util.Assert;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
- * Operational facade over Spring Batch's {@link JobOperator} and
- * {@link JobRepository} for managing running and stopped job executions.
+ * Operates jobs and their executions: start, restart, stop, abandon, recover, and look up
+ * history. Built on Spring Batch 6's {@link JobExecution}-based {@link JobOperator} methods; the
+ * long-id methods scheduled for removal are not used.
  *
- * <p>Provides a small, exception-friendly API for the common lifecycle
- * operations required to operate batch jobs in production:</p>
- * <ul>
- *   <li>{@link #restart(long)} - restart a failed or stopped execution</li>
- *   <li>{@link #stop(long)} - signal a running execution to stop</li>
- *   <li>{@link #abandon(long)} - mark a stopped execution as abandoned</li>
- *   <li>{@link #getRunningExecutions(String)} - list running execution ids</li>
- * </ul>
+ * <p>Restart semantics belong to Spring Batch: a restart is a new execution of the same
+ * JobInstance with the same identifying parameters, and the steps that completed are not run
+ * again. {@link #recover(JobExecution)} marks an execution whose process died (status still
+ * STARTED) as FAILED, so it can be restarted.</p>
+ *
+ * <p>Log lines name jobs and execution ids, never parameter values at INFO; the parameters are
+ * logged masked at DEBUG ({@link ParameterMasking}).</p>
  *
  * @author Adhar Platform Team
- * @since 1.0.0
+ * @since 0.1.0
  */
 @Slf4j
 public class BatchOperator {
 
+    /** How many recent JobInstances {@link #getJobStats(String)} aggregates. */
+    public static final int DEFAULT_STATS_INSTANCES = 100;
+
     private final JobOperator jobOperator;
     private final JobRepository jobRepository;
+    private final JobResolver jobResolver;
 
     /**
-     * Creates a new {@code BatchOperator}.
-     *
-     * @param jobOperator   the Spring Batch job operator
-     * @param jobRepository the Spring Batch job repository for execution lookups
+     * @param jobOperator   Spring Batch's operator
+     * @param jobRepository Spring Batch's repository, for lookups
+     * @param jobResolver   finds jobs by name for {@link #start(String, JobParameters)}
      */
-    public BatchOperator(JobOperator jobOperator, JobRepository jobRepository) {
+    public BatchOperator(JobOperator jobOperator, JobRepository jobRepository, JobResolver jobResolver) {
         this.jobOperator = jobOperator;
         this.jobRepository = jobRepository;
+        this.jobResolver = jobResolver;
     }
 
     /**
-     * Restarts a previously failed or stopped job execution.
+     * Starts a job; if the JobInstance of these identifying parameters failed or stopped before,
+     * this restarts it.
      *
-     * @param executionId the id of the job execution to restart
-     * @return the id of the new job execution
-     * @throws NoSuchJobExecutionException          if the execution id is unknown
-     * @throws NoSuchJobException                   if the job is no longer registered
-     * @throws JobInstanceAlreadyCompleteException  if the instance already completed successfully
-     * @throws JobRestartException                  if the job cannot be restarted
-     * @throws InvalidJobParametersException        if the stored job parameters are invalid
+     * @param job        the job
+     * @param parameters its parameters
+     * @return the new execution (already ended when the operator's task executor is synchronous)
+     * @throws JobInstanceAlreadyCompleteException the instance already completed
+     * @throws JobExecutionAlreadyRunningException an execution of the instance is running
+     * @throws JobRestartException                 the instance cannot be restarted
+     * @throws InvalidJobParametersException       the job's validator refused the parameters
      */
-    public Long restart(long executionId)
-            throws NoSuchJobExecutionException, NoSuchJobException,
-            JobInstanceAlreadyCompleteException, JobRestartException, InvalidJobParametersException {
-        log.info("Restarting job execution [{}]", executionId);
-        var newId = jobOperator.restart(executionId);
-        log.info("Restarted job execution [{}] as new execution [{}]", executionId, newId);
-        return newId;
+    public JobExecution start(Job job, JobParameters parameters) throws JobInstanceAlreadyCompleteException,
+            JobExecutionAlreadyRunningException, JobRestartException, InvalidJobParametersException {
+        Assert.notNull(job, "job must not be null");
+        log.info("Starting job [{}]", job.getName());
+        logParameters(job.getName(), parameters);
+        return jobOperator.start(job, parameters);
     }
 
     /**
-     * Signals a running job execution to stop at the next chunk boundary.
+     * Starts a job by name.
      *
-     * @param executionId the id of the job execution to stop
-     * @return {@code true} if the stop signal was successfully sent
-     * @throws NoSuchJobExecutionException     if the execution id is unknown
-     * @throws JobExecutionNotRunningException if the execution is not running
+     * @param jobName    the job's bean name or name
+     * @param parameters its parameters
+     * @return the new execution
+     * @throws IllegalArgumentException when there is no such job
+     * @throws JobInstanceAlreadyCompleteException the instance already completed
+     * @throws JobExecutionAlreadyRunningException an execution of the instance is running
+     * @throws JobRestartException                 the instance cannot be restarted
+     * @throws InvalidJobParametersException       the job's validator refused the parameters
+     * @see #start(Job, JobParameters)
      */
-    public boolean stop(long executionId)
-            throws NoSuchJobExecutionException, JobExecutionNotRunningException {
-        log.info("Stopping job execution [{}]", executionId);
-        return jobOperator.stop(executionId);
+    public JobExecution start(String jobName, JobParameters parameters) throws JobInstanceAlreadyCompleteException,
+            JobExecutionAlreadyRunningException, JobRestartException, InvalidJobParametersException {
+        return start(jobResolver.resolve(jobName), parameters);
     }
 
     /**
-     * Marks a stopped or failed job execution as abandoned so it is no longer
-     * considered for restart.
+     * Restarts a FAILED or STOPPED execution: a new execution of the same JobInstance that
+     * resumes from the last committed chunk.
      *
-     * @param executionId the id of the job execution to abandon
-     * @return the abandoned {@link JobExecution}
-     * @throws NoSuchJobExecutionException          if the execution id is unknown
-     * @throws JobExecutionAlreadyRunningException  if the execution is still running
+     * @param execution the execution to restart
+     * @return the new execution
+     * @throws JobRestartException when it cannot be restarted (running, completed, abandoned)
      */
-    public JobExecution abandon(long executionId)
-            throws NoSuchJobExecutionException, JobExecutionAlreadyRunningException {
-        log.info("Abandoning job execution [{}]", executionId);
-        return jobOperator.abandon(executionId);
+    public JobExecution restart(JobExecution execution) throws JobRestartException {
+        Assert.notNull(execution, "execution must not be null");
+        log.info("Restarting execution {} of job [{}]", execution.getId(), execution.getJobInstance().getJobName());
+        return jobOperator.restart(execution);
     }
 
     /**
-     * Returns the ids of the currently running executions for the given job.
+     * Asks a running execution to stop: it stops at its next chunk boundary and records STOPPED.
      *
-     * @param jobName the job name
-     * @return the set of running execution ids
-     * @throws NoSuchJobException if the job is not known to the operator
+     * @param execution the running execution
+     * @return {@code true} once the request is recorded
+     * @throws JobExecutionNotRunningException when it is not running
      */
-    public Set<Long> getRunningExecutions(String jobName) throws NoSuchJobException {
-        return jobOperator.getRunningExecutions(jobName);
+    public boolean stop(JobExecution execution) throws JobExecutionNotRunningException {
+        Assert.notNull(execution, "execution must not be null");
+        log.info("Stopping execution {} of job [{}]", execution.getId(), execution.getJobInstance().getJobName());
+        return jobOperator.stop(execution);
     }
 
     /**
-     * Looks up a job execution by id via the job repository.
+     * Abandons a STOPPED or FAILED execution: its instance can no longer be restarted, and
+     * running it again needs new identifying parameters.
      *
-     * @param executionId the execution id
-     * @return the {@link JobExecution}, or {@code null} if none exists
+     * @param execution the execution
+     * @return the abandoned execution
+     * @throws JobExecutionAlreadyRunningException when it is still running
      */
-    public JobExecution getJobExecution(long executionId) {
-        return jobRepository.getJobExecution(executionId);
+    public JobExecution abandon(JobExecution execution) throws JobExecutionAlreadyRunningException {
+        Assert.notNull(execution, "execution must not be null");
+        log.info("Abandoning execution {} of job [{}]", execution.getId(), execution.getJobInstance().getJobName());
+        return jobOperator.abandon(execution);
+    }
+
+    /**
+     * Recovers an execution whose process died while it ran (its status is still STARTED or
+     * STOPPING): marks its running steps and itself FAILED, so it can be restarted. Idempotent.
+     * Only call it when the process that ran it is known to be gone.
+     *
+     * @param execution the orphaned execution
+     * @return the recovered execution (unchanged when already complete, abandoned or recovered)
+     */
+    public JobExecution recover(JobExecution execution) {
+        Assert.notNull(execution, "execution must not be null");
+        log.info("Recovering execution {} of job [{}]", execution.getId(), execution.getJobInstance().getJobName());
+        return jobOperator.recover(execution);
+    }
+
+    /**
+     * @param executionId an execution id
+     * @return the execution, with its step executions
+     */
+    public Optional<JobExecution> findExecution(long executionId) {
+        return Optional.ofNullable(jobRepository.getJobExecution(executionId));
+    }
+
+    /**
+     * Every execution of the JobInstance that these identifying parameters denote.
+     *
+     * @param jobName    the job's name
+     * @param parameters the parameters (only the identifying ones count)
+     * @return the executions, most recent first; empty when the instance does not exist
+     */
+    public List<JobExecution> findExecutions(String jobName, JobParameters parameters) {
+        JobInstance instance = jobRepository.getJobInstance(jobName, parameters);
+        return instance == null ? List.of() : jobRepository.getJobExecutions(instance);
+    }
+
+    /**
+     * @param job        the job
+     * @param parameters the parameters (only the identifying ones count)
+     * @return the executions of the instance, most recent first
+     * @see #findExecutions(String, JobParameters)
+     */
+    public List<JobExecution> findExecutions(Job job, JobParameters parameters) {
+        return findExecutions(job.getName(), parameters);
+    }
+
+    /**
+     * @param jobName    the job's name
+     * @param parameters the parameters (only the identifying ones count)
+     * @return the latest execution of the instance they denote
+     */
+    public Optional<JobExecution> findLastExecution(String jobName, JobParameters parameters) {
+        JobInstance instance = jobRepository.getJobInstance(jobName, parameters);
+        return instance == null ? Optional.empty() : Optional.ofNullable(jobRepository.getLastJobExecution(instance));
+    }
+
+    /**
+     * @param jobName the job's name
+     * @return its executions that are STARTING, STARTED or STOPPING
+     */
+    public Set<JobExecution> getRunningExecutions(String jobName) {
+        return jobRepository.findRunningJobExecutions(jobName);
+    }
+
+    /**
+     * Statistics of a job from the JobRepository: the executions of its
+     * {@value #DEFAULT_STATS_INSTANCES} most recent JobInstances.
+     *
+     * @param jobName the job's name
+     * @return the statistics; zeros when the job never ran
+     */
+    public BatchJobStats getJobStats(String jobName) {
+        return getJobStats(jobName, DEFAULT_STATS_INSTANCES);
+    }
+
+    /**
+     * Statistics of a job from the JobRepository.
+     *
+     * @param jobName      the job's name
+     * @param maxInstances how many of its most recent JobInstances to aggregate
+     * @return executions in total, COMPLETED ones, unsuccessful ones (FAILED, ABANDONED,
+     *         UNKNOWN), the mean duration of the ended ones and the latest start
+     */
+    public BatchJobStats getJobStats(String jobName, int maxInstances) {
+        Assert.isTrue(maxInstances > 0, "maxInstances must be positive");
+        long total = 0;
+        long completed = 0;
+        long unsuccessful = 0;
+        long ended = 0;
+        long durationMs = 0;
+        LocalDateTime latest = null;
+        for (JobInstance instance : jobRepository.getJobInstances(jobName, 0, maxInstances)) {
+            for (JobExecution execution : jobRepository.getJobExecutions(instance)) {
+                total++;
+                BatchStatus status = execution.getStatus();
+                if (status == BatchStatus.COMPLETED) {
+                    completed++;
+                } else if (status.isUnsuccessful()) {
+                    unsuccessful++;
+                }
+                LocalDateTime start = execution.getStartTime();
+                LocalDateTime end = execution.getEndTime();
+                if (start != null && end != null) {
+                    ended++;
+                    durationMs += Duration.between(start, end).toMillis();
+                }
+                LocalDateTime when = start != null ? start : execution.getCreateTime();
+                if (latest == null || when.isAfter(latest)) {
+                    latest = when;
+                }
+            }
+        }
+        return new BatchJobStats(total, completed, unsuccessful, ended > 0 ? (double) durationMs / ended : 0.0,
+                latest == null ? null : latest.atZone(ZoneId.systemDefault()).toInstant());
+    }
+
+    private static void logParameters(String jobName, JobParameters parameters) {
+        if (log.isDebugEnabled()) {
+            log.debug("Job [{}] parameters {}", jobName, ParameterMasking.describe(parameters));
+        }
     }
 }

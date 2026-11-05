@@ -148,10 +148,14 @@
             <artifactId>adhar-kit-graphql</artifactId>
             <version>0.1.0</version>
         </dependency>
+        <!-- Optional: a service that runs jobs declares adhar-kit-batch itself (the batch
+             templates do). Pulled into every service it brought Spring Batch, a JobRepository and
+             Flyway along; AdharFacade.getBatch() explains its absence instead (design 0025, K9). -->
         <dependency>
             <groupId>com.adhar.kit</groupId>
             <artifactId>adhar-kit-batch</artifactId>
             <version>0.1.0</version>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>com.adhar.kit</groupId>

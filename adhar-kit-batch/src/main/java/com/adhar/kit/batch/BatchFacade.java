@@ -2,201 +2,216 @@ package com.adhar.kit.batch;
 
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.metrics.BatchJobStats;
-import com.adhar.kit.batch.metrics.BatchMetrics;
+import com.adhar.kit.batch.operator.BatchOperator;
 import com.adhar.kit.batch.scheduler.BatchScheduler;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
- * Unified facade for the Adhar Batch module.
+ * Single entry point of the batch module: operations on jobs, the embedded scheduler, and the
+ * module's defaults. Reached as {@code adhar.getBatch()} through {@code adhar-kit-starter}, or
+ * directly as {@link #getInstance()}.
  *
- * <p>Provides a single entry point for scheduling, cancelling, and monitoring
- * batch jobs. Delegates to {@link BatchScheduler}, {@link BatchMetrics}, and
- * {@link BatchProperties} internally.</p>
+ * <p>Self-initialising (K1): in a Spring application with at least one job, the module publishes
+ * the facade before any application bean is created, bound to {@code adhar.batch.*} and backed by
+ * the context's {@link BatchOperator} and (when {@code adhar.batch.scheduler.enabled}) its
+ * {@link BatchScheduler}. Without such a context, {@link #getInstance()} returns a facade with the
+ * defaults that has no operator and no scheduler; the operations then explain what is missing.</p>
  *
- * <p>All dependencies are optional -- the facade gracefully degrades when a
- * component is not available (e.g. metrics recording is silently skipped when
- * no {@link BatchMetrics} instance is configured).</p>
- *
- * <p>A thread-safe singleton is available via {@link #getInstance()} after
- * the instance has been initialised through the constructor.</p>
+ * <pre>{@code
+ * BatchFacade batch = BatchFacade.getInstance();      // or: BatchFacade batch = adhar.getBatch();
+ * batch.scheduleJob("nightlyReport", "0 0 2 * * *");  // embedded mode only
+ * BatchJobStats stats = batch.getJobStats("nightlyReport");
+ * }</pre>
  *
  * @author Adhar Platform Team
- * @since 1.0.0
+ * @since 0.1.0
  */
 @Slf4j
 public class BatchFacade {
 
     private static volatile BatchFacade instance;
 
-    private final BatchScheduler scheduler;
-    private final BatchMetrics metrics;
     private final BatchProperties properties;
+    private final Supplier<BatchScheduler> scheduler;
+    private final Supplier<BatchOperator> operator;
 
     /**
-     * Creates a new {@code BatchFacade} and publishes it as the singleton instance.
-     *
-     * @param scheduler  the batch scheduler, may be {@code null}
-     * @param metrics    the batch metrics collector, may be {@code null}
-     * @param properties the batch configuration properties, may be {@code null}
+     * @param properties {@code adhar.batch.*}
+     * @param scheduler  supplies the embedded scheduler, or {@code null} when it is disabled
+     * @param operator   supplies the operator, or {@code null} without a JobRepository
      */
-    public BatchFacade(BatchScheduler scheduler, BatchMetrics metrics, BatchProperties properties) {
-        this.scheduler = scheduler;
-        this.metrics = metrics;
-        this.properties = properties;
-        instance = this;
-        log.info("BatchFacade initialised [scheduler={}, metrics={}, properties={}]",
-                scheduler != null, metrics != null, properties != null);
+    public BatchFacade(BatchProperties properties, Supplier<BatchScheduler> scheduler,
+                       Supplier<BatchOperator> operator) {
+        this.properties = properties != null ? properties : new BatchProperties();
+        this.scheduler = scheduler != null ? scheduler : () -> null;
+        this.operator = operator != null ? operator : () -> null;
     }
 
     /**
-     * Returns the singleton {@code BatchFacade} instance.
+     * The application's facade, or a facade with the defaults when no batch context runs.
      *
-     * @return the singleton instance
-     * @throws IllegalStateException if the facade has not been initialised
+     * @return the facade, never {@code null}
      */
     public static BatchFacade getInstance() {
-        if (instance == null) {
-            throw new IllegalStateException("BatchFacade has not been initialised");
+        BatchFacade current = instance;
+        if (current == null) {
+            synchronized (BatchFacade.class) {
+                if (instance == null) {
+                    instance = new BatchFacade(new BatchProperties(), null, null);
+                    log.debug("BatchFacade initialised with the defaults (no batch application context)");
+                }
+                current = instance;
+            }
         }
-        return instance;
+        return current;
+    }
+
+    /**
+     * Makes a facade the one {@link #getInstance()} returns.
+     *
+     * @param facade the context's facade
+     */
+    static void publish(BatchFacade facade) {
+        synchronized (BatchFacade.class) {
+            instance = facade;
+        }
+    }
+
+    /**
+     * Withdraws a facade when its context closes, unless another one replaced it meanwhile.
+     *
+     * @param facade the context's facade
+     */
+    static void withdraw(BatchFacade facade) {
+        synchronized (BatchFacade.class) {
+            if (instance == facade) {
+                instance = null;
+            }
+        }
     }
 
     // ----------------------------------------------------------------
-    // Scheduling
+    // Embedded scheduler
     // ----------------------------------------------------------------
 
     /**
-     * Schedules a batch job to run according to the given cron expression.
+     * Schedules a job in the embedded scheduler (replacing any schedule it has).
      *
-     * @param jobName        the Spring bean name of the job to schedule
-     * @param cronExpression the cron expression defining the schedule
-     * @throws IllegalStateException if no scheduler is available
+     * @param jobName        the job's bean name or name
+     * @param cronExpression six fields, seconds first, in {@code adhar.batch.scheduler.time-zone}
+     * @throws IllegalStateException when the embedded scheduler is not enabled
      */
     public void scheduleJob(String jobName, String cronExpression) {
-        requireScheduler();
-        scheduler.scheduleJob(jobName, cronExpression);
+        requireScheduler().scheduleJob(jobName, cronExpression);
     }
 
     /**
-     * Cancels a previously scheduled job.
-     *
-     * @param jobName the name of the job to cancel
-     * @return {@code true} if the job was found and cancelled, {@code false} otherwise
-     * @throws IllegalStateException if no scheduler is available
+     * @param jobName the name a job was scheduled under
+     * @return {@code true} if it was scheduled
+     * @throws IllegalStateException when the embedded scheduler is not enabled
      */
     public boolean cancelJob(String jobName) {
-        requireScheduler();
-        return scheduler.cancelScheduledJob(jobName);
+        return requireScheduler().cancelScheduledJob(jobName);
     }
 
     /**
-     * Returns an unmodifiable set of all currently scheduled job names.
-     *
-     * @return the set of scheduled job names, or an empty set if no scheduler is available
+     * @return the scheduled job names; empty when the embedded scheduler is not enabled
      */
     public Set<String> listScheduledJobs() {
-        if (scheduler == null) {
-            return Collections.emptySet();
-        }
-        return scheduler.listScheduledJobs();
+        BatchScheduler current = scheduler.get();
+        return current != null ? current.listScheduledJobs() : Collections.emptySet();
+    }
+
+    /**
+     * @return the embedded scheduler, when enabled
+     */
+    public Optional<BatchScheduler> getScheduler() {
+        return Optional.ofNullable(scheduler.get());
     }
 
     // ----------------------------------------------------------------
-    // Metrics
+    // Operations
     // ----------------------------------------------------------------
 
     /**
-     * Returns aggregated statistics for the given job.
+     * @return the operator: start, restart, stop, abandon, recover, history
+     * @throws IllegalStateException without a batch application context
+     */
+    public BatchOperator getOperator() {
+        BatchOperator current = operator.get();
+        if (current == null) {
+            throw new IllegalStateException("No BatchOperator: the batch module runs in a Spring application "
+                    + "that defines at least one Job (and adhar.batch.enabled is not false)");
+        }
+        return current;
+    }
+
+    /**
+     * Statistics of a job from the JobRepository.
      *
-     * @param jobName the name of the batch job
-     * @return the job statistics, or a zero-value record if no executions have been recorded
-     *         or no metrics component is available
+     * @param jobName the job's name
+     * @return executions, successes, failures, mean duration and latest start
+     * @throws IllegalStateException without a batch application context
      */
     public BatchJobStats getJobStats(String jobName) {
-        if (metrics == null) {
-            log.warn("BatchMetrics is not available; returning empty stats for job [{}]", jobName);
-            return new BatchJobStats(0, 0, 0, 0.0, null);
-        }
-        return metrics.getJobStats(jobName);
-    }
-
-    /**
-     * Records a job execution with its duration and outcome.
-     *
-     * @param jobName    the name of the batch job
-     * @param durationMs the execution duration in milliseconds
-     * @param success    whether the execution completed successfully
-     */
-    public void recordJobExecution(String jobName, long durationMs, boolean success) {
-        if (metrics == null) {
-            log.warn("BatchMetrics is not available; skipping recording for job [{}]", jobName);
-            return;
-        }
-        metrics.recordJobExecution(jobName, durationMs, success);
+        return getOperator().getJobStats(jobName);
     }
 
     // ----------------------------------------------------------------
-    // Properties
+    // Defaults
     // ----------------------------------------------------------------
 
     /**
-     * Returns the configured default chunk size for step processing.
-     *
-     * @return the default chunk size, or {@code 100} if properties are not available
+     * @return {@code adhar.batch.chunk.size}
      */
     public int getDefaultChunkSize() {
-        return properties != null ? properties.getDefaultChunkSize() : 100;
+        return properties.getChunk().getSize();
     }
 
     /**
-     * Returns the configured default page size for paginated item readers.
-     *
-     * @return the default page size, or {@code 50} if properties are not available
+     * @return {@code adhar.batch.page.size}, the page size of the kit's paging readers
      */
     public int getDefaultPageSize() {
-        return properties != null ? properties.getDefaultPageSize() : 50;
+        return properties.getPage().getSize();
     }
 
     /**
-     * Checks whether the batch module is enabled.
-     *
-     * @return {@code true} if enabled (or if properties are not available, defaults to {@code true})
+     * @return {@code adhar.batch.enabled}
      */
     public boolean isEnabled() {
-        return properties == null || properties.isEnabled();
+        return properties.isEnabled();
     }
 
-    // ----------------------------------------------------------------
-    // Health
-    // ----------------------------------------------------------------
-
     /**
-     * Returns a health snapshot of the batch subsystem.
-     *
-     * @return an unmodifiable map containing scheduler status and job count
+     * @return a snapshot: enabled, whether an operator and a scheduler are available, the
+     *         scheduled jobs and the jobs a scheduled run is executing
      */
     public Map<String, Object> health() {
-        var info = new LinkedHashMap<String, Object>();
+        Map<String, Object> info = new LinkedHashMap<>();
+        BatchScheduler currentScheduler = scheduler.get();
         info.put("enabled", isEnabled());
-        info.put("schedulerAvailable", scheduler != null);
-        info.put("metricsAvailable", metrics != null);
-        info.put("scheduledJobCount", scheduler != null ? scheduler.listScheduledJobs().size() : 0);
-        info.put("scheduledJobs", scheduler != null ? scheduler.listScheduledJobs() : Collections.emptySet());
+        info.put("operatorAvailable", operator.get() != null);
+        info.put("schedulerAvailable", currentScheduler != null);
+        Set<String> scheduled = currentScheduler != null ? currentScheduler.listScheduledJobs() : Set.of();
+        info.put("scheduledJobCount", scheduled.size());
+        info.put("scheduledJobs", scheduled);
+        info.put("runningScheduledJobs", currentScheduler != null ? currentScheduler.runningJobs() : Set.of());
         return Collections.unmodifiableMap(info);
     }
 
-    // ----------------------------------------------------------------
-    // Internal helpers
-    // ----------------------------------------------------------------
-
-    private void requireScheduler() {
-        if (scheduler == null) {
-            throw new IllegalStateException("BatchScheduler is not available");
+    private BatchScheduler requireScheduler() {
+        BatchScheduler current = scheduler.get();
+        if (current == null) {
+            throw new IllegalStateException("The embedded batch scheduler is not enabled: set "
+                    + "adhar.batch.scheduler.enabled=true (on the platform, schedule a BatchJob instead)");
         }
+        return current;
     }
 }

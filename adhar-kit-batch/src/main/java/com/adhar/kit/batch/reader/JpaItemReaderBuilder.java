@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.reader;
 
+import com.adhar.kit.batch.BatchFacade;
 import jakarta.persistence.EntityManagerFactory;
 import org.springframework.batch.infrastructure.item.database.JpaPagingItemReader;
 import org.springframework.batch.infrastructure.item.database.builder.JpaPagingItemReaderBuilder;
@@ -19,8 +20,10 @@ import java.util.Map;
  *         .build();
  * }</pre>
  *
+ * <p>The page size defaults to {@code adhar.batch.page.size} (500).</p>
+ *
  * @author Adhar Platform Team
- * @since 1.0.0
+ * @since 0.1.0
  */
 public final class JpaItemReaderBuilder {
 
@@ -35,7 +38,7 @@ public final class JpaItemReaderBuilder {
      * <ul>
      *   <li>The entity manager factory for JPA access</li>
      *   <li>A reader name derived from the entity class name</li>
-     *   <li>A default page size of 50</li>
+     *   <li>The configured page size ({@code adhar.batch.page.size})</li>
      * </ul>
      *
      * @param entityClass the JPA entity class to read
@@ -47,7 +50,7 @@ public final class JpaItemReaderBuilder {
         return new JpaPagingItemReaderBuilder<T>()
                 .name(entityClass.getSimpleName() + "Reader")
                 .entityManagerFactory(emf)
-                .pageSize(50);
+                .pageSize(BatchFacade.getInstance().getDefaultPageSize());
     }
 
     /**

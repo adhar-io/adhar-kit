@@ -3,39 +3,53 @@ package com.adhar.kit.batch.lock;
 import java.time.Duration;
 
 /**
- * Abstraction for a distributed lock used to ensure that a scheduled batch job
- * runs on only one instance at a time in a multi-instance (clustered)
- * deployment.
+ * A named lock shared by the instances of a service, which the embedded scheduler holds for the
+ * whole run of a scheduled job.
  *
- * <p>This provides the same core semantics as libraries such as ShedLock, but
- * without an external dependency: only one holder may own a named lock at a
- * time, and locks automatically expire after a time-to-live so that a crashed
- * instance never blocks the schedule forever.</p>
+ * <p>Only one holder owns a name at a time. A lock carries a lease: the holder renews it while
+ * its run lasts, and a holder that crashed loses it when the lease expires, so it never blocks
+ * the schedule for ever. Comparable to ShedLock, without the dependency.</p>
  *
  * @author Adhar Platform Team
- * @since 1.0.0
+ * @since 0.1.0
  */
 public interface SchedulerLock {
 
     /**
-     * Attempts to acquire the named lock.
+     * Acquires the named lock if nobody holds it or its holder's lease has expired.
      *
-     * <p>The lock is granted if it is currently unheld or if the existing lock
-     * has expired. When granted, it is held for at most {@code ttl} before it
-     * automatically expires.</p>
-     *
-     * @param name the logical lock name (typically the scheduled job name)
-     * @param ttl  the maximum time the lock may be held before expiring
-     * @return {@code true} if the lock was acquired, {@code false} if it is held elsewhere
+     * @param name  the lock name (the scheduled job's name)
+     * @param lease how long the lock stays held without a renewal
+     * @return {@code true} when acquired; {@code false} when another holder owns it, this holder
+     *         already owns it, or the database could not be asked
      */
-    boolean tryLock(String name, Duration ttl);
+    boolean tryLock(String name, Duration lease);
 
     /**
-     * Releases a lock previously acquired by this instance.
+     * Extends a lock this holder owns.
      *
-     * <p>Releasing a lock not owned by this instance is a no-op.</p>
+     * @param name  the lock name
+     * @param lease the new lease, from now
+     * @return {@code true} when still owned and extended; {@code false} when another holder has
+     *         taken it over (the lease had expired)
+     * @throws org.springframework.dao.DataAccessException when the database could not be
+     *         reached: ownership is then unknown, and the caller may retry before the lease ends
+     */
+    boolean renew(String name, Duration lease);
+
+    /**
+     * Releases a lock this holder owns. Releasing a lock owned by someone else does nothing.
      *
-     * @param name the logical lock name
+     * @param name the lock name
      */
     void unlock(String name);
+
+    /**
+     * Checks that the lock can be used at all, so a missing table fails when the scheduler
+     * starts and not at the first fire.
+     *
+     * @throws IllegalStateException describing what is missing
+     */
+    default void verify() {
+    }
 }

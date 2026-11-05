@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.reader;
 
+import com.adhar.kit.batch.BatchFacade;
 import org.springframework.batch.infrastructure.item.database.JdbcCursorItemReader;
 import org.springframework.batch.infrastructure.item.database.builder.JdbcCursorItemReaderBuilder;
 import org.springframework.batch.infrastructure.item.database.builder.JdbcPagingItemReaderBuilder;
@@ -28,12 +29,12 @@ import javax.sql.DataSource;
  *         .build();
  * }</pre>
  *
+ * <p>The paging reader's page size defaults to {@code adhar.batch.page.size} (500).</p>
+ *
  * @author Adhar Platform Team
- * @since 1.0.0
+ * @since 0.1.0
  */
 public final class JdbcItemReaderBuilder {
-
-    private static final int DEFAULT_PAGE_SIZE = 50;
 
     private JdbcItemReaderBuilder() {
         // utility class
@@ -71,8 +72,9 @@ public final class JdbcItemReaderBuilder {
     }
 
     /**
-     * Creates a pre-configured {@link JdbcPagingItemReaderBuilder} with a default
-     * page size, mapping each row to the given type using a {@code dataRowMapper}.
+     * Creates a pre-configured {@link JdbcPagingItemReaderBuilder} with the configured page size
+     * ({@code adhar.batch.page.size}), mapping each row to the given type using a
+     * {@code dataRowMapper}.
      *
      * <p>The caller must supply at least {@code selectClause}, {@code fromClause},
      * and {@code sortKeys} before calling {@code build()}.</p>
@@ -87,6 +89,6 @@ public final class JdbcItemReaderBuilder {
                 .name(targetType.getSimpleName() + "JdbcPagingReader")
                 .dataSource(dataSource)
                 .dataRowMapper(targetType)
-                .pageSize(DEFAULT_PAGE_SIZE);
+                .pageSize(BatchFacade.getInstance().getDefaultPageSize());
     }
 }

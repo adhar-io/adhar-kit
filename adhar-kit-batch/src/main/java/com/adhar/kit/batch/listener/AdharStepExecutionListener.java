@@ -1,66 +1,46 @@
 package com.adhar.kit.batch.listener;
 
-import com.adhar.kit.batch.metrics.BatchMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.listener.StepExecutionListener;
 import org.springframework.batch.core.step.StepExecution;
 
+import java.util.List;
+
 /**
- * A Spring Batch {@link StepExecutionListener} that logs step execution details
- * and records per-step read/write/skip counts to an optional {@link BatchMetrics}.
- *
- * <p>The metrics collector is optional; when {@code null} the recording is
- * silently skipped so the listener works in a bare Spring Batch setup.</p>
+ * The kit's {@link StepExecutionListener}, attached to every step by
+ * {@link BatchListenerAttacher}: logs the step's start and its counts at the end, and notifies
+ * the {@link BatchRunObserver}s.
  *
  * @author Adhar Platform Team
- * @since 1.0.0
+ * @since 0.1.0
  */
 @Slf4j
 public class AdharStepExecutionListener implements StepExecutionListener {
 
-    private final BatchMetrics batchMetrics;
+    private final BatchRunObservers observers;
 
     /**
-     * Creates a listener that only logs step execution (no metrics).
+     * @param observers notified of every step start and end
      */
-    public AdharStepExecutionListener() {
-        this(null);
-    }
-
-    /**
-     * Creates a listener that records step metrics.
-     *
-     * @param batchMetrics the metrics collector, may be {@code null}
-     */
-    public AdharStepExecutionListener(BatchMetrics batchMetrics) {
-        this.batchMetrics = batchMetrics;
+    public AdharStepExecutionListener(List<BatchRunObserver> observers) {
+        this.observers = new BatchRunObservers(observers);
     }
 
     @Override
     public void beforeStep(StepExecution stepExecution) {
-        log.info("Step [{}] starting", stepExecution.getStepName());
+        log.info("Step [{}] starting (step execution {})", stepExecution.getStepName(), stepExecution.getId());
+        observers.notify("stepStarted", observer -> observer.stepStarted(stepExecution));
     }
 
     @Override
     public ExitStatus afterStep(StepExecution stepExecution) {
-        var stepName = stepExecution.getStepName();
-        var readCount = stepExecution.getReadCount();
-        var writeCount = stepExecution.getWriteCount();
-        var skipCount = stepExecution.getSkipCount();
-
-        log.info("Step [{}] completed - Status: {}, Reads: {}, Writes: {}, Skips: {}",
-                stepName, stepExecution.getStatus(), readCount, writeCount, skipCount);
-
-        if (batchMetrics != null) {
-            try {
-                batchMetrics.recordStepExecution(stepName, readCount, writeCount, skipCount);
-            } catch (RuntimeException ex) {
-                log.warn("Failed to record step metrics for [{}]: {}", stepName, ex.getMessage());
-            }
-        }
-
-        // Return null to leave the step's own exit status unchanged.
+        log.info("Step [{}] {} - read {}, written {}, filtered {}, skipped {}, commits {}, rollbacks {}",
+                stepExecution.getStepName(), stepExecution.getStatus(), stepExecution.getReadCount(),
+                stepExecution.getWriteCount(), stepExecution.getFilterCount(), stepExecution.getSkipCount(),
+                stepExecution.getCommitCount(), stepExecution.getRollbackCount());
+        observers.notify("stepFinished", observer -> observer.stepFinished(stepExecution));
+        // null keeps the step's own exit status.
         return null;
     }
 }

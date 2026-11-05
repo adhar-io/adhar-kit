@@ -4,7 +4,6 @@ import com.adhar.adharkit.cache.CacheFacade;
 import com.adhar.adharkit.logging.LoggingFacade;
 import com.adhar.kit.ai.AiFacade;
 import com.adhar.kit.analytics.AnalyticsFacade;
-import com.adhar.kit.batch.BatchFacade;
 import com.adhar.kit.commons.framework.Framework;
 import com.adhar.kit.commons.framework.FrameworkDetector;
 import com.adhar.kit.config.ConfigFacade;
@@ -130,7 +129,8 @@ public class AdharFacade {
     private volatile DaprFacade dapr;
     private volatile CoreFacade utils;
     private volatile GraphQlFacade graphQl;
-    private volatile BatchFacade batch;
+    // A com.adhar.kit.batch.BatchFacade, typed Object: adhar-kit-batch is optional (see BatchAccess).
+    private volatile Object batch;
     private volatile NotificationFacade notification;
     private volatile EventSourcingFacade eventStore;
     private volatile ProfilerFacade profiler;
@@ -325,10 +325,24 @@ public class AdharFacade {
         return lazyInit(() -> graphQl, () -> graphQl = GraphQlFacade.getInstance());
     }
 
-    /** Batch processing - job scheduling, readers/writers, metrics. */
-    public BatchFacade getBatch() {
+    /**
+     * Batch processing - job operations, the embedded scheduler and the batch defaults: a
+     * {@code com.adhar.kit.batch.BatchFacade}.
+     *
+     * <p>{@code adhar-kit-batch} is optional, so a service that runs jobs declares it, and the
+     * accessor names no batch type in its signature: this facade loads without the module.
+     * Assign the result to its type, {@code BatchFacade batch = adhar.getBatch();}, or call
+     * {@code BatchFacade.getInstance()} directly.</p>
+     *
+     * @param <B> {@code com.adhar.kit.batch.BatchFacade}
+     * @return the batch facade
+     * @throws IllegalStateException when the module is disabled
+     *                               ({@code adhar.kit.modules.batch}) or not on the classpath
+     */
+    @SuppressWarnings("unchecked")
+    public <B> B getBatch() {
         requireEnabled(MOD_BATCH);
-        return lazyInit(() -> batch, () -> batch = BatchFacade.getInstance());
+        return (B) lazyInit(() -> batch, () -> batch = BatchAccess.facade());
     }
 
     /** Multi-channel notifications - email, webhook, in-app, SMS. */
@@ -377,7 +391,8 @@ public class AdharFacade {
     public void setDapr(DaprFacade dapr) { this.dapr = dapr; }
     public void setUtils(CoreFacade utils) { this.utils = utils; }
     public void setGraphQl(GraphQlFacade graphQl) { this.graphQl = graphQl; }
-    public void setBatch(BatchFacade batch) { this.batch = batch; }
+    /** @param batch a {@code com.adhar.kit.batch.BatchFacade} (typed Object: the module is optional) */
+    public void setBatch(Object batch) { this.batch = BatchAccess.requireFacade(batch); }
     public void setNotification(NotificationFacade notification) { this.notification = notification; }
     public void setEventStore(EventSourcingFacade eventStore) { this.eventStore = eventStore; }
     public void setProfiler(ProfilerFacade profiler) { this.profiler = profiler; }
@@ -818,6 +833,47 @@ public class AdharFacade {
                     "Adhar Kit module '" + moduleId + "' is disabled "
                             + "(adhar.kit.modules." + moduleId + "=false); "
                             + "enable it to use this facade.");
+        }
+    }
+
+    /**
+     * The only code that names {@code adhar-kit-batch}'s types. They stay out of
+     * {@link AdharFacade}'s own fields, method signatures and lambdas (which compile to methods of
+     * the facade): Spring introspects the facade's declared members to create it as a bean, and
+     * any of them naming a missing class fails that with {@code NoClassDefFoundError} when the
+     * optional module is absent.
+     */
+    private static final class BatchAccess {
+
+        private static final String FACADE_CLASS = "com.adhar.kit.batch.BatchFacade";
+
+        private BatchAccess() {
+        }
+
+        static Object facade() {
+            requirePresent();
+            return com.adhar.kit.batch.BatchFacade.getInstance();
+        }
+
+        static Object requireFacade(Object candidate) {
+            if (candidate == null) {
+                return null;
+            }
+            requirePresent();
+            if (!(candidate instanceof com.adhar.kit.batch.BatchFacade)) {
+                throw new IllegalArgumentException("setBatch expects a " + FACADE_CLASS + ", got "
+                        + candidate.getClass().getName());
+            }
+            return candidate;
+        }
+
+        private static void requirePresent() {
+            try {
+                Class.forName(FACADE_CLASS, false, AdharFacade.class.getClassLoader());
+            } catch (ClassNotFoundException | LinkageError ex) {
+                throw new IllegalStateException("adhar-kit-batch is not on the classpath: add the dependency "
+                        + "com.adhar.kit:adhar-kit-batch to use getBatch() (adhar-kit-starter no longer brings it)", ex);
+            }
         }
     }
 

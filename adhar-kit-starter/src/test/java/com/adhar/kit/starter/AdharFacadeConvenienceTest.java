@@ -135,7 +135,8 @@ class AdharFacadeConvenienceTest {
         assertThat(facade.getKubernetes()).isSameAs(kubernetes);
         assertThat(facade.getDapr()).isSameAs(dapr);
         assertThat(facade.getGraphQl()).isSameAs(graphQl);
-        assertThat(facade.getBatch()).isSameAs(batch);
+        BatchFacade batchFacade = facade.getBatch();
+        assertThat(batchFacade).isSameAs(batch);
         assertThat(facade.getNotification()).isSameAs(notification);
         assertThat(facade.getEventStore()).isSameAs(eventStore);
         assertThat(facade.getProfiler()).isSameAs(profiler);

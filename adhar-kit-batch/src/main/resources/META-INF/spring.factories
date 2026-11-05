@@ -1,0 +1,9 @@
+# Defaults needed before the context exists: framework loggers that print job parameters, and
+# spring.batch.job.enabled=false when the embedded scheduler is enabled.
+org.springframework.boot.EnvironmentPostProcessor=\
+com.adhar.kit.batch.config.BatchRuntimeEnvironmentPostProcessor
+
+# The kit's JobRepository schema migration is a database initializer: Spring Boot makes the
+# JobRepository (and JPA) wait for it.
+org.springframework.boot.sql.init.dependency.DatabaseInitializerDetector=\
+com.adhar.kit.batch.repository.BatchSchemaMigratorDetector

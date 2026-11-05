@@ -1,150 +1,147 @@
 package com.adhar.kit.batch.metrics;
 
+import com.adhar.kit.batch.listener.BatchRunObserver;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
-import lombok.extern.slf4j.Slf4j;
+import io.micrometer.core.instrument.Tags;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.step.StepExecution;
 
-import java.time.Instant;
+import java.time.Clock;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.DoubleAdder;
 
 /**
- * Collects and exposes batch job execution metrics using Micrometer.
+ * The kit's batch meters: only what Spring Batch's own meters do not already say.
  *
- * <p>Tracks per-job and per-step metrics including execution counts, success/failure
- * rates, and durations. All metrics are registered with the provided {@link MeterRegistry}
- * and can be exported to any Micrometer-supported monitoring system.</p>
- *
- * <p><b>Metric Names:</b></p>
+ * <p>Spring Batch records {@code spring.batch.job}, {@code spring.batch.job.active},
+ * {@code spring.batch.step}, {@code spring.batch.item.read}, {@code spring.batch.item.process}
+ * and {@code spring.batch.chunk.write} through Spring Boot's observation support. The kit's first
+ * release duplicated them as {@code adhar.batch.job.*} and {@code adhar.batch.step.*}; those are
+ * gone. What remains:</p>
  * <ul>
- *   <li>{@code adhar.batch.job.executions} - Total job executions (tagged by job name and status)</li>
- *   <li>{@code adhar.batch.job.duration} - Job execution duration timer</li>
- *   <li>{@code adhar.batch.step.reads} - Step read count</li>
- *   <li>{@code adhar.batch.step.writes} - Step write count</li>
- *   <li>{@code adhar.batch.step.skips} - Step skip count</li>
+ *   <li>{@value #RUN} - gauge, the number of running executions (1 while a run is in progress),
+ *       tagged {@code job} and {@code trigger};</li>
+ *   <li>{@value #LAST_COMMIT} - gauge, epoch seconds of a step's last committed chunk, tagged
+ *       {@code job} and {@code step}: a stuck step is a gauge that stops moving;</li>
+ *   <li>{@value #DEAD_LETTERED} - counter of items a step dead-lettered, tagged {@code job} and
+ *       {@code step}.</li>
  * </ul>
+ * <p>No business date or execution id is a tag: their cardinality is unbounded.</p>
  *
  * @author Adhar Platform Team
- * @since 1.0.0
+ * @since 0.1.0
  */
-@Slf4j
-public class BatchMetrics {
+public class BatchMetrics implements BatchRunObserver {
 
-    private final MeterRegistry meterRegistry;
-    private final ConcurrentHashMap<String, JobMetricsAccumulator> jobMetrics = new ConcurrentHashMap<>();
+    /** Running executions. */
+    public static final String RUN = "adhar.batch.run";
+
+    /** Epoch seconds of a step's last committed chunk. */
+    public static final String LAST_COMMIT = "adhar.batch.last.commit";
+
+    /** Items dead-lettered by a step. */
+    public static final String DEAD_LETTERED = "adhar.batch.items.dead.lettered";
+
+    /** Job parameter naming what started a run (design 0025 §5.6). */
+    static final String TRIGGER_PARAMETER = "adhar.trigger";
+
+    /** The trigger values of design 0025 §5.5; anything else is tagged {@code other}. */
+    static final Set<String> TRIGGERS = Set.of("schedule", "manual", "restart", "backfill", "dependency",
+            "workflow", "smoke", "ops", "embedded");
+
+    private final MeterRegistry registry;
+    private final Clock clock;
+    private final Map<Tags, AtomicInteger> running = new ConcurrentHashMap<>();
+    private final Map<Tags, AtomicLong> lastCommit = new ConcurrentHashMap<>();
 
     /**
-     * Constructs a new {@code BatchMetrics} collector.
-     *
-     * @param meterRegistry the Micrometer meter registry for recording metrics
+     * @param registry the application's meter registry
      */
-    public BatchMetrics(MeterRegistry meterRegistry) {
-        this.meterRegistry = meterRegistry;
+    public BatchMetrics(MeterRegistry registry) {
+        this(registry, Clock.systemUTC());
     }
 
     /**
-     * Records a job execution with its duration and outcome.
-     *
-     * @param jobName    the name of the batch job
-     * @param durationMs the execution duration in milliseconds
-     * @param success    whether the execution completed successfully
+     * @param registry the application's meter registry
+     * @param clock    the time source of {@value #LAST_COMMIT}
      */
-    public void recordJobExecution(String jobName, long durationMs, boolean success) {
-        var status = success ? "success" : "failure";
+    public BatchMetrics(MeterRegistry registry, Clock clock) {
+        this.registry = registry;
+        this.clock = clock;
+    }
 
-        Counter.builder("adhar.batch.job.executions")
-                .tag("job", jobName)
-                .tag("status", status)
-                .register(meterRegistry)
-                .increment();
+    @Override
+    public void jobStarted(JobExecution execution) {
+        runGauge(execution).incrementAndGet();
+    }
 
-        Timer.builder("adhar.batch.job.duration")
-                .tag("job", jobName)
-                .register(meterRegistry)
-                .record(durationMs, TimeUnit.MILLISECONDS);
+    @Override
+    public void jobFinished(JobExecution execution) {
+        runGauge(execution).updateAndGet(value -> Math.max(0, value - 1));
+    }
 
-        jobMetrics.computeIfAbsent(jobName, _ -> new JobMetricsAccumulator())
-                .record(durationMs, success);
-
-        log.debug("Recorded job execution: job={}, duration={}ms, status={}", jobName, durationMs, status);
+    @Override
+    public void chunkCommitted(StepExecution execution, long items) {
+        Tags tags = Tags.of("job", execution.getJobExecution().getJobInstance().getJobName(),
+                "step", execution.getStepName());
+        lastCommit.computeIfAbsent(tags, key -> {
+            AtomicLong holder = new AtomicLong();
+            Gauge.builder(LAST_COMMIT, holder, AtomicLong::get)
+                    .description("Epoch seconds of the step's last committed chunk")
+                    .baseUnit("seconds")
+                    .tags(key)
+                    .strongReference(true)
+                    .register(registry);
+            return holder;
+        }).set(clock.instant().getEpochSecond());
     }
 
     /**
-     * Records step-level execution metrics.
+     * Counts items a step wrote to its dead-letter store.
      *
-     * @param stepName   the name of the batch step
-     * @param readCount  the number of items read
-     * @param writeCount the number of items written
-     * @param skipCount  the number of items skipped
+     * @param jobName  the job
+     * @param stepName the step
+     * @param items    how many
      */
-    public void recordStepExecution(String stepName, long readCount, long writeCount, long skipCount) {
-        Counter.builder("adhar.batch.step.reads")
-                .tag("step", stepName)
-                .register(meterRegistry)
-                .increment(readCount);
-
-        Counter.builder("adhar.batch.step.writes")
-                .tag("step", stepName)
-                .register(meterRegistry)
-                .increment(writeCount);
-
-        Counter.builder("adhar.batch.step.skips")
-                .tag("step", stepName)
-                .register(meterRegistry)
-                .increment(skipCount);
-
-        log.debug("Recorded step execution: step={}, reads={}, writes={}, skips={}",
-                stepName, readCount, writeCount, skipCount);
+    public void recordDeadLettered(String jobName, String stepName, long items) {
+        Counter.builder(DEAD_LETTERED)
+                .description("Items a step dead-lettered")
+                .tags("job", jobName, "step", stepName)
+                .register(registry)
+                .increment(items);
     }
 
     /**
-     * Returns aggregated statistics for the given job.
-     *
-     * @param jobName the name of the batch job
-     * @return the job statistics, or a zero-value record if no executions have been recorded
+     * @param execution a job execution
+     * @return the {@code trigger} tag of its run: the {@value #TRIGGER_PARAMETER} parameter when it
+     *         is one of {@link #TRIGGERS}, {@code other} for any other value, {@code unknown} when
+     *         absent
      */
-    public BatchJobStats getJobStats(String jobName) {
-        var accumulator = jobMetrics.get(jobName);
-        if (accumulator == null) {
-            return new BatchJobStats(0, 0, 0, 0.0, null);
+    static String triggerOf(JobExecution execution) {
+        String trigger = execution.getJobParameters().getString(TRIGGER_PARAMETER);
+        if (trigger == null || trigger.isBlank()) {
+            return "unknown";
         }
-        return accumulator.toStats();
+        String normalized = trigger.trim().toLowerCase(Locale.ROOT);
+        return TRIGGERS.contains(normalized) ? normalized : "other";
     }
 
-    /**
-     * Internal accumulator for per-job metrics, safe for concurrent access.
-     */
-    private static class JobMetricsAccumulator {
-        private final AtomicLong totalExecutions = new AtomicLong();
-        private final AtomicLong successCount = new AtomicLong();
-        private final AtomicLong failureCount = new AtomicLong();
-        private final DoubleAdder totalDurationMs = new DoubleAdder();
-        private volatile Instant lastExecutionTime;
-
-        void record(long durationMs, boolean success) {
-            totalExecutions.incrementAndGet();
-            totalDurationMs.add(durationMs);
-            lastExecutionTime = Instant.now();
-            if (success) {
-                successCount.incrementAndGet();
-            } else {
-                failureCount.incrementAndGet();
-            }
-        }
-
-        BatchJobStats toStats() {
-            long total = totalExecutions.get();
-            double avgDuration = total > 0 ? totalDurationMs.sum() / total : 0.0;
-            return new BatchJobStats(
-                    total,
-                    successCount.get(),
-                    failureCount.get(),
-                    avgDuration,
-                    lastExecutionTime
-            );
-        }
+    private AtomicInteger runGauge(JobExecution execution) {
+        Tags tags = Tags.of("job", execution.getJobInstance().getJobName(), "trigger", triggerOf(execution));
+        return running.computeIfAbsent(tags, key -> {
+            AtomicInteger holder = new AtomicInteger();
+            Gauge.builder(RUN, holder, AtomicInteger::get)
+                    .description("Running executions of the job")
+                    .tags(key)
+                    .strongReference(true)
+                    .register(registry);
+            return holder;
+        });
     }
 }
