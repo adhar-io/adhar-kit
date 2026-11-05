@@ -12,7 +12,8 @@
     <artifactId>adhar-kit-batch</artifactId>
     <version>0.1.0</version>
     <name>Adhar Kit Batch</name>
-    <description>Enterprise batch processing with Spring Batch - Job execution, partitioning, and monitoring</description>
+    <description>Spring Batch 6 on the Adhar platform - a JDBC JobRepository with a managed schema, an
+        operator API, fault-tolerant chunk steps, telemetry and an embedded scheduler</description>
 
     <properties>
         <java.version>25</java.version>
@@ -26,14 +27,28 @@
             <version>0.1.0</version>
         </dependency>
 
-        <!-- Spring Batch -->
+        <!-- Spring Batch with the JDBC JobRepository. spring-boot-starter-batch alone is an
+             in-memory (resourceless) store since Spring Boot 4.0: nothing would survive a pod. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-batch</artifactId>
+            <artifactId>spring-boot-starter-batch-jdbc</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.batch</groupId>
             <artifactId>spring-batch-core</artifactId>
+        </dependency>
+
+        <!-- The kit migrates the JobRepository schema itself (schema "batch", its own history
+             table) with programmatic Flyway. Only flyway-core: Spring Boot's own Flyway
+             auto-configuration lives in spring-boot-flyway, which the application adds for its
+             OWN migrations; the kit never defines a Flyway bean, so those keep running. -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
 
         <!-- Spring Boot Starter -->
@@ -49,7 +64,7 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- Micrometer (optional - for BatchMetrics) -->
+        <!-- Micrometer (spring-batch-core already brings it; declared for the kit's meters) -->
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-core</artifactId>
@@ -70,6 +85,15 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Structured BATCH log events (optional): when the application has adhar-kit-logging,
+             the kit's listeners drive its BatchJobLogger for every job and step. -->
+        <dependency>
+            <groupId>com.adhar.kit</groupId>
+            <artifactId>adhar-kit-logging</artifactId>
+            <version>0.1.0</version>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>
@@ -87,10 +111,50 @@
             <groupId>org.springframework.batch</groupId>
             <artifactId>spring-batch-test</artifactId>
             <scope>test</scope>
-            <optional>true</optional>
         </dependency>
 
-        <!-- H2 in-memory database (test - for JDBC scheduler lock and JDBC IO builders) -->
+        <!-- The JobRepository guards (A0.1-A0.5) run against PostgreSQL 18 in a container,
+             with the real auto-configuration: an ApplicationContextRunner with hand-made beans
+             is what hid the ordering defect (K2). -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- A0.2: a web service context must get none of the kit's batch beans. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- MeterRegistry from Spring Boot's own auto-configuration, as in a service. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-micrometer-metrics</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- H2 in-memory database (test - for JDBC IO builders and the lock's portable SQL) -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
@@ -100,6 +164,25 @@
 
     <build>
         <plugins>
+            <!-- A0.4: the module compiles with -Xlint:removal -Werror against Spring Batch 6.0.x,
+                 so nothing the kit ships is built on an API scheduled for removal (JobLauncher,
+                 SimpleStepBuilder, FaultTolerantStepBuilder, the id-based JobOperator methods).
+                 Main sources only: the tests exercise the kit's own deprecated delegates. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>default-compile</id>
+                        <configuration>
+                            <compilerArgs combine.children="append">
+                                <arg>-Xlint:removal</arg>
+                                <arg>-Werror</arg>
+                            </compilerArgs>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
