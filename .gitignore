@@ -12,7 +12,9 @@ buildNumber.properties
 **/target/
 
 # IDE files
-.idea/
+# Not `.idea/`: git cannot re-include a file below an ignored directory.
+.idea/*
+!.idea/externalDependencies.xml
 *.iml
 *.ipr
 *.iws

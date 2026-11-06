@@ -1,0 +1,83 @@
+// Development container for adhar-kit: the toolchain this repository declares,
+// the platform's tools, and the editor extensions and IDE plugins. VS Code,
+// IntelliJ IDEA, a Coder workspace and `devcontainer up` all build it from this
+// file. Dockerfile, post-create.sh, app-ci.sh and README.md beside it are the same
+// as in every application created from an Adhar template; README.md explains them.
+{
+  "name": "adhar-kit",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      // Java 25, as adhar-kit-parent/pom.xml <java.version> and .github/workflows
+      // declare. Change them together (post-create.sh warns when they differ).
+      "BASE_IMAGE": "mcr.microsoft.com/devcontainers/java:3-25-trixie"
+    }
+  },
+  "features": {
+    // Maven from the 3.9 line, which README.md and CONTRIBUTING.md require; the repository has no wrapper.
+    "ghcr.io/devcontainers/features/java:1": { "version": "none", "installMaven": true, "mavenVersion": "3.9", "installGradle": false },
+    // kubectl and Helm.
+    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": { "version": "latest", "helm": "latest", "minikube": "none" },
+    // The host's Docker engine, for the modules' Testcontainers tests in `mvn verify`. Never Docker-in-Docker.
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": { "moby": false }
+  },
+  // Testcontainers publishes its containers' ports on the HOST engine: this name
+  // reaches them from inside the container on Docker Desktop and on Linux alike.
+  "runArgs": ["--add-host=host.docker.internal:host-gateway"],
+  "remoteUser": "vscode",
+  "containerEnv": {
+    // Testcontainers: the host engine's published ports, not the bridge gateway
+    // (where Docker Desktop does not listen; see README.md).
+    "TESTCONTAINERS_HOST_OVERRIDE": "host.docker.internal"
+  },
+  "forwardPorts": [5005],
+  "portsAttributes": {
+    "5005": { "label": "Java debugger (JDWP)", "onAutoForward": "silent" }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "customizations": {
+    "vscode": {
+      // The same list as ../.vscode/extensions.json (its recommendations, and its
+      // unwantedRecommendations with a "-"): every id is on the VS Code Marketplace
+      // AND Open VSX, so VS Code and code-server install the same set.
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "vmware.vscode-spring-boot",
+        "redhat.vscode-xml",
+        "eamodio.gitlens",
+        "ms-azuretools.vscode-containers",
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "redhat.vscode-yaml",
+        "editorconfig.editorconfig",
+        "42crunch.vscode-openapi",
+        "sonarsource.sonarlint-vscode",
+        "usernamehw.errorlens",
+        "humao.rest-client",
+        "-dbaeumer.vscode-eslint"
+      ],
+      "settings": {
+        "java.configuration.updateBuildConfiguration": "automatic",
+        "java.compile.nullAnalysis.mode": "automatic",
+        "java.jdt.ls.lombokSupport.enabled": true,
+        "redhat.telemetry.enabled": false
+      }
+    },
+    "jetbrains": {
+      // IntelliJ IDEA Ultimate, the IDE the platform's Coder workspaces open through
+      // JetBrains Gateway; the plugins are the same list as ../.idea/externalDependencies.xml.
+      "backend": "IntelliJ",
+      "plugins": [
+        "org.jetbrains.idea.maven",
+        "com.intellij.spring.boot",
+        "Lombook Plugin",
+        "com.intellij.kubernetes",
+        "Docker",
+        "org.jetbrains.plugins.yaml",
+        "org.editorconfig.editorconfigjetbrains",
+        "org.sonarlint.idea",
+        "com.intellij.swagger",
+        "com.jetbrains.restClient"
+      ]
+    }
+  }
+}
