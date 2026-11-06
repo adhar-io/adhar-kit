@@ -2,7 +2,7 @@ package com.adhar.kit.batch;
 
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.metrics.BatchJobStats;
-import com.adhar.kit.batch.metrics.BatchMetrics;
+import com.adhar.kit.batch.operator.BatchOperator;
 import com.adhar.kit.batch.scheduler.BatchScheduler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -18,9 +18,6 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -34,13 +31,17 @@ class BatchFacadeTest {
     private BatchScheduler scheduler;
 
     @Mock
-    private BatchMetrics metrics;
+    private BatchOperator operator;
 
     @BeforeEach
     void resetSingleton() throws Exception {
         Field instanceField = BatchFacade.class.getDeclaredField("instance");
         instanceField.setAccessible(true);
         instanceField.set(null, null);
+    }
+
+    private BatchFacade defaults() {
+        return new BatchFacade(null, null, null);
     }
 
     // ----------------------------------------------------------------
@@ -52,23 +53,37 @@ class BatchFacadeTest {
     class GetInstance {
 
         @Test
-        @DisplayName("should return the same instance after construction")
-        void returnsSameInstance() {
-            BatchProperties props = new BatchProperties();
-            new BatchFacade(scheduler, metrics, props);
-
+        @DisplayName("should return a facade with the defaults when no context published one")
+        void defaultsWithoutAContext() {
             BatchFacade first = BatchFacade.getInstance();
-            BatchFacade second = BatchFacade.getInstance();
 
-            assertThat(first).isSameAs(second);
+            assertThat(first).isSameAs(BatchFacade.getInstance());
+            assertThat(first.getDefaultChunkSize()).isEqualTo(100);
         }
 
         @Test
-        @DisplayName("should throw when not yet initialised")
-        void throwsWhenNotInitialised() {
-            assertThatThrownBy(BatchFacade::getInstance)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("not been initialised");
+        @DisplayName("should return the published facade until it is withdrawn")
+        void publishedUntilWithdrawn() {
+            BatchFacade published = defaults();
+
+            BatchFacade.publish(published);
+            assertThat(BatchFacade.getInstance()).isSameAs(published);
+
+            BatchFacade.withdraw(published);
+            assertThat(BatchFacade.getInstance()).isNotSameAs(published);
+        }
+
+        @Test
+        @DisplayName("withdrawing a facade another context replaced changes nothing")
+        void withdrawIgnoresAReplacedFacade() {
+            BatchFacade replaced = defaults();
+            BatchFacade current = defaults();
+            BatchFacade.publish(replaced);
+            BatchFacade.publish(current);
+
+            BatchFacade.withdraw(replaced);
+
+            assertThat(BatchFacade.getInstance()).isSameAs(current);
         }
     }
 
@@ -83,9 +98,7 @@ class BatchFacadeTest {
         @Test
         @DisplayName("should default to true when properties are null")
         void defaultsTrueWithNullProps() {
-            BatchFacade facade = new BatchFacade(null, null, null);
-
-            assertThat(facade.isEnabled()).isTrue();
+            assertThat(defaults().isEnabled()).isTrue();
         }
 
         @Test
@@ -93,9 +106,8 @@ class BatchFacadeTest {
         void reflectsProperties() {
             BatchProperties props = new BatchProperties();
             props.setEnabled(false);
-            BatchFacade facade = new BatchFacade(null, null, props);
 
-            assertThat(facade.isEnabled()).isFalse();
+            assertThat(new BatchFacade(props, null, null).isEnabled()).isFalse();
         }
     }
 
@@ -110,37 +122,31 @@ class BatchFacadeTest {
         @Test
         @DisplayName("getDefaultChunkSize returns 100 when properties are null")
         void chunkSizeNullProps() {
-            BatchFacade facade = new BatchFacade(null, null, null);
-
-            assertThat(facade.getDefaultChunkSize()).isEqualTo(100);
+            assertThat(defaults().getDefaultChunkSize()).isEqualTo(100);
         }
 
         @Test
-        @DisplayName("getDefaultPageSize returns 50 when properties are null")
+        @DisplayName("getDefaultPageSize returns 500 when properties are null")
         void pageSizeNullProps() {
-            BatchFacade facade = new BatchFacade(null, null, null);
-
-            assertThat(facade.getDefaultPageSize()).isEqualTo(50);
+            assertThat(defaults().getDefaultPageSize()).isEqualTo(500);
         }
 
         @Test
         @DisplayName("getDefaultChunkSize reflects configured value")
         void chunkSizeFromProps() {
             BatchProperties props = new BatchProperties();
-            props.setDefaultChunkSize(250);
-            BatchFacade facade = new BatchFacade(null, null, props);
+            props.getChunk().setSize(250);
 
-            assertThat(facade.getDefaultChunkSize()).isEqualTo(250);
+            assertThat(new BatchFacade(props, null, null).getDefaultChunkSize()).isEqualTo(250);
         }
 
         @Test
         @DisplayName("getDefaultPageSize reflects configured value")
         void pageSizeFromProps() {
             BatchProperties props = new BatchProperties();
-            props.setDefaultPageSize(75);
-            BatchFacade facade = new BatchFacade(null, null, props);
+            props.getPage().setSize(75);
 
-            assertThat(facade.getDefaultPageSize()).isEqualTo(75);
+            assertThat(new BatchFacade(props, null, null).getDefaultPageSize()).isEqualTo(75);
         }
     }
 
@@ -153,40 +159,35 @@ class BatchFacadeTest {
     class Health {
 
         @Test
-        @DisplayName("should return expected keys with scheduler and metrics")
+        @DisplayName("should describe the scheduler and the operator when available")
         void healthKeys() {
             when(scheduler.listScheduledJobs()).thenReturn(Set.of("job1"));
-            BatchFacade facade = new BatchFacade(scheduler, metrics, new BatchProperties());
+            when(scheduler.runningJobs()).thenReturn(Set.of("job1"));
+            BatchFacade facade = new BatchFacade(new BatchProperties(), () -> scheduler, () -> operator);
 
             Map<String, Object> health = facade.health();
 
-            assertThat(health).containsKeys(
-                    "enabled",
-                    "schedulerAvailable",
-                    "metricsAvailable",
-                    "scheduledJobCount",
-                    "scheduledJobs"
-            );
+            assertThat(health.get("enabled")).isEqualTo(true);
+            assertThat(health.get("operatorAvailable")).isEqualTo(true);
             assertThat(health.get("schedulerAvailable")).isEqualTo(true);
-            assertThat(health.get("metricsAvailable")).isEqualTo(true);
             assertThat(health.get("scheduledJobCount")).isEqualTo(1);
+            assertThat(health.get("scheduledJobs")).isEqualTo(Set.of("job1"));
+            assertThat(health.get("runningScheduledJobs")).isEqualTo(Set.of("job1"));
         }
 
         @Test
-        @DisplayName("should handle null scheduler and metrics gracefully")
+        @DisplayName("should handle a missing scheduler and operator gracefully")
         void healthNullComponents() {
-            BatchFacade facade = new BatchFacade(null, null, null);
+            Map<String, Object> health = defaults().health();
 
-            Map<String, Object> health = facade.health();
-
+            assertThat(health.get("operatorAvailable")).isEqualTo(false);
             assertThat(health.get("schedulerAvailable")).isEqualTo(false);
-            assertThat(health.get("metricsAvailable")).isEqualTo(false);
             assertThat(health.get("scheduledJobCount")).isEqualTo(0);
         }
     }
 
     // ----------------------------------------------------------------
-    // Null scheduler/metrics (graceful handling)
+    // Without a scheduler / operator
     // ----------------------------------------------------------------
 
     @Nested
@@ -194,75 +195,70 @@ class BatchFacadeTest {
     class GracefulNullHandling {
 
         @Test
-        @DisplayName("scheduleJob throws when scheduler is null")
+        @DisplayName("scheduleJob explains that the scheduler is not enabled")
         void scheduleJobNullScheduler() {
-            BatchFacade facade = new BatchFacade(null, null, null);
-
-            assertThatThrownBy(() -> facade.scheduleJob("job", "0 0 * * * *"))
+            assertThatThrownBy(() -> defaults().scheduleJob("job", "0 0 * * * *"))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("not available");
+                    .hasMessageContaining("adhar.batch.scheduler.enabled=true");
         }
 
         @Test
-        @DisplayName("cancelJob throws when scheduler is null")
+        @DisplayName("cancelJob throws when the scheduler is not enabled")
         void cancelJobNullScheduler() {
-            BatchFacade facade = new BatchFacade(null, null, null);
-
-            assertThatThrownBy(() -> facade.cancelJob("job"))
+            assertThatThrownBy(() -> defaults().cancelJob("job"))
                     .isInstanceOf(IllegalStateException.class);
         }
 
         @Test
-        @DisplayName("listScheduledJobs returns empty set when scheduler is null")
+        @DisplayName("listScheduledJobs returns an empty set when the scheduler is not enabled")
         void listJobsNullScheduler() {
-            BatchFacade facade = new BatchFacade(null, null, null);
-
-            assertThat(facade.listScheduledJobs()).isEmpty();
+            assertThat(defaults().listScheduledJobs()).isEmpty();
+            assertThat(defaults().getScheduler()).isEmpty();
         }
 
         @Test
-        @DisplayName("recordJobExecution does not throw when metrics is null")
-        void recordJobNullMetrics() {
-            BatchFacade facade = new BatchFacade(null, null, null);
+        @DisplayName("getOperator and getJobStats explain what is missing")
+        void noOperator() {
+            assertThatThrownBy(() -> defaults().getOperator())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("No BatchOperator");
+            assertThatThrownBy(() -> defaults().getJobStats("job"))
+                    .isInstanceOf(IllegalStateException.class);
+        }
+    }
 
-            // Should not throw
-            facade.recordJobExecution("job", 100L, true);
+    // ----------------------------------------------------------------
+    // Delegation
+    // ----------------------------------------------------------------
+
+    @Nested
+    @DisplayName("Delegation")
+    class Delegation {
+
+        @Test
+        @DisplayName("scheduling goes to the scheduler")
+        void schedulingDelegates() {
+            when(scheduler.cancelScheduledJob("job")).thenReturn(true);
+            when(scheduler.listScheduledJobs()).thenReturn(Set.of("job"));
+            BatchFacade facade = new BatchFacade(null, () -> scheduler, null);
+
+            facade.scheduleJob("job", "0 0 2 * * *");
+
+            verify(scheduler).scheduleJob("job", "0 0 2 * * *");
+            assertThat(facade.cancelJob("job")).isTrue();
+            assertThat(facade.listScheduledJobs()).containsExactly("job");
+            assertThat(facade.getScheduler()).containsSame(scheduler);
         }
 
         @Test
-        @DisplayName("getJobStats returns zero stats when metrics is null")
-        void getJobStatsNullMetrics() {
-            BatchFacade facade = new BatchFacade(null, null, null);
-
-            BatchJobStats stats = facade.getJobStats("job");
-
-            assertThat(stats.totalExecutions()).isZero();
-            assertThat(stats.successCount()).isZero();
-            assertThat(stats.failureCount()).isZero();
-            assertThat(stats.avgDurationMs()).isZero();
-            assertThat(stats.lastExecutionTime()).isNull();
-        }
-
-        @Test
-        @DisplayName("recordJobExecution delegates to metrics when available")
-        void recordJobDelegatesToMetrics() {
-            BatchFacade facade = new BatchFacade(null, metrics, null);
-
-            facade.recordJobExecution("testJob", 500L, true);
-
-            verify(metrics).recordJobExecution("testJob", 500L, true);
-        }
-
-        @Test
-        @DisplayName("getJobStats delegates to metrics when available")
-        void getJobStatsDelegatesToMetrics() {
+        @DisplayName("getJobStats comes from the operator")
+        void getJobStatsDelegatesToOperator() {
             BatchJobStats expected = new BatchJobStats(5, 4, 1, 200.0, null);
-            when(metrics.getJobStats("testJob")).thenReturn(expected);
-            BatchFacade facade = new BatchFacade(null, metrics, null);
+            when(operator.getJobStats("testJob")).thenReturn(expected);
+            BatchFacade facade = new BatchFacade(null, null, () -> operator);
 
-            BatchJobStats result = facade.getJobStats("testJob");
-
-            assertThat(result).isEqualTo(expected);
+            assertThat(facade.getJobStats("testJob")).isEqualTo(expected);
+            assertThat(facade.getOperator()).isSameAs(operator);
         }
     }
 }
