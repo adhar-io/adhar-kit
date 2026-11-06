@@ -154,6 +154,14 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- adhar-kit-logging's auto-configuration names Tracer in its bean signatures. A service has
+             the class through adhar-kit-tracing; without it the test application could not start. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- H2 in-memory database (test - for JDBC IO builders and the lock's portable SQL) -->
         <dependency>
             <groupId>com.h2database</groupId>

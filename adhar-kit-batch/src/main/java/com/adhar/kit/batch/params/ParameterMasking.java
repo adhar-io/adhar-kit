@@ -24,7 +24,7 @@ public final class ParameterMasking {
 
     /** Parameter names that look like credentials (design 0025 §5.6). */
     public static final Pattern SECRET_NAME =
-            Pattern.compile("(?i)pass(word)?|secret|token|credential|api[-_]?key|private[-_]?key");
+            Pattern.compile("(?i)pass(word)?|secret|token|credential|api[-_.]?key|private[-_.]?key");
 
     /** What a masked value is shown as. */
     public static final String MASK = "****";

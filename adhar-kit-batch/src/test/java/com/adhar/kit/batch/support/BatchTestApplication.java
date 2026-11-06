@@ -1,9 +1,11 @@
 package com.adhar.kit.batch.support;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.Banner;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.LinkedHashMap;
@@ -17,6 +19,17 @@ import java.util.UUID;
 @Configuration(proxyBeanMethods = false)
 @EnableAutoConfiguration
 public class BatchTestApplication {
+
+    /**
+     * adhar-kit-logging's beans need Jackson 2's mapper, which a service gets from adhar-kit-core and
+     * which Spring Boot 4 no longer configures itself.
+     *
+     * @return the mapper
+     */
+    @Bean
+    ObjectMapper objectMapper() {
+        return new ObjectMapper();
+    }
 
     /**
      * @param sources configuration classes besides this one

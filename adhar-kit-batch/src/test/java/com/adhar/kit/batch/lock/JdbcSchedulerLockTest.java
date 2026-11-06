@@ -4,18 +4,31 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabase;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link JdbcSchedulerLock} backed by an in-memory H2 database. The kit never
@@ -153,5 +166,117 @@ class JdbcSchedulerLockTest {
                 .hasMessageContaining("CREATE TABLE NO_SUCH_LOCK_TABLE");
         // tryLock reports an unusable database as "not acquired" rather than failing the fire.
         assertThat(missing.tryLock("job", LEASE)).isFalse();
+    }
+
+    @Test
+    @DisplayName("renewing on a broken database throws: ownership is unknown, and the caller decides")
+    void renewReportsADatabaseFailure() {
+        var missing = new JdbcSchedulerLock(db, "NO_SUCH_LOCK_TABLE");
+
+        assertThatThrownBy(() -> missing.renew("job", LEASE)).isInstanceOf(DataAccessException.class);
+    }
+
+    @Test
+    @DisplayName("releasing on a broken database does not fail: the lock expires with its lease")
+    void unlockToleratesADatabaseFailure() {
+        var missing = new JdbcSchedulerLock(db, "NO_SUCH_LOCK_TABLE");
+
+        assertThatCode(() -> missing.unlock("job")).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("a released row stays visible with its last holder, and is expired")
+    void unlockKeepsTheRow() {
+        var lock = holder("a", T0);
+        lock.tryLock("job", LEASE);
+
+        lock.unlock("job");
+
+        var jdbc = new JdbcTemplate(db);
+        assertThat(jdbc.queryForObject("SELECT LOCKED_BY FROM " + JdbcSchedulerLock.DEFAULT_TABLE, String.class))
+                .isEqualTo("a");
+    }
+
+    @Test
+    @DisplayName("the default owner names the host and the process, and is unique per holder")
+    void defaultOwner() {
+        String owner = JdbcSchedulerLock.defaultOwner();
+
+        assertThat(owner).contains(":" + ProcessHandle.current().pid() + ":");
+        assertThat(JdbcSchedulerLock.defaultOwner()).isNotEqualTo(owner);
+    }
+
+    // ------------------------------------------------------------------
+    // PostgreSQL: one conditional statement. H2 cannot run ON CONFLICT ... WHERE, so a mocked
+    // connection shows what is sent; the statement itself runs in the TestContainer suite.
+    // ------------------------------------------------------------------
+
+    private PreparedStatement statement;
+    private Connection connection;
+
+    private DataSource reporting(String product, int updated) throws Exception {
+        DataSource dataSource = mock(DataSource.class);
+        connection = mock(Connection.class);
+        DatabaseMetaData metaData = mock(DatabaseMetaData.class);
+        statement = mock(PreparedStatement.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.getMetaData()).thenReturn(metaData);
+        when(metaData.getDatabaseProductName()).thenReturn(product);
+        when(connection.prepareStatement(anyString())).thenReturn(statement);
+        when(statement.executeUpdate()).thenReturn(updated);
+        return dataSource;
+    }
+
+    @Test
+    @DisplayName("on PostgreSQL acquiring is one INSERT ... ON CONFLICT that only takes an expired row")
+    void postgresAcquiresWithOneStatement() throws Exception {
+        var lock = new JdbcSchedulerLock(reporting("PostgreSQL", 1), "batch.ADHAR_SCHEDULER_LOCK",
+                Clock.fixed(T0, ZoneOffset.UTC), "a");
+
+        assertThat(lock.tryLock("job", LEASE)).isTrue();
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, times(1)).prepareStatement(sql.capture());
+        assertThat(sql.getValue())
+                .startsWith("INSERT INTO batch.ADHAR_SCHEDULER_LOCK AS l ")
+                .contains("ON CONFLICT (LOCK_NAME) DO UPDATE")
+                .endsWith("WHERE l.LOCKED_UNTIL <= EXCLUDED.LOCKED_AT");
+    }
+
+    @Test
+    @DisplayName("on PostgreSQL a row that was not written means another holder has the lock")
+    void postgresHeldElsewhere() throws Exception {
+        var lock = new JdbcSchedulerLock(reporting("PostgreSQL", 0), "batch.ADHAR_SCHEDULER_LOCK",
+                Clock.fixed(T0, ZoneOffset.UTC), "a");
+
+        assertThat(lock.tryLock("job", LEASE)).isFalse();
+
+        verify(connection, times(1)).prepareStatement(anyString());
+    }
+
+    @Test
+    @DisplayName("the database product is asked once and then remembered")
+    void productIsCached() throws Exception {
+        var lock = new JdbcSchedulerLock(reporting("PostgreSQL", 1), "t", Clock.fixed(T0, ZoneOffset.UTC), "a");
+
+        lock.tryLock("one", LEASE);
+        lock.tryLock("two", LEASE);
+
+        verify(connection, times(1)).getMetaData();
+    }
+
+    @Test
+    @DisplayName("when the product cannot be read the portable statements run, and it is asked again next time")
+    void productUnknown() throws Exception {
+        var lock = new JdbcSchedulerLock(reporting("PostgreSQL", 1), "t", Clock.fixed(T0, ZoneOffset.UTC), "a");
+        when(connection.getMetaData()).thenThrow(new SQLException("metadata unavailable"));
+
+        assertThat(lock.tryLock("job", LEASE)).isTrue();
+        lock.tryLock("job", LEASE);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, times(2)).prepareStatement(sql.capture());
+        assertThat(sql.getAllValues()).allSatisfy(statementText -> assertThat(statementText).startsWith("UPDATE t "));
+        verify(connection, times(2)).getMetaData();
     }
 }
