@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CompilerConfiguration">
+    <annotationProcessing>
+      <profile default="true" name="Default" enabled="true" />
+      <profile name="Maven default annotation processors profile" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <module name="adhar-kit-graphql" />
+        <module name="adhar-kit-starter" />
+      </profile>
+      <profile name="Annotation profile for adhar-kit" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <processorPath useClasspath="false">
+          <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/1.18.32/lombok-1.18.32.jar" />
+          <entry name="$MAVEN_REPOSITORY$/org/mapstruct/mapstruct-processor/${mapstruct.version}/mapstruct-processor-${mapstruct.version}.jar" />
+        </processorPath>
+        <module name="adhar-quarkus" />
+      </profile>
+      <profile name="Annotation profile for Adhar Kit" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <processorPath useClasspath="false">
+          <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/edge-SNAPSHOT/lombok-edge-SNAPSHOT.jar" />
+        </processorPath>
+        <module name="adhar-kit-core" />
+        <module name="adhar-kit-dapr" />
+        <module name="adhar-kit-event-sourcing" />
+        <module name="adhar-kit-grpc" />
+        <module name="adhar-kit-test-commons" />
+        <module name="adhar-kit-kubernetes" />
+        <module name="adhar-kit-docs" />
+        <module name="adhar-kit-health" />
+        <module name="adhar-kit-metrics" />
+        <module name="adhar-kit-resilience" />
+        <module name="adhar-kit-messaging" />
+        <module name="adhar-kit-ai" />
+        <module name="adhar-kit-security" />
+        <module name="adhar-kit-cache" />
+        <module name="adhar-kit-commons" />
+        <module name="adhar-kit-tracing" />
+        <module name="adhar-kit-maven-plugin" />
+        <module name="adhar-kit-perf-profiler" />
+        <module name="adhar-kit-rewrite" />
+        <module name="adhar-kit-logging" />
+        <module name="adhar-kit-analytics" />
+        <module name="adhar-kit-config" />
+        <module name="adhar-kit-notification" />
+      </profile>
+      <profile name="Annotation profile for adhar-kit-batch.main" enabled="true">
+        <sourceOutputDir name="../generated-sources/annotations" />
+        <sourceTestOutputDir name="../generated-test-sources/test-annotations" />
+        <processorPath useClasspath="false">
+          <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/edge-SNAPSHOT/lombok-edge-SNAPSHOT.jar" />
+        </processorPath>
+        <module name="adhar-kit-batch.main" />
+      </profile>
+      <profile name="Annotation profile for adhar-kit-batch.test" enabled="true">
+        <sourceOutputDir name="../generated-sources/annotations" />
+        <sourceTestOutputDir name="../generated-test-sources/test-annotations" />
+        <processorPath useClasspath="false">
+          <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/edge-SNAPSHOT/lombok-edge-SNAPSHOT.jar" />
+        </processorPath>
+        <module name="adhar-kit-batch.test" />
+      </profile>
+      <profile name="Annotation profile for adhar-kit-persistence" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <processorPath useClasspath="false">
+          <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/edge-SNAPSHOT/lombok-edge-SNAPSHOT.jar" />
+          <entry name="$MAVEN_REPOSITORY$/com/querydsl/querydsl-apt/5.1.0/querydsl-apt-5.1.0-jakarta.jar" />
+          <entry name="$MAVEN_REPOSITORY$/com/querydsl/querydsl-codegen/5.1.0/querydsl-codegen-5.1.0.jar" />
+          <entry name="$MAVEN_REPOSITORY$/com/querydsl/querydsl-core/5.1.0/querydsl-core-5.1.0.jar" />
+          <entry name="$MAVEN_REPOSITORY$/com/mysema/commons/mysema-commons-lang/0.2.4/mysema-commons-lang-0.2.4.jar" />
+          <entry name="$MAVEN_REPOSITORY$/com/querydsl/codegen-utils/5.1.0/codegen-utils-5.1.0.jar" />
+          <entry name="$MAVEN_REPOSITORY$/org/eclipse/jdt/ecj/3.26.0/ecj-3.26.0.jar" />
+          <entry name="$MAVEN_REPOSITORY$/javax/inject/javax.inject/1/javax.inject-1.jar" />
+          <entry name="$MAVEN_REPOSITORY$/io/github/classgraph/classgraph/4.8.146/classgraph-4.8.146.jar" />
+          <entry name="$MAVEN_REPOSITORY$/jakarta/persistence/jakarta.persistence-api/3.1.0/jakarta.persistence-api-3.1.0.jar" />
+        </processorPath>
+        <module name="adhar-kit-persistence" />
+      </profile>
+    </annotationProcessing>
+    <bytecodeTargetLevel>
+      <module name="adhar-kafka-starter" target="1.5" />
+      <module name="adhar-kit-mers" target="25" />
+      <module name="adhar-platform-libraries" target="24" />
+      <module name="adhar-rabbitmq-starter" target="1.5" />
+      <module name="adhar-redis-starter" target="1.5" />
+      <module name="adhar-springboot" target="24" />
+      <module name="adhar-springboot-hexagonal" target="24" />
+      <module name="adhar-vault-starter" target="1.5" />
+      <module name="api-gateway" target="24" />
+      <module name="auth-service" target="24" />
+      <module name="config-repo" target="24" />
+      <module name="config-server" target="24" />
+      <module name="infrastructure" target="24" />
+      <module name="service-templates" target="24" />
+      <module name="services" target="21" />
+      <module name="template-quarkus" target="21" />
+    </bytecodeTargetLevel>
+  </component>
+  <component name="JavacSettings">
+    <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="adhar-kafka-starter" options="" />
+      <module name="adhar-kit-ai" options="-parameters -parameters" />
+      <module name="adhar-kit-analytics" options="-parameters -parameters" />
+      <module name="adhar-kit-batch" options="-parameters -parameters -Xlint:removal -Werror" />
+      <module name="adhar-kit-batch.main" options="-parameters -parameters -Xlint:removal -Werror" />
+      <module name="adhar-kit-batch.test" options="-parameters -parameters" />
+      <module name="adhar-kit-cache" options="-parameters -parameters" />
+      <module name="adhar-kit-commons" options="-parameters -parameters" />
+      <module name="adhar-kit-config" options="-parameters -parameters" />
+      <module name="adhar-kit-core" options="-parameters -parameters" />
+      <module name="adhar-kit-dapr" options="-parameters -parameters" />
+      <module name="adhar-kit-docs" options="-parameters -parameters" />
+      <module name="adhar-kit-event-sourcing" options="-parameters -parameters" />
+      <module name="adhar-kit-graphql" options="-parameters -parameters" />
+      <module name="adhar-kit-grpc" options="-parameters -parameters" />
+      <module name="adhar-kit-health" options="-parameters -parameters" />
+      <module name="adhar-kit-kubernetes" options="-parameters -parameters" />
+      <module name="adhar-kit-logging" options="-parameters -parameters" />
+      <module name="adhar-kit-maven-plugin" options="-parameters -parameters" />
+      <module name="adhar-kit-mers" options="-parameters -parameters" />
+      <module name="adhar-kit-messaging" options="-parameters -parameters" />
+      <module name="adhar-kit-metrics" options="-parameters -parameters" />
+      <module name="adhar-kit-notification" options="-parameters -parameters" />
+      <module name="adhar-kit-parent" options="" />
+      <module name="adhar-kit-perf-profiler" options="-parameters -parameters" />
+      <module name="adhar-kit-persistence" options="-parameters -parameters" />
+      <module name="adhar-kit-resilience" options="-parameters -parameters" />
+      <module name="adhar-kit-rewrite" options="-parameters -parameters" />
+      <module name="adhar-kit-security" options="-parameters -parameters" />
+      <module name="adhar-kit-starter" options="-parameters -parameters" />
+      <module name="adhar-kit-test-commons" options="-parameters -parameters" />
+      <module name="adhar-kit-tracing" options="-parameters -parameters" />
+      <module name="adhar-platform-libraries" options="" />
+      <module name="adhar-quarkus" options="-parameters" />
+      <module name="adhar-rabbitmq-starter" options="" />
+      <module name="adhar-redis-starter" options="" />
+      <module name="adhar-springboot" options="-parameters" />
+      <module name="adhar-springboot-hexagonal" options="-parameters" />
+      <module name="adhar-vault-starter" options="" />
+      <module name="api-gateway" options="-parameters" />
+      <module name="auth-service" options="-parameters" />
+      <module name="config-repo" options="-parameters" />
+      <module name="config-server" options="-parameters" />
+      <module name="infrastructure" options="" />
+      <module name="service-templates" options="" />
+      <module name="services" options="-parameters" />
+      <module name="template-quarkus" options="-parameters" />
+    </option>
+  </component>
+</project>

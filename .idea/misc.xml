@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ExternalStorageConfigurationManager" enabled="true" />
+  <component name="MavenProjectsManager">
+    <option name="originalFiles">
+      <list>
+        <option value="$PROJECT_DIR$/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-platform-libraries/adhar-messaging-starter/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-platform-libraries/adhar-mers-strater/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-platform-libraries/adhar-config-starter/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-platform-libraries/adhar-persistence-starter/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-platform-libraries/adhar-analytics-starter/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-platform-libraries/adhar-cache-starter/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-platform-libraries/adhar-api-definitions/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-parent/pom.xml" />
+        <option value="$PROJECT_DIR$/infrastructure/config-repo/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-starter/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-perf-profiler/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-bom/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-commons/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-persistence/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-config/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-cache/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-core/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-logging/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-metrics/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-messaging/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-analytics/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-docs/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-grpc/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-security/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-maven-plugin/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-tracing/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-test-commons/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-resilience/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-health/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-kubernetes/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-dapr/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-kit-ai/pom.xml" />
+      </list>
+    </option>
+    <option name="ignoredFiles">
+      <set>
+        <option value="$PROJECT_DIR$/adhar-kit-mers/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-platform-libraries/adhar-kafka-starter/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-platform-libraries/adhar-rabbitmq-starter/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-platform-libraries/adhar-redis-starter/pom.xml" />
+        <option value="$PROJECT_DIR$/adhar-platform-libraries/adhar-vault-starter/pom.xml" />
+        <option value="$PROJECT_DIR$/services/pom.xml" />
+      </set>
+    </option>
+  </component>
+  <component name="ProjectRootManager" version="2" languageLevel="JDK_X" project-jdk-name="25" project-jdk-type="JavaSDK">
+    <output url="file://$PROJECT_DIR$/out" />
+  </component>
+</project>
