@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.job.DefaultJobKeyGenerator;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.JobInstance;
@@ -160,6 +161,18 @@ class BatchSchedulerTest {
         assertThat(parameters.getParameter(BatchScheduler.SCHEDULED_TIME_PARAMETER).identifying()).isTrue();
         assertThat(parameters.getString(BatchScheduler.TRIGGER_PARAMETER)).isEqualTo(BatchScheduler.EMBEDDED_TRIGGER);
         assertThat(parameters.getParameter(BatchScheduler.TRIGGER_PARAMETER).identifying()).isFalse();
+    }
+
+    @Test
+    @DisplayName("two slots in one minute (\"0/30 * * * * *\") are two identities, not one")
+    void twoSlotsInOneMinuteAreTwoIdentities() {
+        JobParameters first = BatchScheduler.slotParameters(Instant.parse("2026-11-06T02:00:00Z"));
+        JobParameters second = BatchScheduler.slotParameters(Instant.parse("2026-11-06T02:00:30.250Z"));
+
+        assertThat(second.getString(BatchScheduler.SCHEDULED_TIME_PARAMETER)).isEqualTo("2026-11-06T02:00:30Z");
+        // The JobInstance key, which is what the repository refuses a second run of.
+        DefaultJobKeyGenerator keys = new DefaultJobKeyGenerator();
+        assertThat(keys.generateKey(second)).isNotEqualTo(keys.generateKey(first));
     }
 
     // ------------------------------------------------------------------

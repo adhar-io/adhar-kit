@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.config;
 
+import com.adhar.kit.batch.runtime.BatchRole;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
@@ -15,13 +16,22 @@ import java.util.regex.Pattern;
  * adhar:
  *   batch:
  *     enabled: true                 # the module also needs at least one Job bean
+ *     mode: auto                    # auto | kubernetes | embedded; auto = kubernetes when a job is named
+ *     job: importJob                # Kubernetes mode: the job to run (env ADHAR_BATCH_JOB)
+ *     role: single                  # single | manager | worker | indexed (env ADHAR_BATCH_ROLE)
  *     repository:
  *       schema: batch               # the JobRepository's own PostgreSQL schema
  *       table-prefix: BATCH_        # -> spring.batch.jdbc.table-prefix = batch.BATCH_
  *       migrate: true               # the kit's Flyway migrations of that schema
  *       allow-in-memory: false      # tests only
+ *     recovery:                     # Kubernetes mode: the execution lease
+ *       heartbeat-interval: 30s
+ *       stale-after: 2m             # a STARTED execution with an older heartbeat is recovered
+ *       max-wait: 10m               # how long a run waits for a terminating owner pod
  *     shutdown:
  *       timeout: 90s                # graceful stop of running jobs on shutdown
+ *     exit:
+ *       already-complete: success   # success (exit 0) | fail (exit 3)
  *     chunk:
  *       size: 100                   # AdharSteps.chunk(name)
  *     page:
@@ -30,6 +40,10 @@ import java.util.regex.Pattern;
  *       max-attempts: 3
  *       initial-backoff: 1s
  *       max-backoff: 30s
+ *     dead-letter:
+ *       enabled: true               # FaultTolerance.deadLetter() writes skipped items to the JDBC table
+ *     telemetry:
+ *       trace-items: false          # per-item spans (off: a million items would be a million spans)
  *     scheduler:                    # embedded mode - not the platform path
  *       enabled: false
  *       time-zone: UTC
@@ -63,7 +77,34 @@ public class BatchProperties {
      */
     private boolean enabled = true;
 
+    /**
+     * How the application runs its jobs. {@code auto} becomes {@code kubernetes} when a job is
+     * named ({@code adhar.batch.job}, environment {@code ADHAR_BATCH_JOB}), and is otherwise
+     * {@code embedded}.
+     */
+    private Mode mode = Mode.AUTO;
+
+    /**
+     * Kubernetes mode: the job the run executes, by job or bean name. The platform sets it
+     * through {@code ADHAR_BATCH_JOB}.
+     */
+    private String job;
+
+    /**
+     * Kubernetes mode: what this pod does in its job. The platform sets it through
+     * {@code ADHAR_BATCH_ROLE}.
+     */
+    private BatchRole role = BatchRole.SINGLE;
+
     private final Repository repository = new Repository();
+
+    private final Recovery recovery = new Recovery();
+
+    private final Exit exit = new Exit();
+
+    private final DeadLetter deadLetter = new DeadLetter();
+
+    private final Telemetry telemetry = new Telemetry();
 
     private final Shutdown shutdown = new Shutdown();
 
@@ -83,8 +124,48 @@ public class BatchProperties {
         this.enabled = enabled;
     }
 
+    public Mode getMode() {
+        return mode;
+    }
+
+    public void setMode(Mode mode) {
+        this.mode = mode;
+    }
+
+    public String getJob() {
+        return job;
+    }
+
+    public void setJob(String job) {
+        this.job = job;
+    }
+
+    public BatchRole getRole() {
+        return role;
+    }
+
+    public void setRole(BatchRole role) {
+        this.role = role;
+    }
+
     public Repository getRepository() {
         return repository;
+    }
+
+    public Recovery getRecovery() {
+        return recovery;
+    }
+
+    public Exit getExit() {
+        return exit;
+    }
+
+    public DeadLetter getDeadLetter() {
+        return deadLetter;
+    }
+
+    public Telemetry getTelemetry() {
+        return telemetry;
     }
 
     public Shutdown getShutdown() {
@@ -128,6 +209,11 @@ public class BatchProperties {
         require(isPositive(retry.maxBackoff) && retry.maxBackoff.compareTo(retry.initialBackoff) >= 0,
                 "adhar.batch.retry.max-backoff must be positive and not below initial-backoff");
         require(isPositive(shutdown.timeout), "adhar.batch.shutdown.timeout must be positive");
+        require(isPositive(recovery.heartbeatInterval) && isPositive(recovery.staleAfter)
+                        && recovery.heartbeatInterval.compareTo(recovery.staleAfter) < 0,
+                "adhar.batch.recovery.heartbeat-interval must be positive and shorter than stale-after ("
+                        + recovery.staleAfter + "), was " + recovery.heartbeatInterval);
+        require(isPositive(recovery.maxWait), "adhar.batch.recovery.max-wait must be positive");
         require(isPositive(scheduler.misfireThreshold), "adhar.batch.scheduler.misfire-threshold must be positive");
         require(isPositive(scheduler.lockLease), "adhar.batch.scheduler.lock-lease must be positive");
         require(isPositive(scheduler.lockRenewInterval)
@@ -210,6 +296,135 @@ public class BatchProperties {
 
         public void setAllowInMemory(boolean allowInMemory) {
             this.allowInMemory = allowInMemory;
+        }
+    }
+
+    /**
+     * How an application runs its jobs.
+     */
+    public enum Mode {
+        /** {@link #KUBERNETES} when a job is named, otherwise {@link #EMBEDDED}. */
+        AUTO,
+        /** One run per process: the runner executes {@code adhar.batch.job} and exits with its code. */
+        KUBERNETES,
+        /** Jobs run inside a long-running service (operator calls, the embedded scheduler). */
+        EMBEDDED
+    }
+
+    /**
+     * Kubernetes mode: the lease a run holds on its execution, and when another run may take a
+     * STARTED execution over.
+     */
+    public static class Recovery {
+
+        /**
+         * How often a running execution's lease is renewed.
+         */
+        private Duration heartbeatInterval = Duration.ofSeconds(30);
+
+        /**
+         * A STARTED execution whose lease is older than this is taken over (recovered and
+         * restarted) even if its owner pod cannot be checked.
+         */
+        private Duration staleAfter = Duration.ofMinutes(2);
+
+        /**
+         * How long a run waits for the terminating pod that owns the execution before deciding.
+         */
+        private Duration maxWait = Duration.ofMinutes(10);
+
+        public Duration getHeartbeatInterval() {
+            return heartbeatInterval;
+        }
+
+        public void setHeartbeatInterval(Duration heartbeatInterval) {
+            this.heartbeatInterval = heartbeatInterval;
+        }
+
+        public Duration getStaleAfter() {
+            return staleAfter;
+        }
+
+        public void setStaleAfter(Duration staleAfter) {
+            this.staleAfter = staleAfter;
+        }
+
+        public Duration getMaxWait() {
+            return maxWait;
+        }
+
+        public void setMaxWait(Duration maxWait) {
+            this.maxWait = maxWait;
+        }
+    }
+
+    /**
+     * Kubernetes mode: exit codes the application may choose.
+     */
+    public static class Exit {
+
+        /**
+         * What a run of an identity that already COMPLETED exits with: {@code success} (0) or
+         * {@code fail} (3).
+         */
+        private AlreadyComplete alreadyComplete = AlreadyComplete.SUCCESS;
+
+        public AlreadyComplete getAlreadyComplete() {
+            return alreadyComplete;
+        }
+
+        public void setAlreadyComplete(AlreadyComplete alreadyComplete) {
+            this.alreadyComplete = alreadyComplete;
+        }
+
+        /**
+         * The exit of a run whose identity already completed.
+         */
+        public enum AlreadyComplete {
+            /** Exit 0: the work is done, so the run succeeded. */
+            SUCCESS,
+            /** Exit 3: a second run of a completed identity is a mistake worth a failed Job. */
+            FAIL
+        }
+    }
+
+    /**
+     * The dead-letter table of fault-tolerant steps.
+     */
+    public static class DeadLetter {
+
+        /**
+         * Write the items a step skips to {@code <schema>.ADHAR_BATCH_DEAD_LETTER} when the step
+         * declares {@code FaultTolerance.deadLetter()}.
+         */
+        private boolean enabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+    }
+
+    /**
+     * Telemetry of batch runs.
+     */
+    public static class Telemetry {
+
+        /**
+         * Trace every item read, processed and written. Off, items are metrics only and a run
+         * traces jobs, steps and chunks.
+         */
+        private boolean traceItems = false;
+
+        public boolean isTraceItems() {
+            return traceItems;
+        }
+
+        public void setTraceItems(boolean traceItems) {
+            this.traceItems = traceItems;
         }
     }
 

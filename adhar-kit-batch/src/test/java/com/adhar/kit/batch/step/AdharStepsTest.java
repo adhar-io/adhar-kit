@@ -48,7 +48,7 @@ class AdharStepsTest {
 
     @BeforeEach
     void setUp() {
-        steps = new AdharSteps(repository, transactionManager, listeners, properties, null);
+        steps = new AdharSteps(repository, transactionManager, listeners, properties, null, null);
     }
 
     private AdharChunkStepBuilder<String, String> chunk() {
@@ -125,7 +125,7 @@ class AdharStepsTest {
     @DisplayName("the application's observation registry reaches chunk, tasklet and plain builders")
     void observationRegistry() {
         ObservationRegistry registry = ObservationRegistry.create();
-        var observed = new AdharSteps(repository, transactionManager, listeners, properties, registry);
+        var observed = new AdharSteps(repository, transactionManager, listeners, properties, registry, null);
 
         ChunkOrientedStep<String, String> chunkStep = observed.<String, String>chunk("step", 1)
                 .reader(new ListItemReader<>(List.of("a"))).writer(WRITER).build();

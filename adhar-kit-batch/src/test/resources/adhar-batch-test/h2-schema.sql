@@ -1,11 +1,37 @@
--- Test schema for H2 contexts: the kit only migrates PostgreSQL, so on H2 the scheduler lock
--- table is created here, with the DDL JdbcSchedulerLock.verify() prints, plus the business tables
--- of the test jobs.
+-- Test schema for H2 contexts: the kit only migrates PostgreSQL, so on H2 the kit's tables are
+-- created here (the lock with the DDL JdbcSchedulerLock.verify() prints; the lease and the dead
+-- letters as in V6_0_1, ITEM as text and without the foreign key), plus the business tables of
+-- the test jobs.
 CREATE TABLE IF NOT EXISTS ADHAR_SCHEDULER_LOCK (
     LOCK_NAME VARCHAR(200) NOT NULL PRIMARY KEY,
     LOCKED_BY VARCHAR(255) NOT NULL,
     LOCKED_AT TIMESTAMP WITH TIME ZONE NOT NULL,
     LOCKED_UNTIL TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ADHAR_BATCH_EXECUTION_LEASE (
+    JOB_EXECUTION_ID BIGINT NOT NULL PRIMARY KEY,
+    OWNER_POD VARCHAR(253) NOT NULL,
+    OWNER_UID VARCHAR(64),
+    NODE VARCHAR(253),
+    ACQUIRED_AT TIMESTAMP WITH TIME ZONE NOT NULL,
+    HEARTBEAT_AT TIMESTAMP WITH TIME ZONE NOT NULL,
+    LAST_COMMIT_AT TIMESTAMP WITH TIME ZONE
+);
+CREATE TABLE IF NOT EXISTS ADHAR_BATCH_DEAD_LETTER (
+    ID BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    JOB_EXECUTION_ID BIGINT NOT NULL,
+    JOB_NAME VARCHAR(100) NOT NULL,
+    STEP_NAME VARCHAR(100) NOT NULL,
+    BUSINESS_DATE DATE,
+    PHASE VARCHAR(10) NOT NULL,
+    ITEM_TYPE VARCHAR(500),
+    ITEM VARCHAR(10000),
+    ERROR_CLASS VARCHAR(500) NOT NULL,
+    ERROR_MESSAGE VARCHAR(2500),
+    CREATED_AT TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    REPLAYED_AT TIMESTAMP WITH TIME ZONE,
+    REPLAY_EXECUTION_ID BIGINT,
+    CONSTRAINT ADHAR_DEAD_LETTER_PHASE_CK CHECK (PHASE IN ('read', 'process', 'write'))
 );
 CREATE TABLE IF NOT EXISTS SOURCE_ITEMS (ID BIGINT NOT NULL PRIMARY KEY);
 -- No key on purpose: a duplicate write must be countable, not rejected.

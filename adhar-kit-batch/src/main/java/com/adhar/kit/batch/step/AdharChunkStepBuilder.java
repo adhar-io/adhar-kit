@@ -1,8 +1,11 @@
 package com.adhar.kit.batch.step;
 
 import com.adhar.kit.batch.config.BatchProperties;
+import com.adhar.kit.batch.fault.DeadLetterSkipListener;
 import com.adhar.kit.batch.fault.FaultTolerance;
 import com.adhar.kit.batch.listener.BatchListenerAttacher;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.listener.SkipListener;
 import org.springframework.batch.core.listener.StepListener;
 import org.springframework.batch.core.step.builder.ChunkOrientedStepBuilder;
 import org.springframework.batch.core.step.item.ChunkOrientedStep;
@@ -34,18 +37,23 @@ import java.util.function.Consumer;
  * @author Adhar Platform Team
  * @since 0.1.0
  */
+@Slf4j
 public final class AdharChunkStepBuilder<I, O> {
 
     private final ChunkOrientedStepBuilder<I, O> delegate;
     private final BatchProperties.Retry retryDefaults;
     private final BatchListenerAttacher listeners;
+    private final BatchProperties.DeadLetter deadLetterSettings;
+    private final DeadLetterSkipListener deadLetters;
     private FaultTolerance faultTolerance = FaultTolerance.none();
 
-    AdharChunkStepBuilder(ChunkOrientedStepBuilder<I, O> delegate, BatchProperties.Retry retryDefaults,
-                          BatchListenerAttacher listeners) {
+    AdharChunkStepBuilder(ChunkOrientedStepBuilder<I, O> delegate, BatchProperties properties,
+                          BatchListenerAttacher listeners, DeadLetterSkipListener deadLetters) {
         this.delegate = delegate;
-        this.retryDefaults = retryDefaults;
+        this.retryDefaults = properties.getRetry();
+        this.deadLetterSettings = properties.getDeadLetter();
         this.listeners = listeners;
+        this.deadLetters = deadLetters;
     }
 
     /**
@@ -166,12 +174,27 @@ public final class AdharChunkStepBuilder<I, O> {
     }
 
     /**
-     * @return the step, with the fault tolerance applied and the kit's listeners attached
+     * @return the step, with the fault tolerance applied, the kit's listeners attached and, when
+     *         the fault tolerance asks for it, skipped items dead-lettered
+     * @throws IllegalStateException when the step asks for dead letters and there is no sink (no
+     *                               DataSource) although {@code adhar.batch.dead-letter.enabled}
      */
+    @SuppressWarnings({"unchecked", "rawtypes"})
     public ChunkOrientedStep<I, O> build() {
         faultTolerance.applyTo(delegate, retryDefaults);
         ChunkOrientedStep<I, O> step = delegate.build();
         listeners.attach(step);
+        if (faultTolerance.isDeadLetter()) {
+            if (deadLetters != null) {
+                step.registerSkipListener((SkipListener) deadLetters);
+            } else if (deadLetterSettings.isEnabled()) {
+                throw new IllegalStateException("Step [" + step.getName() + "] dead-letters skipped items, but there "
+                        + "is no dead-letter table: the kit writes it on the JobRepository's DataSource");
+            } else {
+                log.info("Step [{}] declares deadLetter(), but adhar.batch.dead-letter.enabled=false: skipped items "
+                        + "are counted and logged only", step.getName());
+            }
+        }
         return step;
     }
 }

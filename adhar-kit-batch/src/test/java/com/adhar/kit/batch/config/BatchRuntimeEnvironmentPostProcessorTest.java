@@ -7,12 +7,16 @@ import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.context.config.ConfigDataEnvironmentPostProcessor;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.util.ClassUtils;
+import org.springframework.web.context.WebApplicationContext;
 
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Unit tests for {@link BatchRuntimeEnvironmentPostProcessor}: the defaults the batch module needs
@@ -118,6 +122,65 @@ class BatchRuntimeEnvironmentPostProcessorTest {
         application.setDefaultProperties(Map.of("adhar.batch.scheduler.enabled", "true",
                 "spring.main.banner-mode", "off"));
         try (ConfigurableApplicationContext context = application.run()) {
+            assertThat(context.getEnvironment().getProperty(JOB_ENABLED)).isEqualTo("false");
+        }
+    }
+
+    private static MockEnvironment withJobVariable(String job) {
+        MockEnvironment environment = new MockEnvironment();
+        environment.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, Map.of("ADHAR_BATCH_JOB", job)));
+        return environment;
+    }
+
+    @Test
+    @DisplayName("ADHAR_BATCH_JOB switches auto to Kubernetes mode and SETS the four 5.5 properties over the application's")
+    void kubernetesModeFromTheEnvironment() {
+        MockEnvironment environment = withJobVariable("importJob")
+                .withProperty(JOB_ENABLED, "true")
+                .withProperty("spring.main.web-application-type", "servlet")
+                .withProperty("adhar.batch.scheduler.enabled", "true");
+
+        process(environment);
+
+        assertThat(environment.getProperty(JOB_ENABLED)).isEqualTo("false");
+        assertThat(environment.getProperty("spring.main.web-application-type")).isEqualTo("none");
+        assertThat(environment.getProperty("spring.lifecycle.timeout-per-shutdown-phase")).isEqualTo("90s");
+        assertThat(environment.getProperty("spring.main.cloud-platform")).isEqualTo("none");
+        assertThat(environment.getProperty("adhar.batch.mode")).isEqualTo("kubernetes");
+        assertThat(environment.getProperty("adhar.batch.scheduler.enabled")).isEqualTo("false");
+        assertThat(environment.getProperty("adhar.batch.job")).as("relaxed binding of ADHAR_BATCH_JOB")
+                .isEqualTo("importJob");
+    }
+
+    @Test
+    @DisplayName("the shutdown phase timeout is adhar.batch.shutdown.timeout; an explicit mode decides alone")
+    void explicitModes() {
+        MockEnvironment timeout = new MockEnvironment().withProperty("adhar.batch.job", "importJob")
+                .withProperty("adhar.batch.shutdown.timeout", "45s");
+        assertThat(process(timeout).getProperty("spring.lifecycle.timeout-per-shutdown-phase")).isEqualTo("45s");
+
+        MockEnvironment embedded = withJobVariable("importJob").withProperty("adhar.batch.mode", "embedded");
+        assertThat(process(embedded).getProperty("spring.main.web-application-type")).isNull();
+        assertThat(embedded.getPropertySources().contains(BatchRuntimeEnvironmentPostProcessor.KUBERNETES_SOURCE_NAME))
+                .isFalse();
+
+        MockEnvironment kubernetes = new MockEnvironment().withProperty("adhar.batch.mode", "KUBERNETES");
+        assertThat(process(kubernetes).getProperty("spring.main.web-application-type")).isEqualTo("none");
+
+        assertThat(process(new MockEnvironment()).getProperty("spring.main.web-application-type"))
+                .as("auto without a job is embedded").isNull();
+        assertThatThrownBy(() -> process(new MockEnvironment().withProperty("adhar.batch.mode", "remote")))
+                .hasMessageContaining("adhar.batch.mode must be auto, kubernetes or embedded, was 'remote'");
+    }
+
+    @Test
+    @DisplayName("a real application with Spring MVC on the classpath starts as no web application in a run pod")
+    void runPodIsNotAWebApplication() {
+        SpringApplication application = new SpringApplication(Empty.class);
+        application.setDefaultProperties(Map.of("adhar.batch.job", "importJob", "spring.main.banner-mode", "off"));
+        try (ConfigurableApplicationContext context = application.run()) {
+            assertThat(context).isNotInstanceOf(WebApplicationContext.class);
             assertThat(context.getEnvironment().getProperty(JOB_ENABLED)).isEqualTo("false");
         }
     }

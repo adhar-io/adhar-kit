@@ -76,10 +76,14 @@ class BatchAutoConfigurationTestContainerTest {
                 .addString("run", "a01-repository").toJobParameters());
 
         assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
-        // Persisted in the batch schema, not in memory: a fresh query finds the instance.
+        // Persisted in the batch schema, not in memory: a fresh query finds THIS run's instance
+        // (other tests of the class start the same job against the shared database).
         assertThat(jdbcTemplate.queryForObject(
-                "select count(*) from batch.batch_job_instance where job_name = ?", Integer.class,
-                TestJobs.IMPORT_JOB)).isEqualTo(1);
+                "select count(distinct i.job_instance_id) from batch.batch_job_instance i "
+                        + "join batch.batch_job_execution e on e.job_instance_id = i.job_instance_id "
+                        + "join batch.batch_job_execution_params p on p.job_execution_id = e.job_execution_id "
+                        + "where i.job_name = ? and p.parameter_name = 'run' and p.parameter_value = ?",
+                Integer.class, TestJobs.IMPORT_JOB, "a01-repository")).isEqualTo(1);
         assertThat(jobRepository.getJobExecution(execution.getId())).isNotNull();
         assertThat(jdbcTemplate.queryForObject("select count(*) from target_items", Integer.class)).isEqualTo(25);
     }
@@ -89,9 +93,10 @@ class BatchAutoConfigurationTestContainerTest {
         assertThat(jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.schemata where schema_name = 'batch'", Integer.class))
                 .isEqualTo(1);
+        // Flyway's createSchemas(true) records the schema creation as a versionless row first.
         List<String> versions = jdbcTemplate.queryForList(
-                "select version from batch.adhar_batch_schema_history where success order by installed_rank",
-                String.class);
+                "select version from batch.adhar_batch_schema_history where success and version is not null "
+                        + "order by installed_rank", String.class);
         assertThat(versions).containsExactly("6.0.0", "6.0.1");
         assertThat(jdbcTemplate.queryForList(
                 "select table_name from information_schema.tables where table_schema = 'batch'", String.class))

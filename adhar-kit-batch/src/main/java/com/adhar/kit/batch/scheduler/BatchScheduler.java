@@ -147,6 +147,10 @@ public class BatchScheduler implements SmartLifecycle {
      * @return {@value #SCHEDULED_TIME_PARAMETER} (identifying) and {@value #TRIGGER_PARAMETER}
      */
     public static JobParameters slotParameters(Instant nominal) {
+        // Whole SECONDS, not the minute design 0025 §5.16 names (2026-11-13): the schedules are
+        // six-field cron expressions with second resolution, so "0/30 * * * * *" has two slots a
+        // minute. Truncated to the minute both would share one JobInstance and the second would
+        // be skipped as already run. A minute-resolution schedule gets the same identity either way.
         return new JobParametersBuilder()
                 .addString(SCHEDULED_TIME_PARAMETER,
                         DateTimeFormatter.ISO_INSTANT.format(nominal.truncatedTo(ChronoUnit.SECONDS)), true)

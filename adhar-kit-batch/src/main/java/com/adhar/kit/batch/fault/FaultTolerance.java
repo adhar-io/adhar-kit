@@ -19,7 +19,8 @@ import java.util.function.Predicate;
  * steps.<In, Out>chunk("importStep")
  *     .reader(reader).processor(processor).writer(writer)
  *     .faultTolerance(FaultTolerance.transientInfrastructure()   // retry presets
- *         .skip(ValidationException.class, 100))                 // SkipPolicy + limit
+ *         .skip(ValidationException.class, 100)                  // SkipPolicy + limit
+ *         .deadLetter())                                         // keep what was skipped
  *     .build();
  * }</pre>
  *
@@ -36,7 +37,7 @@ import java.util.function.Predicate;
 public final class FaultTolerance {
 
     private static final FaultTolerance NONE = new FaultTolerance(null, null, null, null, null,
-            Set.of(), 0, null);
+            Set.of(), 0, null, false);
 
     private final Predicate<Throwable> retryable;
     private final Integer maxAttempts;
@@ -46,10 +47,11 @@ public final class FaultTolerance {
     private final Set<Class<? extends Throwable>> skippable;
     private final long skipLimit;
     private final SkipPolicy skipPolicy;
+    private final boolean deadLetter;
 
     private FaultTolerance(Predicate<Throwable> retryable, Integer maxAttempts, Duration initialBackoff,
                            Duration maxBackoff, RetryPolicy retryPolicy, Set<Class<? extends Throwable>> skippable,
-                           long skipLimit, SkipPolicy skipPolicy) {
+                           long skipLimit, SkipPolicy skipPolicy, boolean deadLetter) {
         this.retryable = retryable;
         this.maxAttempts = maxAttempts;
         this.initialBackoff = initialBackoff;
@@ -58,6 +60,7 @@ public final class FaultTolerance {
         this.skippable = Collections.unmodifiableSet(new LinkedHashSet<>(skippable));
         this.skipLimit = skipLimit;
         this.skipPolicy = skipPolicy;
+        this.deadLetter = deadLetter;
     }
 
     /**
@@ -112,7 +115,7 @@ public final class FaultTolerance {
             throw new IllegalArgumentException("attempts must be at least 1, was " + attempts);
         }
         return new FaultTolerance(retryable, attempts, initialBackoff, maxBackoff, retryPolicy, skippable,
-                skipLimit, skipPolicy);
+                skipLimit, skipPolicy, deadLetter);
     }
 
     /**
@@ -124,7 +127,8 @@ public final class FaultTolerance {
         if (initial == null || max == null || initial.isNegative() || initial.isZero() || max.compareTo(initial) < 0) {
             throw new IllegalArgumentException("backoff needs a positive initial delay and a max not below it");
         }
-        return new FaultTolerance(retryable, maxAttempts, initial, max, retryPolicy, skippable, skipLimit, skipPolicy);
+        return new FaultTolerance(retryable, maxAttempts, initial, max, retryPolicy, skippable, skipLimit, skipPolicy,
+                deadLetter);
     }
 
     /**
@@ -136,7 +140,7 @@ public final class FaultTolerance {
             throw new IllegalArgumentException("policy must not be null");
         }
         return new FaultTolerance(retryable, maxAttempts, initialBackoff, maxBackoff, policy, skippable, skipLimit,
-                skipPolicy);
+                skipPolicy, deadLetter);
     }
 
     /**
@@ -174,7 +178,7 @@ public final class FaultTolerance {
         Set<Class<? extends Throwable>> more = new LinkedHashSet<>(skippable);
         more.addAll(Arrays.asList(types));
         return new FaultTolerance(retryable, maxAttempts, initialBackoff, maxBackoff, retryPolicy, more, limit,
-                skipPolicy);
+                skipPolicy, deadLetter);
     }
 
     /**
@@ -186,7 +190,27 @@ public final class FaultTolerance {
             throw new IllegalArgumentException("policy must not be null");
         }
         return new FaultTolerance(retryable, maxAttempts, initialBackoff, maxBackoff, retryPolicy, skippable,
-                skipLimit, policy);
+                skipLimit, policy, deadLetter);
+    }
+
+    /**
+     * Keeps every skipped item in the dead-letter table ({@code batch.ADHAR_BATCH_DEAD_LETTER}):
+     * the item as JSON, why it failed, the step, the execution and the business date. Needs a skip
+     * ({@link #skip(Class, long)} or {@link #skipPolicy(SkipPolicy)}); without
+     * {@code adhar.batch.dead-letter.enabled} it is ignored.
+     *
+     * @return the same, keeping skipped items
+     */
+    public FaultTolerance deadLetter() {
+        return new FaultTolerance(retryable, maxAttempts, initialBackoff, maxBackoff, retryPolicy, skippable, skipLimit,
+                skipPolicy, true);
+    }
+
+    /**
+     * @return whether skipped items are kept in the dead-letter table
+     */
+    public boolean isDeadLetter() {
+        return deadLetter;
     }
 
     /**
@@ -234,6 +258,10 @@ public final class FaultTolerance {
      * @param <O>      output type
      */
     public <I, O> void applyTo(ChunkOrientedStepBuilder<I, O> builder, BatchProperties.Retry defaults) {
+        if (deadLetter && skippable.isEmpty() && skipPolicy == null) {
+            throw new IllegalStateException("deadLetter() keeps the items a step skips, but this step skips "
+                    + "nothing: declare skip(...) or skipPolicy(...) as well");
+        }
         if (!isFaultTolerant()) {
             return;
         }
@@ -261,6 +289,6 @@ public final class FaultTolerance {
 
     private FaultTolerance withRetry(Predicate<Throwable> predicate) {
         return new FaultTolerance(predicate, maxAttempts, initialBackoff, maxBackoff, retryPolicy, skippable,
-                skipLimit, skipPolicy);
+                skipLimit, skipPolicy, deadLetter);
     }
 }

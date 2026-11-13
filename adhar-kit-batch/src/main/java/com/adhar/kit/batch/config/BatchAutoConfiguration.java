@@ -2,6 +2,9 @@ package com.adhar.kit.batch.config;
 
 import com.adhar.adharkit.logging.batch.BatchJobLogger;
 import com.adhar.kit.batch.BatchFacadeRegistrar;
+import com.adhar.kit.batch.fault.DeadLetterSink;
+import com.adhar.kit.batch.fault.DeadLetterSkipListener;
+import com.adhar.kit.batch.fault.JdbcDeadLetterSink;
 import com.adhar.kit.batch.listener.AdharChunkListener;
 import com.adhar.kit.batch.listener.AdharJobExecutionListener;
 import com.adhar.kit.batch.listener.AdharSkipListener;
@@ -14,6 +17,8 @@ import com.adhar.kit.batch.lock.SchedulerLock;
 import com.adhar.kit.batch.metrics.BatchMetrics;
 import com.adhar.kit.batch.operator.BatchOperator;
 import com.adhar.kit.batch.operator.JobResolver;
+import com.adhar.kit.batch.params.JobParameterSpecRegistry;
+import com.adhar.kit.batch.params.JobParametersResolver;
 import com.adhar.kit.batch.repository.AdharBatchRepositoryConfiguration;
 import com.adhar.kit.batch.repository.BatchRepositoryLayout;
 import com.adhar.kit.batch.repository.ResourcelessRepositoryGuard;
@@ -42,6 +47,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import javax.sql.DataSource;
@@ -195,6 +201,25 @@ public class BatchAutoConfiguration {
     }
 
     /**
+     * @param beanFactory the application's beans
+     * @return the declared parameters of every job
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public JobParameterSpecRegistry jobParameterSpecRegistry(ListableBeanFactory beanFactory) {
+        return new JobParameterSpecRegistry(beanFactory);
+    }
+
+    /**
+     * @return validates a run's input against its job's declaration
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public JobParametersResolver jobParametersResolver() {
+        return new JobParametersResolver();
+    }
+
+    /**
      * @param jobOperator   Spring Batch's operator
      * @param jobRepository Spring Batch's repository
      * @param jobResolver   resolves jobs by name
@@ -214,6 +239,7 @@ public class BatchAutoConfiguration {
      * @param listeners               attaches the kit's listeners
      * @param properties              {@code adhar.batch.*}
      * @param observationRegistry     the application's observation registry, if any
+     * @param deadLetters             keeps skipped items, when there is a dead-letter table
      * @return the step builder entry point
      */
     @Bean
@@ -223,12 +249,14 @@ public class BatchAutoConfiguration {
                                  @BatchTransactionManager ObjectProvider<PlatformTransactionManager> batchTransactionManager,
                                  ObjectProvider<PlatformTransactionManager> transactionManager,
                                  BatchListenerAttacher listeners, BatchProperties properties,
-                                 ObjectProvider<ObservationRegistry> observationRegistry) {
+                                 ObjectProvider<ObservationRegistry> observationRegistry,
+                                 ObjectProvider<DeadLetterSkipListener> deadLetters) {
         // The JobRepository's transaction manager, chosen as Spring Boot chooses it, so business
         // writes and step progress commit together (INV-4).
         PlatformTransactionManager manager = batchTransactionManager.getIfAvailable(
                 () -> transactionManager.getIfAvailable(ResourcelessTransactionManager::new));
-        return new AdharSteps(jobRepository, manager, listeners, properties, observationRegistry.getIfAvailable());
+        return new AdharSteps(jobRepository, manager, listeners, properties, observationRegistry.getIfAvailable(),
+                deadLetters.getIfAvailable());
     }
 
     /**
@@ -263,6 +291,32 @@ public class BatchAutoConfiguration {
             String table = resolved != null ? resolved.kitTable(BatchRepositoryLayout.SCHEDULER_LOCK_TABLE)
                     : JdbcSchedulerLock.DEFAULT_TABLE;
             return new JdbcSchedulerLock(batchDataSource.getIfAvailable(() -> dataSource), table);
+        }
+    }
+
+    /**
+     * The dead-letter table of fault-tolerant steps, on the JobRepository's database.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnBean(DataSource.class)
+    @ConditionalOnBooleanProperty(name = "adhar.batch.dead-letter.enabled", matchIfMissing = true)
+    static class DeadLetterConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        DeadLetterSink deadLetterSink(DataSource dataSource, @BatchDataSource ObjectProvider<DataSource> batchDataSource,
+                                      ObjectProvider<BatchRepositoryLayout> layout) {
+            BatchRepositoryLayout resolved = layout.getIfAvailable();
+            String table = resolved != null ? resolved.kitTable(BatchRepositoryLayout.DEAD_LETTER_TABLE)
+                    : BatchRepositoryLayout.DEAD_LETTER_TABLE;
+            return new JdbcDeadLetterSink(new JdbcTemplate(batchDataSource.getIfAvailable(() -> dataSource)), table,
+                    resolved != null && resolved.managed());
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        DeadLetterSkipListener deadLetterSkipListener(DeadLetterSink sink, ObjectProvider<BatchMetrics> metrics) {
+            return new DeadLetterSkipListener(sink, DeadLetterSkipListener.defaultSerializer(), metrics.getIfAvailable());
         }
     }
 

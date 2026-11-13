@@ -1,5 +1,9 @@
 package com.adhar.kit.batch.runtime;
 
+import com.adhar.kit.batch.fault.NonRetryableBatchException;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.step.skip.SkipLimitExceededException;
+
 /**
  * The process exit codes of a batch run (design 0025 §5.7).
  *
@@ -43,5 +47,44 @@ public final class ExitCodes {
     public static final int UNKNOWN = 7;
 
     private ExitCodes() {
+    }
+
+    /**
+     * The exit code of a finished execution (design 0025 §5.4, §5.7).
+     *
+     * @param execution the execution
+     * @return {@link #COMPLETED}, {@link #STOPPED}, {@link #ABANDONED}; for FAILED,
+     *         {@link #FAILED_NOT_RETRYABLE} when {@link #isNotRetryable(JobExecution)} and
+     *         {@link #FAILED_RETRYABLE} otherwise; {@link #UNKNOWN} for UNKNOWN and for a status
+     *         a finished run cannot have
+     */
+    public static int of(JobExecution execution) {
+        return switch (execution.getStatus()) {
+            case COMPLETED -> COMPLETED;
+            case STOPPED -> STOPPED;
+            case FAILED -> isNotRetryable(execution) ? FAILED_NOT_RETRYABLE : FAILED_RETRYABLE;
+            case ABANDONED -> ABANDONED;
+            default -> UNKNOWN;
+        };
+    }
+
+    /**
+     * Whether running the same execution again would fail the same way: a step failed with a
+     * {@link NonRetryableBatchException} (or a subclass), or skipped more items than its limit
+     * ({@link SkipLimitExceededException}), anywhere in a failure's cause chain.
+     *
+     * @param execution a failed execution
+     * @return whether retrying it is pointless
+     */
+    public static boolean isNotRetryable(JobExecution execution) {
+        for (Throwable failure : execution.getAllFailureExceptions()) {
+            Throwable cause = failure;
+            for (int depth = 0; cause != null && depth < 32; depth++, cause = cause.getCause()) {
+                if (cause instanceof NonRetryableBatchException || cause instanceof SkipLimitExceededException) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

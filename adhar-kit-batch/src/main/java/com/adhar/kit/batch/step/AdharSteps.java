@@ -1,6 +1,7 @@
 package com.adhar.kit.batch.step;
 
 import com.adhar.kit.batch.config.BatchProperties;
+import com.adhar.kit.batch.fault.DeadLetterSkipListener;
 import com.adhar.kit.batch.listener.BatchListenerAttacher;
 import io.micrometer.observation.ObservationRegistry;
 import org.springframework.batch.core.repository.JobRepository;
@@ -41,6 +42,7 @@ public class AdharSteps {
     private final BatchListenerAttacher listeners;
     private final BatchProperties properties;
     private final ObservationRegistry observationRegistry;
+    private final DeadLetterSkipListener deadLetters;
 
     /**
      * @param jobRepository       the JobRepository
@@ -48,15 +50,17 @@ public class AdharSteps {
      * @param listeners           attaches the kit's listeners
      * @param properties          {@code adhar.batch.*}
      * @param observationRegistry the application's observation registry, may be {@code null}
+     * @param deadLetters         keeps skipped items of steps that ask for it, may be {@code null}
      */
     public AdharSteps(JobRepository jobRepository, PlatformTransactionManager transactionManager,
                       BatchListenerAttacher listeners, BatchProperties properties,
-                      ObservationRegistry observationRegistry) {
+                      ObservationRegistry observationRegistry, DeadLetterSkipListener deadLetters) {
         this.jobRepository = jobRepository;
         this.transactionManager = transactionManager;
         this.listeners = listeners;
         this.properties = properties;
         this.observationRegistry = observationRegistry;
+        this.deadLetters = deadLetters;
     }
 
     /**
@@ -88,7 +92,7 @@ public class AdharSteps {
         if (observationRegistry != null) {
             builder.observationRegistry(observationRegistry);
         }
-        return new AdharChunkStepBuilder<>(builder, properties.getRetry(), listeners);
+        return new AdharChunkStepBuilder<>(builder, properties, listeners, deadLetters);
     }
 
     /**
