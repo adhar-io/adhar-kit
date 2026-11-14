@@ -41,7 +41,8 @@ public record JobParameterSpec(String jobName, String description, List<Param> p
         Set<String> names = new HashSet<>();
         for (Param param : parameters) {
             if (!names.add(param.name())) {
-                throw new IllegalArgumentException("Job [" + jobName + "] declares parameter " + param.name() + " twice");
+                throw new IllegalArgumentException("Job [" + jobName + "] declares parameter " + param.name()
+                        + " twice");
             }
         }
     }

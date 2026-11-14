@@ -5,9 +5,12 @@ import com.adhar.adharkit.logging.event.AppLogEventOutcome;
 import com.adhar.adharkit.logging.event.AppLogEventPublisher;
 import com.adhar.adharkit.logging.event.AppLogEventType;
 import com.adhar.adharkit.logging.properties.AdharLoggingProperties;
+import org.slf4j.MDC;
 import org.slf4j.event.Level;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -19,6 +22,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>Thread-safe: item counters may be updated from parallel worker threads. Closing the run is
  * idempotent; if neither {@link #complete()} nor {@link #fail(Throwable)} was called,
  * {@link #close()} completes the run (as PARTIAL when item failures were recorded).</p>
+ *
+ * <p>A run started with a context ({@link BatchJobLogger#startJob(String, Map)}) puts it into the
+ * MDC while each of its events is logged, whichever thread logs it: a progress event from a
+ * partition's worker thread carries the same {@code batch.*} keys as the job's own lines.</p>
  */
 public class BatchJobRun implements AutoCloseable {
 
@@ -26,6 +33,7 @@ public class BatchJobRun implements AutoCloseable {
     private final String jobId;
     private final AdharLoggingProperties.BatchLoggingProperties batchProperties;
     private final AppLogEventPublisher publisher;
+    private final Map<String, String> context;
 
     private final long startNanos = System.nanoTime();
     private final AtomicLong itemsProcessed = new AtomicLong();
@@ -39,11 +47,12 @@ public class BatchJobRun implements AutoCloseable {
 
     BatchJobRun(String jobName, String jobId,
                 AdharLoggingProperties.BatchLoggingProperties batchProperties,
-                AppLogEventPublisher publisher) {
+                AppLogEventPublisher publisher, Map<String, String> context) {
         this.jobName = jobName;
         this.jobId = jobId;
         this.batchProperties = batchProperties;
         this.publisher = publisher;
+        this.context = Map.copyOf(context);
     }
 
     public String getJobName() {
@@ -64,6 +73,22 @@ public class BatchJobRun implements AutoCloseable {
 
     public long getItemsFailed() {
         return itemsFailed.get();
+    }
+
+    /**
+     * @return the MDC entries each of the run's events is logged with
+     */
+    public Map<String, String> getContext() {
+        return context;
+    }
+
+    void started() {
+        publish(AppLogEvent.builder()
+                .type(AppLogEventType.BATCH)
+                .category("batch")
+                .name(jobName)
+                .outcome(AppLogEventOutcome.STARTED)
+                .metadata("jobId", jobId));
     }
 
     /**
@@ -205,8 +230,21 @@ public class BatchJobRun implements AutoCloseable {
     }
 
     private void publish(AppLogEvent.Builder builder) {
-        if (batchProperties.isEnabled()) {
+        if (!batchProperties.isEnabled()) {
+            return;
+        }
+        // Only the keys the thread does not already carry, and only for this one event.
+        List<String> added = new ArrayList<>();
+        context.forEach((key, value) -> {
+            if (MDC.get(key) == null) {
+                MDC.put(key, value);
+                added.add(key);
+            }
+        });
+        try {
             publisher.publish(builder.build());
+        } finally {
+            added.forEach(MDC::remove);
         }
     }
 

@@ -1,4 +1,4 @@
-package com.adhar.kit.batch.metrics;
+package com.adhar.kit.batch.telemetry;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -20,31 +20,31 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link BatchMetrics}.
+ * Unit tests for {@link BatchProgressMetrics}.
  */
 class BatchMetricsTest {
 
     private static final Instant NOW = Instant.parse("2026-11-06T12:00:00Z");
 
     private MeterRegistry meterRegistry;
-    private BatchMetrics batchMetrics;
+    private BatchProgressMetrics batchMetrics;
 
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
-        batchMetrics = new BatchMetrics(meterRegistry, Clock.fixed(NOW, ZoneOffset.UTC));
+        batchMetrics = new BatchProgressMetrics(meterRegistry, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private JobExecution execution(String trigger) {
         var parameters = new JobParametersBuilder();
         if (trigger != null) {
-            parameters.addString(BatchMetrics.TRIGGER_PARAMETER, trigger, false);
+            parameters.addString(BatchProgressMetrics.TRIGGER_PARAMETER, trigger, false);
         }
         return new JobExecution(1L, new JobInstance(1L, "importJob"), parameters.toJobParameters());
     }
 
     private double run(String trigger) {
-        return meterRegistry.get(BatchMetrics.RUN).tag("job", "importJob").tag("trigger", trigger).gauge().value();
+        return meterRegistry.get(BatchProgressMetrics.RUN).tag("job", "importJob").tag("trigger", trigger).gauge().value();
     }
 
     // ----------------------------------------------------------------
@@ -121,7 +121,7 @@ class BatchMetricsTest {
 
             batchMetrics.chunkCommitted(step, 10);
 
-            assertThat(meterRegistry.get(BatchMetrics.LAST_COMMIT).tag("job", "importJob").tag("step", "step1")
+            assertThat(meterRegistry.get(BatchProgressMetrics.LAST_COMMIT).tag("job", "importJob").tag("step", "step1")
                     .gauge().value()).isEqualTo((double) NOW.getEpochSecond());
         }
     }
@@ -140,7 +140,7 @@ class BatchMetricsTest {
             batchMetrics.recordDeadLettered("importJob", "step1", 2);
             batchMetrics.recordDeadLettered("importJob", "step1", 3);
 
-            assertThat(meterRegistry.get(BatchMetrics.DEAD_LETTERED).tag("job", "importJob").tag("step", "step1")
+            assertThat(meterRegistry.get(BatchProgressMetrics.DEAD_LETTERED).tag("job", "importJob").tag("step", "step1")
                     .counter().count()).isEqualTo(5.0);
         }
     }
@@ -157,6 +157,6 @@ class BatchMetricsTest {
         batchMetrics.jobFinished(execution);
 
         assertThat(meterRegistry.getMeters()).extracting(meter -> meter.getId().getName())
-                .containsOnly(BatchMetrics.RUN);
+                .containsOnly(BatchProgressMetrics.RUN);
     }
 }

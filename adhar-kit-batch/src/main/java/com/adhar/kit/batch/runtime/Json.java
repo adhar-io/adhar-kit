@@ -69,7 +69,9 @@ public final class Json {
         StringBuilder out = new StringBuilder(value.length());
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
-            if (Character.isHighSurrogate(c) && i + 1 < value.length() && Character.isLowSurrogate(value.charAt(i + 1))) {
+            boolean pair = Character.isHighSurrogate(c) && i + 1 < value.length()
+                    && Character.isLowSurrogate(value.charAt(i + 1));
+            if (pair) {
                 out.append(c).append(value.charAt(++i));
             } else {
                 out.append(Character.isSurrogate(c) ? '�' : c);

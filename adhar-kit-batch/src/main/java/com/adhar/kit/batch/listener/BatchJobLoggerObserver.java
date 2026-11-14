@@ -2,6 +2,7 @@ package com.adhar.kit.batch.listener;
 
 import com.adhar.adharkit.logging.batch.BatchJobLogger;
 import com.adhar.adharkit.logging.batch.BatchJobRun;
+import com.adhar.kit.batch.telemetry.BatchMdc;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.step.StepExecution;
@@ -35,7 +36,8 @@ public class BatchJobLoggerObserver implements BatchRunObserver {
 
     @Override
     public void jobStarted(JobExecution execution) {
-        runs.put(execution.getId(), batchJobLogger.startJob(execution.getJobInstance().getJobName()));
+        runs.put(execution.getId(), batchJobLogger.startJob(execution.getJobInstance().getJobName(),
+                BatchMdc.jobContext(execution)));
     }
 
     @Override

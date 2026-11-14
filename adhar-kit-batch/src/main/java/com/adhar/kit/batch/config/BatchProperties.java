@@ -48,12 +48,16 @@ import java.util.regex.Pattern;
  *       enabled: false
  *       time-zone: UTC
  *       misfire-threshold: 10m
- *       lock: jdbc
+ *       lock: jdbc                  # jdbc | none
+ *       lock-lease: 2m              # renewed every lock-renew-interval while the run lasts
+ *       lock-renew-interval: 30s
+ *       pool-size: 2
  *       jobs:
  *         importJob: "0 0 2 * * *"
  * }</pre>
  *
- * <p>Earlier keys are gone, not aliased: {@code table-prefix} is {@code repository.table-prefix},
+ * <p>{@code partition.*} (remote partitioning) arrives with Phase 2. Earlier keys are gone, not
+ * aliased: {@code table-prefix} is {@code repository.table-prefix},
  * {@code default-chunk-size} is {@code chunk.size}, {@code default-page-size} is
  * {@code page.size}, {@code max-retries} is {@code retry.max-attempts};
  * {@code max-concurrent-jobs} (the asynchronous launcher) and {@code retry-on-failure} were

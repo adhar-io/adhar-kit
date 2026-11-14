@@ -1,7 +1,7 @@
 package com.adhar.kit.batch.fault;
 
 import com.adhar.kit.batch.listener.BatchRunObserver.SkipPhase;
-import com.adhar.kit.batch.metrics.BatchMetrics;
+import com.adhar.kit.batch.telemetry.BatchProgressMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.job.parameters.JobParameter;
 import org.springframework.batch.core.job.parameters.JobParameters;
@@ -40,7 +40,7 @@ public class DeadLetterSkipListener implements SkipListener<Object, Object> {
 
     private final DeadLetterSink sink;
     private final Function<Object, String> serializer;
-    private final BatchMetrics metrics;
+    private final BatchProgressMetrics metrics;
 
     /**
      * @param sink       where the items go
@@ -48,7 +48,7 @@ public class DeadLetterSkipListener implements SkipListener<Object, Object> {
      *                   by type only
      * @param metrics    the kit's meters, may be {@code null}
      */
-    public DeadLetterSkipListener(DeadLetterSink sink, Function<Object, String> serializer, BatchMetrics metrics) {
+    public DeadLetterSkipListener(DeadLetterSink sink, Function<Object, String> serializer, BatchProgressMetrics metrics) {
         this.sink = sink;
         this.serializer = serializer;
         this.metrics = metrics;
@@ -110,10 +110,12 @@ public class DeadLetterSkipListener implements SkipListener<Object, Object> {
     }
 
     /**
+     * The business date of a run, as the dead-letter table and the log context record it.
+     *
      * @param parameters a run's parameters
-     * @return {@value #BUSINESS_DATE} when it is a date, else the first identifying date
+     * @return {@value #BUSINESS_DATE} when it is a date, else the first identifying date, else {@code null}
      */
-    static LocalDate businessDate(JobParameters parameters) {
+    public static LocalDate businessDate(JobParameters parameters) {
         JobParameter<?> named = parameters.getParameter(BUSINESS_DATE);
         if (named != null && named.value() instanceof LocalDate date) {
             return date;

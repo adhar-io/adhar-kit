@@ -1,11 +1,10 @@
 package com.adhar.adharkit.logging.batch;
 
-import com.adhar.adharkit.logging.event.AppLogEvent;
-import com.adhar.adharkit.logging.event.AppLogEventOutcome;
 import com.adhar.adharkit.logging.event.AppLogEventPublisher;
 import com.adhar.adharkit.logging.event.AppLogEventType;
 import com.adhar.adharkit.logging.properties.AdharLoggingProperties;
 
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -59,17 +58,22 @@ public class BatchJobLogger {
      * @return the run handle used to record progress and completion
      */
     public BatchJobRun startJob(String jobName) {
+        return startJob(jobName, Map.of());
+    }
+
+    /**
+     * Starts a tracked batch job run whose events are logged with the given MDC entries (e.g.
+     * {@code batch.job}, {@code batch.execution}, {@code k8s.job}), and publishes its STARTED event.
+     *
+     * @param jobName the job name
+     * @param context MDC entries for every event of the run; a key the logging thread already
+     *                carries keeps its value
+     * @return the run handle used to record progress and completion
+     */
+    public BatchJobRun startJob(String jobName, Map<String, String> context) {
         BatchJobRun run = new BatchJobRun(jobName, UUID.randomUUID().toString(),
-                properties.getBatch(), publisher);
-        if (properties.getBatch().isEnabled()) {
-            publisher.publish(AppLogEvent.builder()
-                    .type(AppLogEventType.BATCH)
-                    .category("batch")
-                    .name(jobName)
-                    .outcome(AppLogEventOutcome.STARTED)
-                    .metadata("jobId", run.getJobId())
-                    .build());
-        }
+                properties.getBatch(), publisher, context);
+        run.started();
         return run;
     }
 }

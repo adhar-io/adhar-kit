@@ -1,4 +1,4 @@
-package com.adhar.kit.batch.metrics;
+package com.adhar.kit.batch.telemetry;
 
 import com.adhar.kit.batch.listener.BatchRunObserver;
 import io.micrometer.core.instrument.Counter;
@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * @author Adhar Platform Team
  * @since 0.1.0
  */
-public class BatchMetrics implements BatchRunObserver {
+public class BatchProgressMetrics implements BatchRunObserver {
 
     /** Running executions. */
     public static final String RUN = "adhar.batch.run";
@@ -63,7 +63,7 @@ public class BatchMetrics implements BatchRunObserver {
     /**
      * @param registry the application's meter registry
      */
-    public BatchMetrics(MeterRegistry registry) {
+    public BatchProgressMetrics(MeterRegistry registry) {
         this(registry, Clock.systemUTC());
     }
 
@@ -71,7 +71,7 @@ public class BatchMetrics implements BatchRunObserver {
      * @param registry the application's meter registry
      * @param clock    the time source of {@value #LAST_COMMIT}
      */
-    public BatchMetrics(MeterRegistry registry, Clock clock) {
+    public BatchProgressMetrics(MeterRegistry registry, Clock clock) {
         this.registry = registry;
         this.clock = clock;
     }

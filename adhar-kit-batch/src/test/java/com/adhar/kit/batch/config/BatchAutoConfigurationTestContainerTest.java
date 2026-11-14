@@ -4,7 +4,7 @@ import com.adhar.kit.batch.BatchFacade;
 import com.adhar.kit.batch.listener.BatchListenerAttacher;
 import com.adhar.kit.batch.lock.JdbcSchedulerLock;
 import com.adhar.kit.batch.lock.SchedulerLock;
-import com.adhar.kit.batch.metrics.BatchMetrics;
+import com.adhar.kit.batch.telemetry.BatchProgressMetrics;
 import com.adhar.kit.batch.operator.BatchOperator;
 import com.adhar.kit.batch.repository.BatchSchemaMigrator;
 import com.adhar.kit.batch.repository.ResourcelessRepositoryGuard;
@@ -117,7 +117,7 @@ class BatchAutoConfigurationTestContainerTest {
         assertThat(((JdbcSchedulerLock) lock).getTable()).isEqualTo("batch.ADHAR_SCHEDULER_LOCK");
         assertThat(lock.tryLock("a01-lock", java.time.Duration.ofSeconds(30))).isTrue();
         lock.unlock("a01-lock");
-        assertThat(context.getBean(BatchMetrics.class)).isNotNull();
+        assertThat(context.getBean(BatchProgressMetrics.class)).isNotNull();
         assertThat(context.getBean(AdharSteps.class)).isNotNull();
         assertThat(BatchFacade.getInstance().getOperator()).isSameAs(batchOperator);
 
@@ -125,9 +125,9 @@ class BatchAutoConfigurationTestContainerTest {
         batchOperator.start(importJob, new JobParametersBuilder().addString("run", "a01-gauges").toJobParameters());
 
         MeterRegistry registry = context.getBean(MeterRegistry.class);
-        assertThat(registry.find(BatchMetrics.RUN).tag("job", TestJobs.IMPORT_JOB).gauge()).isNotNull();
-        assertThat(registry.find(BatchMetrics.LAST_COMMIT).tag("step", "importStep").gauge()).isNotNull();
-        assertThat(registry.find(BatchMetrics.LAST_COMMIT).tag("step", "importStep").gauge().value()).isPositive();
+        assertThat(registry.find(BatchProgressMetrics.RUN).tag("job", TestJobs.IMPORT_JOB).gauge()).isNotNull();
+        assertThat(registry.find(BatchProgressMetrics.LAST_COMMIT).tag("step", "importStep").gauge()).isNotNull();
+        assertThat(registry.find(BatchProgressMetrics.LAST_COMMIT).tag("step", "importStep").gauge().value()).isPositive();
     }
 
     @Test

@@ -112,6 +112,21 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- OTLP push (optional): short-lived pods (batch runs) push their metrics to Alloy instead
+             of waiting for a scrape they may not live to see; see OtlpMetricsEnvironmentPostProcessor.
+             An application adds both this and spring-boot-opentelemetry. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-otlp</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- Spring Boot 4's OTLP metrics export reads OpenTelemetryProperties (resource attributes)
+             and is skipped without this module: the registry jar alone exports nothing. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-opentelemetry</artifactId>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-core</artifactId>

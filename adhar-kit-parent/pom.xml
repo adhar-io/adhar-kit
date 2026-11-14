@@ -110,6 +110,7 @@
         <!-- ===================================================================== -->
         <!-- Multi-cloud support: AWS, Azure, GCP -->
         <aws-sdk.version>2.46.14</aws-sdk.version>
+        <spring-cloud-aws.version>4.2.2</spring-cloud-aws.version>
         <azure-sdk.version>1.18.0</azure-sdk.version>
         <google-cloud.version>26.84.0</google-cloud.version>
 
@@ -360,6 +361,14 @@
                 <version>${aws-sdk.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- S3 Resources for adhar-kit-batch's S3 readers and writers (RustFS, path-style).
+                 Not the Spring Cloud AWS BOM: its awssdk import would lose to the one above
+                 anyway, and the batch spike (S3ResourceSpikeTest) ran on this pair. -->
+            <dependency>
+                <groupId>io.awspring.cloud</groupId>
+                <artifactId>spring-cloud-aws-starter-s3</artifactId>
+                <version>${spring-cloud-aws.version}</version>
             </dependency>
 
             <!-- Azure SDK - Microsoft Azure services support - Optional -->

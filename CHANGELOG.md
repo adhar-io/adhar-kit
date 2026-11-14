@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **adhar-kit-batch** — Spring Batch 6 as the platform runs it (design 0025, Phases 0 and 1; the
+  version stays 0.1.0). A JDBC JobRepository in its own PostgreSQL schema `batch`, migrated by the
+  kit's Flyway (`V6_0_0`, `V6_0_1`) and refused in-memory on the platform; `AdharSteps` over
+  Batch 6's `ChunkOrientedStepBuilder` on the repository's transaction manager, with
+  `FaultTolerance` retry/skip presets and a JDBC dead-letter table; the Kubernetes runner
+  (`AdharBatchApplication`, `AdharBatchRunner`): one job per pod from `ADHAR_BATCH_*`, the
+  scheduled time and business date from the owner Job (never `now()`), exit codes 0–7 for the
+  Job's failure policy, a termination summary (v1, ≤ 3,584 bytes), an execution lease with
+  heartbeat and stale-owner recovery, and a graceful stop that records STOPPED on SIGTERM;
+  `@AdharBatchJob`/`@JobParam` parameter declarations, validated by the runner, with secret-like
+  names refused and naming v1 (`RunIdentity`) shared with the CLI and the Console; in-JVM
+  `BatchRunEvent`s; `KeysetPagingItemReaderBuilder` (checks the key is unique and non-null),
+  `PostgresUpsertItemWriterBuilder` (`ON CONFLICT … DO UPDATE`), JSON Lines readers and writers,
+  S3 readers and writers on Spring Cloud AWS 4.2 (RustFS, path-style; one object per committed
+  chunk, a restart over changed input refused); `LocalPartitioning`, `SqlKeyRangePartitioner`
+  and `ObjectPrefixPartitioner`; `BatchMdc` (the run in every log line) and
+  `ItemObservationTracingFilter` (no span per item). The embedded scheduler launches
+  synchronously under a renewed JDBC lock with the nominal fire time as identity. Usage and the
+  full property reference are in `adhar-kit-batch/README.md`.
+- **adhar-kit-test-commons** — `@AdharBatchTest` (the real auto-configuration on a fresh database
+  of a PostgreSQL 18.4 container, `@SpringBatchTest`, optional LocalStack S3), `RestartScenario`
+  (fail at item N, restart, assert the same instance resumed and every row was written once),
+  `FailureInjector` and `BatchContractAssertions` (`@AdharBatchJob` against
+  `deploy/base/batchjob.yaml`, the 1Gi JVM floor, grace above the shutdown timeout).
+  `PostgresTestContainer.platformInstance()` starts `postgres:18.4`.
+- **adhar-kit-metrics** — OTLP metrics push: with `micrometer-registry-otlp` and
+  `spring-boot-opentelemetry` on the classpath, `OTEL_EXPORTER_OTLP_[METRICS_]ENDPOINT`,
+  `_HEADERS`, `OTEL_METRICS_EXPORTER` and `OTEL_METRIC_EXPORT_INTERVAL` configure
+  `management.otlp.metrics.export.*`. Export stays off without an endpoint, for an exporter list
+  without `otlp`, and for `grpc` (Micrometer speaks `http/protobuf`). A pod shorter than one
+  scrape interval is still seen: the registry pushes when the context closes.
+- **adhar-kit-logging** — `BatchJobLogger.startJob(name, context)`: every BATCH event of the run
+  is logged with the context (`batch.*`, `k8s.job`) in the MDC, from whichever thread logs it.
 - **adhar-kit-tracing** — outbound calls are traced and carry the trace context. The kit now
   supplies the `Propagator` (and depends on `spring-boot-micrometer-tracing`), so Boot's tracing
   observation handlers record into the kit's SDK: `RestClient`/`RestTemplate`/`WebClient` calls,
@@ -50,6 +83,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **adhar-kit-batch** — `adhar-kit-starter` carries it as optional: a service without jobs gets
+  no batch beans and no batch tables. Properties renamed directly, without aliases (the kit
+  deprecates nothing): `table-prefix` → `repository.table-prefix`, `default-chunk-size` →
+  `chunk.size`, `default-page-size` → `page.size`, `max-retries` → `retry.max-attempts`;
+  `max-concurrent-jobs` and `retry-on-failure` are removed with the asynchronous launcher.
+  `RetryableStepBuilder` is replaced by `AdharSteps`/`FaultTolerance`, `BatchOperator` works on
+  `JobExecution`s (and gains `recover`), the duplicate `adhar.batch.job.*`/`adhar.batch.step.*`
+  meters are gone (Spring Batch's `spring.batch.*` remain), and `metrics.BatchMetrics` is
+  `telemetry.BatchProgressMetrics`.
 - **adhar-kit-commons** — `ApiVersionInterceptor` is no longer the versioning mechanism: it
   acts only outside `/api/v<major>`, where its legacy headers and the opt-in
   `validate-request-version` check are unchanged. The contract check under `/api/v<major>` is

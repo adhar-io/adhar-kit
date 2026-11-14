@@ -71,6 +71,14 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Micrometer Tracing (optional - ItemObservationTracingFilter keeps per-item observations out
+             of the traces). adhar-kit-logging's auto-configuration also names Tracer in its bean signatures. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- JPA (optional - for JpaItemReaderBuilder) -->
         <dependency>
             <groupId>jakarta.persistence</groupId>
@@ -82,6 +90,14 @@
         <dependency>
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- S3 / RustFS I/O (optional - for S3ItemReaderBuilder, S3ItemWriterBuilder and
+             ObjectPrefixPartitioner). A job that reads a bucket adds the starter itself. -->
+        <dependency>
+            <groupId>io.awspring.cloud</groupId>
+            <artifactId>spring-cloud-aws-starter-s3</artifactId>
             <optional>true</optional>
         </dependency>
 
@@ -154,11 +170,24 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- adhar-kit-logging's auto-configuration names Tracer in its bean signatures. A service has
-             the class through adhar-kit-tracing; without it the test application could not start. -->
+        <!-- Spring Boot's tracing auto-configuration with an in-memory tracer: the span-count
+             contract (a 10,000-item run is fewer than 50 spans) runs through Boot's real handler grouping. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-micrometer-tracing</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-tracing</artifactId>
+            <artifactId>micrometer-tracing-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- The Kubernetes runner reads its owner Job and pod with the JDK HttpClient; its tests
+             serve those reads from WireMock instead of an API server. -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -190,6 +219,11 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+            <!-- *IT: the runner's exit codes and its SIGTERM path, proven in forked JVMs. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
             </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

@@ -2,6 +2,7 @@ package com.adhar.kit.batch.config;
 
 import com.adhar.adharkit.logging.batch.BatchJobLogger;
 import com.adhar.kit.batch.BatchFacadeRegistrar;
+import com.adhar.kit.batch.event.BatchRunEventPublisher;
 import com.adhar.kit.batch.fault.DeadLetterSink;
 import com.adhar.kit.batch.fault.DeadLetterSkipListener;
 import com.adhar.kit.batch.fault.JdbcDeadLetterSink;
@@ -14,7 +15,7 @@ import com.adhar.kit.batch.listener.BatchListenerAttacher;
 import com.adhar.kit.batch.listener.BatchRunObserver;
 import com.adhar.kit.batch.lock.JdbcSchedulerLock;
 import com.adhar.kit.batch.lock.SchedulerLock;
-import com.adhar.kit.batch.metrics.BatchMetrics;
+import com.adhar.kit.batch.telemetry.BatchProgressMetrics;
 import com.adhar.kit.batch.operator.BatchOperator;
 import com.adhar.kit.batch.operator.JobResolver;
 import com.adhar.kit.batch.params.JobParameterSpecRegistry;
@@ -22,9 +23,17 @@ import com.adhar.kit.batch.params.JobParametersResolver;
 import com.adhar.kit.batch.repository.AdharBatchRepositoryConfiguration;
 import com.adhar.kit.batch.repository.BatchRepositoryLayout;
 import com.adhar.kit.batch.repository.ResourcelessRepositoryGuard;
+import com.adhar.kit.batch.runtime.AdharBatchRunner;
+import com.adhar.kit.batch.runtime.BatchExitCodeGenerator;
+import com.adhar.kit.batch.runtime.ExecutionLease;
+import com.adhar.kit.batch.runtime.GracefulStopLifecycle;
+import com.adhar.kit.batch.runtime.JdbcExecutionLease;
+import com.adhar.kit.batch.runtime.KubernetesOwnerLookup;
+import com.adhar.kit.batch.runtime.RecoveryPolicy;
+import com.adhar.kit.batch.runtime.RunContextResolver;
+import com.adhar.kit.batch.runtime.TerminationSummaryWriter;
 import com.adhar.kit.batch.scheduler.BatchScheduler;
 import com.adhar.kit.batch.step.AdharSteps;
-import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.job.Job;
@@ -64,9 +73,10 @@ import java.time.Clock;
  *
  * <p>It provides the JDBC repository management ({@link AdharBatchRepositoryConfiguration}), the
  * refusal of an in-memory repository, {@link AdharSteps}, the kit's listeners attached to every
- * job and step, {@link BatchOperator}, {@link BatchMetrics}, a {@link SchedulerLock}, the
+ * job and step, {@link BatchOperator}, a {@link SchedulerLock}, the
  * {@link com.adhar.kit.batch.BatchFacade} and, when {@code adhar.batch.scheduler.enabled}, the
- * embedded {@link BatchScheduler}.</p>
+ * embedded {@link BatchScheduler}. Metrics, the log context and the trace filter are
+ * {@link com.adhar.kit.batch.telemetry.BatchTelemetryAutoConfiguration}.</p>
  *
  * @author Adhar Platform Team
  * @since 0.1.0
@@ -169,17 +179,6 @@ public class BatchAutoConfiguration {
     }
 
     /**
-     * @param meterRegistry the application's meter registry
-     * @return the kit's gauges and counter
-     */
-    @Bean
-    @ConditionalOnMissingBean
-    @ConditionalOnBean(MeterRegistry.class)
-    public BatchMetrics batchMetrics(MeterRegistry meterRegistry) {
-        return new BatchMetrics(meterRegistry);
-    }
-
-    /**
      * @param jobRepository the JobRepository
      * @param properties    {@code adhar.batch.*}
      * @return the guard refusing an in-memory JobRepository
@@ -198,6 +197,18 @@ public class BatchAutoConfiguration {
     @ConditionalOnMissingBean
     public JobResolver batchJobResolver(ListableBeanFactory beanFactory) {
         return JobResolver.of(beanFactory);
+    }
+
+    /**
+     * @param publisher the application's event publisher
+     * @param specs     the declared parameters, for the sensitive names
+     * @return publishes {@link com.adhar.kit.batch.event.BatchRunEvent}s for every run
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public BatchRunEventPublisher batchRunEventPublisher(ApplicationEventPublisher publisher,
+                                                         ObjectProvider<JobParameterSpecRegistry> specs) {
+        return new BatchRunEventPublisher(publisher, specs);
     }
 
     /**
@@ -315,8 +326,86 @@ public class BatchAutoConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        DeadLetterSkipListener deadLetterSkipListener(DeadLetterSink sink, ObjectProvider<BatchMetrics> metrics) {
+        DeadLetterSkipListener deadLetterSkipListener(DeadLetterSink sink, ObjectProvider<BatchProgressMetrics> metrics) {
             return new DeadLetterSkipListener(sink, DeadLetterSkipListener.defaultSerializer(), metrics.getIfAvailable());
+        }
+    }
+
+    /**
+     * Kubernetes mode ({@code adhar.batch.mode=kubernetes}, resolved by
+     * {@link BatchRuntimeEnvironmentPostProcessor}): the runner of one job per pod, its lease,
+     * recovery, graceful stop, termination summary and exit code (design 0025 §5.5).
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnProperty(name = BatchRuntimeEnvironmentPostProcessor.MODE_PROPERTY, havingValue = "kubernetes")
+    static class KubernetesRunConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        KubernetesOwnerLookup kubernetesOwnerLookup() {
+            return KubernetesOwnerLookup.inCluster(System::getenv, KubernetesOwnerLookup.SERVICE_ACCOUNT);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        RunContextResolver runContextResolver(Environment environment, KubernetesOwnerLookup lookup,
+                                              BatchProperties properties) {
+            return new RunContextResolver(environment::getProperty, lookup, properties);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnBean(DataSource.class)
+        ExecutionLease executionLease(DataSource dataSource, @BatchDataSource ObjectProvider<DataSource> batchDataSource,
+                                      ObjectProvider<BatchRepositoryLayout> layout) {
+            BatchRepositoryLayout resolved = layout.getIfAvailable();
+            String table = resolved != null ? resolved.kitTable(BatchRepositoryLayout.EXECUTION_LEASE_TABLE)
+                    : BatchRepositoryLayout.EXECUTION_LEASE_TABLE;
+            return new JdbcExecutionLease(new JdbcTemplate(batchDataSource.getIfAvailable(() -> dataSource)), table);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        GracefulStopLifecycle gracefulStopLifecycle(ObjectProvider<JobOperator> jobOperator,
+                                                    BatchProperties properties) {
+            return new GracefulStopLifecycle(jobOperator, properties.getShutdown().getTimeout());
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        TerminationSummaryWriter terminationSummaryWriter() {
+            return new TerminationSummaryWriter(TerminationSummaryWriter.TERMINATION_LOG, System.out);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        BatchExitCodeGenerator batchExitCodeGenerator() {
+            return new BatchExitCodeGenerator();
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        AdharBatchRunner adharBatchRunner(ObjectProvider<JobRepository> jobRepository,
+                                          ObjectProvider<JobOperator> jobOperator, ObjectProvider<JobResolver> jobResolver,
+                                          ObjectProvider<JobParameterSpecRegistry> specs,
+                                          ObjectProvider<JobParametersResolver> parametersResolver,
+                                          ObjectProvider<RunContextResolver> contextResolver,
+                                          ObjectProvider<KubernetesOwnerLookup> lookup,
+                                          ObjectProvider<ExecutionLease> lease,
+                                          ObjectProvider<GracefulStopLifecycle> stop,
+                                          ObjectProvider<TerminationSummaryWriter> summary,
+                                          ObjectProvider<BatchExitCodeGenerator> exitCodes,
+                                          ObjectProvider<BatchRunEventPublisher> events,
+                                          BatchProperties properties, Environment environment) {
+            return new AdharBatchRunner(() -> {
+                ExecutionLease leases = lease.getIfAvailable(ExecutionLease::none);
+                return new AdharBatchRunner.Collaborators(jobRepository.getObject(), jobOperator.getObject(),
+                        jobResolver.getObject(), specs.getObject(), parametersResolver.getObject(),
+                        contextResolver.getObject(), new RecoveryPolicy(leases, lookup.getObject(),
+                        properties.getRecovery().getStaleAfter(), Clock.systemUTC()), leases, stop.getObject(),
+                        summary.getObject(), exitCodes.getObject(), events.getObject(),
+                        AdharBatchRunner.Collaborators.heartbeatThread());
+            }, properties, environment::getProperty, Clock.systemUTC(), AdharBatchRunner.Sleeper.threadSleep());
         }
     }
 

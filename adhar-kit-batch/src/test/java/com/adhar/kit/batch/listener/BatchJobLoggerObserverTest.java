@@ -3,6 +3,7 @@ package com.adhar.kit.batch.listener;
 import com.adhar.adharkit.logging.batch.BatchJobLogger;
 import com.adhar.adharkit.logging.batch.BatchJobRun;
 import com.adhar.kit.batch.listener.BatchRunObserver.SkipPhase;
+import com.adhar.kit.batch.telemetry.BatchMdc;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,11 @@ import org.springframework.batch.core.job.JobInstance;
 import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.step.StepExecution;
 
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -36,7 +41,7 @@ class BatchJobLoggerObserverTest {
 
     @BeforeEach
     void setUp() {
-        when(logger.startJob("importJob")).thenReturn(run);
+        when(logger.startJob(eq("importJob"), anyMap())).thenReturn(run);
     }
 
     @Test
@@ -44,7 +49,8 @@ class BatchJobLoggerObserverTest {
     void tracksTheRun() {
         observer.jobStarted(job);
 
-        verify(logger).startJob("importJob");
+        verify(logger).startJob("importJob", Map.of(BatchMdc.JOB, "importJob", BatchMdc.INSTANCE, "1",
+                BatchMdc.EXECUTION, "10"));
         assertThat(observer.trackedRuns()).isEqualTo(1);
 
         job.setStatus(BatchStatus.COMPLETED);
@@ -154,7 +160,7 @@ class BatchJobLoggerObserverTest {
     void concurrentExecutions() {
         var otherJob = new JobExecution(11L, new JobInstance(2L, "otherJob"), new JobParameters());
         BatchJobRun otherRun = mock(BatchJobRun.class);
-        when(logger.startJob("otherJob")).thenReturn(otherRun);
+        when(logger.startJob(eq("otherJob"), anyMap())).thenReturn(otherRun);
         observer.jobStarted(job);
         observer.jobStarted(otherJob);
 

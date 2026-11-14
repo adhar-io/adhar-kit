@@ -107,7 +107,7 @@ class DeadLetterSkipListenerTest {
         });
         StepExecution step = onlyStep(execution);
         assertThat(step.getExecutionContext().getLong(DeadLetterSkipListener.COUNT_KEY)).isEqualTo(1);
-        assertThat(jobRepository.getStepExecution(execution.getId(), step.getId()).getExecutionContext()
+        assertThat(onlyStep(jobRepository.getJobExecution(execution.getId())).getExecutionContext()
                 .getLong(DeadLetterSkipListener.COUNT_KEY)).as("persisted with the step").isEqualTo(1);
         assertThat(meterRegistry.get("adhar.batch.items.dead.lettered").tag("job", "dlqJob").counter().count())
                 .isEqualTo(1.0);

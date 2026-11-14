@@ -9,9 +9,12 @@ import com.adhar.adharkit.logging.masking.LogDataMasker;
 import com.adhar.adharkit.logging.properties.AdharLoggingProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.slf4j.event.Level;
 
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -43,6 +46,35 @@ class BatchJobLoggerTest {
         assertThat(event.getType()).isEqualTo(AppLogEventType.BATCH);
         assertThat(event.getOutcome()).isEqualTo(AppLogEventOutcome.STARTED);
         assertThat(event.getMetadata()).containsEntry("jobId", run.getJobId());
+    }
+
+    @Test
+    void eventsOfARunWithAContextAreLoggedWithItInTheMdcFromAnyThread() throws Exception {
+        List<Map<String, String>> mdcAtLog = new CopyOnWriteArrayList<>();
+        BatchJobLogger logger = new BatchJobLogger(properties, new AppLogEventPublisher(properties,
+                new LogDataMasker(properties.getMasking()), List.of(event -> mdcAtLog.add(mdc()))));
+        MDC.clear(); // other tests of this JVM leave entries on the main thread
+        MDC.put("batch.step", "outer");
+
+        BatchJobRun run = logger.startJob("importJob", Map.of("batch.job", "importJob", "batch.execution", "97",
+                "batch.step", "fromContext"));
+        Thread worker = new Thread(() -> run.startStep("worker:partition1"));
+        worker.start();
+        worker.join();
+        run.complete();
+
+        assertThat(mdcAtLog).hasSize(4).allSatisfy(entries -> assertThat(entries)
+                .containsEntry("batch.job", "importJob").containsEntry("batch.execution", "97"));
+        assertThat(mdcAtLog.getFirst()).containsEntry("batch.step", "outer");
+        assertThat(mdcAtLog.get(1)).containsEntry("batch.step", "fromContext");
+        assertThat(mdc()).containsExactly(Map.entry("batch.step", "outer"));
+        assertThat(run.getContext()).hasSize(3);
+        MDC.clear();
+    }
+
+    private static Map<String, String> mdc() {
+        Map<String, String> copy = MDC.getCopyOfContextMap();
+        return copy == null ? Map.of() : copy;
     }
 
     @Test

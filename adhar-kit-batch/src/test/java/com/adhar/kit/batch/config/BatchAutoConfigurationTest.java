@@ -5,7 +5,10 @@ import com.adhar.kit.batch.listener.AdharJobExecutionListener;
 import com.adhar.kit.batch.listener.AdharSkipListener;
 import com.adhar.kit.batch.listener.AdharStepExecutionListener;
 import com.adhar.kit.batch.lock.SchedulerLock;
-import com.adhar.kit.batch.metrics.BatchMetrics;
+import com.adhar.kit.batch.telemetry.BatchMdc;
+import com.adhar.kit.batch.telemetry.BatchProgressMetrics;
+import com.adhar.kit.batch.telemetry.BatchTelemetryAutoConfiguration;
+import com.adhar.kit.batch.telemetry.ItemObservationTracingFilter;
 import com.adhar.kit.batch.operator.BatchOperator;
 import com.adhar.kit.batch.scheduler.BatchScheduler;
 import com.adhar.kit.batch.step.AdharSteps;
@@ -36,7 +39,7 @@ import static org.mockito.Mockito.mock;
 class BatchAutoConfigurationTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(BatchAutoConfiguration.class));
+            .withConfiguration(AutoConfigurations.of(BatchAutoConfiguration.class, BatchTelemetryAutoConfiguration.class));
 
     private final ApplicationContextRunner withJob = runner
             .withUserConfiguration(SupportConfig.class, JobConfig.class);
@@ -53,7 +56,9 @@ class BatchAutoConfigurationTest {
             assertThat(context).hasSingleBean(AdharSteps.class);
             assertThat(context).hasSingleBean(BatchOperator.class);
             assertThat(context).hasSingleBean(SchedulerLock.class);
-            assertThat(context).hasSingleBean(BatchMetrics.class);
+            assertThat(context).hasSingleBean(BatchProgressMetrics.class);
+            assertThat(context).hasSingleBean(BatchMdc.class);
+            assertThat(context).hasSingleBean(ItemObservationTracingFilter.class);
         });
     }
 
@@ -66,7 +71,16 @@ class BatchAutoConfigurationTest {
             assertThat(context).doesNotHaveBean(AdharJobExecutionListener.class);
             assertThat(context).doesNotHaveBean(BatchOperator.class);
             assertThat(context).doesNotHaveBean(SchedulerLock.class);
+            assertThat(context).doesNotHaveBean(BatchMdc.class);
+            assertThat(context).doesNotHaveBean(ItemObservationTracingFilter.class);
         });
+    }
+
+    @Test
+    @DisplayName("adhar.batch.telemetry.trace-items=true removes the per-item trace filter")
+    void traceItemsRemovesTheFilter() {
+        withJob.withPropertyValues("adhar.batch.telemetry.trace-items=true").run(context ->
+                assertThat(context).doesNotHaveBean(ItemObservationTracingFilter.class).hasSingleBean(BatchMdc.class));
     }
 
     @Test

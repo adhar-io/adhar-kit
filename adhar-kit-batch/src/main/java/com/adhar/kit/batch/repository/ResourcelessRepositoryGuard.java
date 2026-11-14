@@ -55,7 +55,7 @@ public class ResourcelessRepositoryGuard implements SmartInitializingSingleton {
      * @param repository a JobRepository, possibly behind a proxy
      * @return whether it keeps its state in memory only
      */
-    static boolean isResourceless(JobRepository repository) {
+    public static boolean isResourceless(JobRepository repository) {
         return repository instanceof ResourcelessJobRepository
                 || ResourcelessJobRepository.class.isAssignableFrom(AopUtils.getTargetClass(repository));
     }

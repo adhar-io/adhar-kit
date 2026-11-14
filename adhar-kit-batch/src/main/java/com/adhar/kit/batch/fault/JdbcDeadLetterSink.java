@@ -35,7 +35,8 @@ public class JdbcDeadLetterSink implements DeadLetterSink {
     public void write(Entry entry) {
         jdbc.update(sql, entry.jobExecutionId(), cut(entry.jobName(), 100), cut(entry.stepName(), 100),
                 entry.businessDate() == null ? null : Date.valueOf(entry.businessDate()), entry.phase(),
-                cut(entry.itemType(), 500), entry.item(), cut(entry.errorClass(), 500), cut(entry.errorMessage(), 2500));
+                cut(entry.itemType(), 500), entry.item(), cut(entry.errorClass(), 500),
+                cut(entry.errorMessage(), 2500));
     }
 
     /**

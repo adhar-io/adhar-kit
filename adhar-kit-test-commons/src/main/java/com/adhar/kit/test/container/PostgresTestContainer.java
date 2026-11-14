@@ -21,7 +21,11 @@ public class PostgresTestContainer {
     private static final String DEFAULT_USERNAME = "test";
     private static final String DEFAULT_PASSWORD = "test";
 
+    /** The PostgreSQL the platform runs (CNPG), for tests that must behave as on a cluster. */
+    public static final String PLATFORM_IMAGE = "postgres:18.4";
+
     private static PostgreSQLContainer<?> container;
+    private static PostgreSQLContainer<?> platform;
 
     /**
      * Get a singleton PostgreSQL container instance.
@@ -35,6 +39,26 @@ public class PostgresTestContainer {
                     .withReuse(true);
         }
         return container;
+    }
+
+    /**
+     * A singleton container of {@link #PLATFORM_IMAGE}, started on first use and never reused
+     * across JVMs (app-ci runs it under kubedock). Used by {@code @AdharBatchTest}.
+     *
+     * @return the started container
+     */
+    public static synchronized PostgreSQLContainer<?> platformInstance() {
+        if (platform == null) {
+            PostgreSQLContainer<?> started = new PostgreSQLContainer<>(DockerImageName.parse(PLATFORM_IMAGE)
+                    .asCompatibleSubstituteFor("postgres"))
+                    .withDatabaseName(DEFAULT_DATABASE)
+                    .withUsername(DEFAULT_USERNAME)
+                    .withPassword(DEFAULT_PASSWORD);
+            started.start();
+            log.info("PostgreSQL {} container started: {}", PLATFORM_IMAGE, started.getJdbcUrl());
+            platform = started;
+        }
+        return platform;
     }
 
     /**
