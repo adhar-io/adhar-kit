@@ -1,6 +1,7 @@
 package com.adhar.kit.batch.listener;
 
 import com.adhar.kit.batch.event.BatchJobFailedEvent;
+import com.adhar.kit.batch.params.JobParameterSpecRegistry;
 import com.adhar.kit.batch.params.ParameterMasking;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.BatchStatus;
@@ -26,14 +27,18 @@ public class AdharJobExecutionListener implements JobExecutionListener {
 
     private final ApplicationEventPublisher eventPublisher;
     private final BatchRunObservers observers;
+    private final JobParameterSpecRegistry specs;
 
     /**
      * @param eventPublisher publishes {@link BatchJobFailedEvent}, may be {@code null}
      * @param observers      notified of every start and end
+     * @param specs          the declared parameters, whose sensitive values are masked; may be {@code null}
      */
-    public AdharJobExecutionListener(ApplicationEventPublisher eventPublisher, List<BatchRunObserver> observers) {
+    public AdharJobExecutionListener(ApplicationEventPublisher eventPublisher, List<BatchRunObserver> observers,
+                                     JobParameterSpecRegistry specs) {
         this.eventPublisher = eventPublisher;
         this.observers = new BatchRunObservers(observers);
+        this.specs = specs;
     }
 
     @Override
@@ -42,7 +47,8 @@ public class AdharJobExecutionListener implements JobExecutionListener {
         log.info("Job [{}] starting (execution {}, instance {})", jobName, jobExecution.getId(),
                 jobExecution.getJobInstance().getInstanceId());
         if (log.isDebugEnabled()) {
-            log.debug("Job [{}] parameters {}", jobName, ParameterMasking.describe(jobExecution.getJobParameters()));
+            log.debug("Job [{}] parameters {}", jobName, ParameterMasking.describe(jobExecution.getJobParameters(), jobName,
+                    specs));
         }
         observers.notify("jobStarted", observer -> observer.jobStarted(jobExecution));
     }

@@ -49,6 +49,9 @@ class DeadLetterSinkTest {
         verify(jdbc).update(any(String.class), eq(7L), eq("j".repeat(100)), eq("s"), eq(null), eq("write"), eq(null),
                 eq(null), eq("E"), eq("m".repeat(2500)));
         assertThat(JdbcDeadLetterSink.cut(null, 3)).isNull();
+        assertThat(JdbcDeadLetterSink.cut("a\u0000b", 3)).isEqualTo("a�b");
+        assertThat(JdbcDeadLetterSink.json("{\"a\":\"x\\u0000\",\"b\":\"\\\\u0000\",\"c\":\"\\\\\\u0000\"}"))
+                .isEqualTo("{\"a\":\"x\\ufffd\",\"b\":\"\\\\u0000\",\"c\":\"\\\\\\ufffd\"}");
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.adhar.kit.batch.scheduler;
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.lock.SchedulerLock;
 import com.adhar.kit.batch.operator.JobResolver;
+import com.adhar.kit.batch.repository.InstanceCreationRetry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.Job;
@@ -423,7 +424,7 @@ public class BatchScheduler implements SmartLifecycle {
                         existing.getInstanceId());
                 return SlotOutcome.ALREADY_RAN;
             }
-            JobExecution execution = jobOperator.start(job, parameters);
+            JobExecution execution = InstanceCreationRetry.start(jobOperator, job, parameters);
             execution = awaitEnd(execution);
             BatchStatus status = execution.getStatus();
             if (status == BatchStatus.COMPLETED) {
@@ -438,7 +439,8 @@ public class BatchScheduler implements SmartLifecycle {
             log.info("Skipping slot {} of job [{}]: another instance ran or runs it", nominal, scheduleName);
             return SlotOutcome.ALREADY_RAN;
         } catch (DataIntegrityViolationException | ConcurrencyFailureException ex) {
-            // Two instances without a shared lock created the slot's JobInstance at the same time.
+            // Two instances without a shared lock created the slot's JobInstance at the same time
+            // (a conflict with another identity was already retried by InstanceCreationRetry).
             log.info("Skipping slot {} of job [{}]: another instance claimed it first", nominal, scheduleName);
             return SlotOutcome.ALREADY_RAN;
         } catch (InterruptedException ex) {

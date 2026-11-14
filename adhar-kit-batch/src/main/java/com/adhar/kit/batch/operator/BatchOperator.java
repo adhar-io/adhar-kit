@@ -1,7 +1,9 @@
 package com.adhar.kit.batch.operator;
 
 import com.adhar.kit.batch.metrics.BatchJobStats;
+import com.adhar.kit.batch.params.JobParameterSpecRegistry;
 import com.adhar.kit.batch.params.ParameterMasking;
+import com.adhar.kit.batch.repository.InstanceCreationRetry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.Job;
@@ -49,16 +51,20 @@ public class BatchOperator {
     private final JobOperator jobOperator;
     private final JobRepository jobRepository;
     private final JobResolver jobResolver;
+    private final JobParameterSpecRegistry specs;
 
     /**
      * @param jobOperator   Spring Batch's operator
      * @param jobRepository Spring Batch's repository, for lookups
      * @param jobResolver   finds jobs by name for {@link #start(String, JobParameters)}
+     * @param specs         the declared parameters, whose sensitive values are masked; may be {@code null}
      */
-    public BatchOperator(JobOperator jobOperator, JobRepository jobRepository, JobResolver jobResolver) {
+    public BatchOperator(JobOperator jobOperator, JobRepository jobRepository, JobResolver jobResolver,
+                         JobParameterSpecRegistry specs) {
         this.jobOperator = jobOperator;
         this.jobRepository = jobRepository;
         this.jobResolver = jobResolver;
+        this.specs = specs;
     }
 
     /**
@@ -78,7 +84,7 @@ public class BatchOperator {
         Assert.notNull(job, "job must not be null");
         log.info("Starting job [{}]", job.getName());
         logParameters(job.getName(), parameters);
-        return jobOperator.start(job, parameters);
+        return InstanceCreationRetry.start(jobOperator, job, parameters);
     }
 
     /**
@@ -254,9 +260,9 @@ public class BatchOperator {
                 latest == null ? null : latest.atZone(ZoneId.systemDefault()).toInstant());
     }
 
-    private static void logParameters(String jobName, JobParameters parameters) {
+    private void logParameters(String jobName, JobParameters parameters) {
         if (log.isDebugEnabled()) {
-            log.debug("Job [{}] parameters {}", jobName, ParameterMasking.describe(parameters));
+            log.debug("Job [{}] parameters {}", jobName, ParameterMasking.describe(parameters, jobName, specs));
         }
     }
 }

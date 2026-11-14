@@ -8,14 +8,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.AdditionalAnswers;
 import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.JobInstance;
 import org.springframework.batch.core.job.parameters.JobParameter;
 import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.job.parameters.JobParametersBuilder;
+import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.infrastructure.item.ExecutionContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.CannotAcquireLockException;
 import com.adhar.kit.batch.support.FailureInjector;
 
 import java.time.LocalDate;
@@ -27,6 +31,11 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 /**
  * {@link AdharBatchRunner} (design 0025 §5.5) on a real JobRepository, with the owner Job and pods
@@ -98,6 +107,23 @@ class AdharBatchRunnerTest extends RunnerFixture {
         assertThat(stdout.toString()).contains(summary());
         assertThat(lease.find(outcome.execution().getId())).as("released when the run ended").isEmpty();
         assertThat(events).extracting(event -> event.getClass().getSimpleName()).containsExactly("Started", "Completed");
+    }
+
+    @Test
+    @DisplayName("a serialization conflict at the start (another identity created at once) is retried: exit 0, not 1")
+    void serializationConflictIsRetried() throws Exception {
+        scheduled("2026-11-04T17:30:00Z");
+        JobOperator real = jobOperator;
+        jobOperator = mock(JobOperator.class, AdditionalAnswers.delegatesTo(real));
+        doThrow(new CannotAcquireLockException("could not serialize access")).doAnswer(AdditionalAnswers.delegatesTo(real))
+                .when(jobOperator).start(any(Job.class), any(JobParameters.class));
+
+        RunOutcome outcome = run();
+
+        assertThat(outcome.exitCode()).isZero();
+        assertThat(outcome.kind()).isEqualTo(RunOutcome.Kind.COMPLETED);
+        verify(jobOperator, times(2)).start(any(Job.class), any(JobParameters.class));
+        assertThat(executions(RunnerJobs.REPORT_JOB, reportIdentity("2026-11-04"))).hasSize(1);
     }
 
     @Test

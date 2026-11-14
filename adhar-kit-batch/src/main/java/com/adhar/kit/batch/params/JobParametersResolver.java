@@ -35,6 +35,9 @@ import java.util.TreeSet;
  */
 public class JobParametersResolver {
 
+    /** The longest value {@code BATCH_JOB_EXECUTION_PARAMS.PARAMETER_VALUE} holds. */
+    static final int MAX_VALUE_LENGTH = 2500;
+
     /**
      * @param spec          the job's declared parameters
      * @param input         the run's values, as given
@@ -78,6 +81,9 @@ public class JobParametersResolver {
             if (invalid.isEmpty() && !isText(value)) {
                 invalid = List.of(param.name() + " is not valid text (it holds a lone surrogate)");
             }
+            if (invalid.isEmpty()) {
+                invalid = storable(param.name(), value);
+            }
             problems.addAll(invalid);
             values.put(param.name(), value);
         }
@@ -116,6 +122,20 @@ public class JobParametersResolver {
         var local = scheduledTime.atZoneSameInstant(zone);
         return param.type() == ParamType.DATE ? local.toLocalDate().toString()
                 : DateTimeFormatter.ISO_LOCAL_DATE_TIME.format(local.toLocalDateTime());
+    }
+
+    /**
+     * PostgreSQL text holds no U+0000 and {@code PARAMETER_VALUE} is VARCHAR(2500): such a value
+     * fails the execution's insert, exit 1, which the Job retries to no end but its backoff limit (2026-11-14).
+     */
+    private static List<String> storable(String name, String value) {
+        if (value.indexOf('\u0000') >= 0) {
+            return List.of(name + " holds a NUL character, which the JobRepository cannot store");
+        }
+        if (value.length() > MAX_VALUE_LENGTH) {
+            return List.of(name + " is longer than " + MAX_VALUE_LENGTH + " characters, the JobRepository's limit");
+        }
+        return List.of();
     }
 
     private static boolean isText(String value) {

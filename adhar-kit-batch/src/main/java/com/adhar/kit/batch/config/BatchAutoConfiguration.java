@@ -139,13 +139,16 @@ public class BatchAutoConfiguration {
     /**
      * @param eventPublisher publishes {@link com.adhar.kit.batch.event.BatchJobFailedEvent}
      * @param observers      the run observers
+     * @param specs          the declared parameters, for the sensitive names
      * @return the job listener
      */
     @Bean
     @ConditionalOnMissingBean
     public AdharJobExecutionListener adharJobExecutionListener(ApplicationEventPublisher eventPublisher,
-                                                               ObjectProvider<BatchRunObserver> observers) {
-        return new AdharJobExecutionListener(eventPublisher, observers.orderedStream().toList());
+                                                               ObjectProvider<BatchRunObserver> observers,
+                                                               ObjectProvider<JobParameterSpecRegistry> specs) {
+        return new AdharJobExecutionListener(eventPublisher, observers.orderedStream().toList(),
+                specs.getIfAvailable());
     }
 
     /**
@@ -234,13 +237,15 @@ public class BatchAutoConfiguration {
      * @param jobOperator   Spring Batch's operator
      * @param jobRepository Spring Batch's repository
      * @param jobResolver   resolves jobs by name
+     * @param specs         the declared parameters, for the sensitive names
      * @return the kit's operator
      */
     @Bean
     @ConditionalOnMissingBean
     @ConditionalOnBean({JobOperator.class, JobRepository.class})
-    public BatchOperator batchOperator(JobOperator jobOperator, JobRepository jobRepository, JobResolver jobResolver) {
-        return new BatchOperator(jobOperator, jobRepository, jobResolver);
+    public BatchOperator batchOperator(JobOperator jobOperator, JobRepository jobRepository, JobResolver jobResolver,
+                                       ObjectProvider<JobParameterSpecRegistry> specs) {
+        return new BatchOperator(jobOperator, jobRepository, jobResolver, specs.getIfAvailable());
     }
 
     /**

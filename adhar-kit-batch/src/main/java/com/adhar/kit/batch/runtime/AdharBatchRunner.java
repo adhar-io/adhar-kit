@@ -9,6 +9,7 @@ import com.adhar.kit.batch.params.JobParameterSpecRegistry;
 import com.adhar.kit.batch.params.JobParametersResolver;
 import com.adhar.kit.batch.params.JobParametersResolver.ResolvedParameters;
 import com.adhar.kit.batch.params.ParameterValidationException;
+import com.adhar.kit.batch.repository.InstanceCreationRetry;
 import com.adhar.kit.batch.repository.ResourcelessRepositoryGuard;
 import com.adhar.kit.batch.runtime.ExecutionLease.Owner;
 import com.adhar.kit.batch.runtime.RecoveryPolicy.Verdict;
@@ -252,7 +253,7 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
 
     private RunOutcome start(Job job, JobParameters parameters) {
         try {
-            JobExecution execution = with().jobOperator().start(job, parameters);
+            JobExecution execution = InstanceCreationRetry.start(with().jobOperator(), job, parameters);
             return RunOutcome.of(execution);
         } catch (JobInstanceAlreadyCompleteException ex) {
             return skipped(RunOutcome.ALREADY_COMPLETE, alreadyCompleteExit(), null, null, parameters, ex.getMessage());

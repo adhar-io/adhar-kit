@@ -23,6 +23,7 @@ import org.springframework.batch.core.job.parameters.JobParametersIncrementer;
 import org.springframework.batch.core.launch.JobExecutionAlreadyRunningException;
 import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.dao.CannotAcquireLockException;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -36,6 +37,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -235,6 +237,19 @@ class BatchSchedulerTest {
 
         verify(jobOperator, never()).start(any(Job.class), any(JobParameters.class));
         verify(lock).unlock("job");
+    }
+
+    @Test
+    @DisplayName("a serialization conflict with another identity of the job is retried, not counted as already run")
+    void serializationConflictIsRetried() throws Exception {
+        lockFree();
+        when(jobOperator.start(eq(job), any(JobParameters.class)))
+                .thenThrow(new CannotAcquireLockException("could not serialize access"))
+                .thenReturn(completed());
+
+        assertThat(scheduler.runSlot("job", job, NOW)).isEqualTo(SlotOutcome.RAN);
+
+        verify(jobOperator, times(2)).start(job, BatchScheduler.slotParameters(NOW));
     }
 
     @Test

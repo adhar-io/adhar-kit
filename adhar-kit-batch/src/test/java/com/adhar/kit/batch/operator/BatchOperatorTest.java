@@ -1,6 +1,12 @@
 package com.adhar.kit.batch.operator;
 
+import com.adhar.kit.batch.annotation.ParamSource;
+import com.adhar.kit.batch.annotation.ParamType;
 import com.adhar.kit.batch.metrics.BatchJobStats;
+import com.adhar.kit.batch.params.JobParameterSpec;
+import com.adhar.kit.batch.params.JobParameterSpec.Param;
+import com.adhar.kit.batch.params.JobParameterSpecRegistry;
+import com.adhar.kit.batch.support.DebugLogCapture;
 import com.adhar.kit.batch.support.BatchTestApplication;
 import com.adhar.kit.batch.support.FailureInjector;
 import com.adhar.kit.batch.support.TestJobs;
@@ -25,6 +31,7 @@ import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.launch.JobRestartException;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDateTime;
@@ -65,7 +72,7 @@ class BatchOperatorTest {
 
     @BeforeEach
     void setUp() {
-        operator = new BatchOperator(jobOperator, jobRepository, jobResolver);
+        operator = new BatchOperator(jobOperator, jobRepository, jobResolver, null);
     }
 
     private JobExecution ended(long id, BatchStatus status, LocalDateTime start, LocalDateTime end) {
@@ -81,6 +88,36 @@ class BatchOperatorTest {
     void startDelegates() throws Exception {
         when(job.getName()).thenReturn("job");
         when(jobOperator.start(job, PARAMETERS)).thenReturn(execution);
+
+        assertThat(operator.start(job, PARAMETERS)).isSameAs(execution);
+    }
+
+    @Test
+    @DisplayName("start's DEBUG line masks a parameter the job declares sensitive, not only secret-like names")
+    void startMasksSensitiveParameters() throws Exception {
+        var registry = JobParameterSpecRegistry.of(List.of(new JobParameterSpec("job", "", List.of(
+                new Param("account", ParamType.STRING, true, false, null, null, List.of(), ParamSource.INPUT, true, "")),
+                false)));
+        var masking = new BatchOperator(jobOperator, jobRepository, jobResolver, registry);
+        var parameters = new JobParametersBuilder().addString("account", "acct-S3CRET").addString("region", "sg")
+                .toJobParameters();
+        when(job.getName()).thenReturn("job");
+        when(jobOperator.start(job, parameters)).thenReturn(execution);
+
+        try (var log = new DebugLogCapture(BatchOperator.class)) {
+            masking.start(job, parameters);
+
+            assertThat(log.messages()).anySatisfy(line -> assertThat(line).contains("account=****", "region=sg"))
+                    .noneSatisfy(line -> assertThat(line).contains("S3CRET"));
+        }
+    }
+
+    @Test
+    @DisplayName("start retries a serialization conflict with a concurrent launch")
+    void startRetriesSerializationConflict() throws Exception {
+        when(job.getName()).thenReturn("job");
+        when(jobOperator.start(job, PARAMETERS)).thenThrow(new CannotAcquireLockException("could not serialize"))
+                .thenReturn(execution);
 
         assertThat(operator.start(job, PARAMETERS)).isSameAs(execution);
     }

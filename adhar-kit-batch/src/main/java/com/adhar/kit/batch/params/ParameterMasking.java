@@ -59,6 +59,7 @@ public final class ParameterMasking {
      * @return {@code {name=value, ...}} sorted by name
      */
     public static String describe(JobParameters parameters, Set<String> sensitive) {
+        Set<String> masked = sensitive == null ? Set.of() : sensitive;
         if (parameters == null || parameters.isEmpty()) {
             return "{}";
         }
@@ -66,8 +67,21 @@ public final class ParameterMasking {
         parameters.parameters().stream()
                 .sorted(Comparator.comparing(JobParameter::name))
                 .forEach(parameter -> joiner.add(parameter.name() + (parameter.identifying() ? "" : "(n)") + "="
-                        + (isSecretName(parameter.name()) || sensitive.contains(parameter.name())
+                        + (isSecretName(parameter.name()) || masked.contains(parameter.name())
                         ? MASK : String.valueOf(parameter.value()))));
         return joiner.toString();
+    }
+
+    /**
+     * Renders a job's parameters, masking credential-like names and the ones its declaration
+     * marks {@code sensitive = true}.
+     *
+     * @param parameters the parameters, may be {@code null}
+     * @param jobName    the job's name
+     * @param registry   the declared parameters, may be {@code null}
+     * @return {@code {name=value, ...}} sorted by name
+     */
+    public static String describe(JobParameters parameters, String jobName, JobParameterSpecRegistry registry) {
+        return describe(parameters, registry == null ? Set.of() : registry.spec(jobName).sensitiveNames());
     }
 }

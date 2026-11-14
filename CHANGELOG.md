@@ -26,7 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chunk, a restart over changed input refused); `LocalPartitioning`, `SqlKeyRangePartitioner`
   and `ObjectPrefixPartitioner`; `BatchMdc` (the run in every log line) and
   `ItemObservationTracingFilter` (no span per item). The embedded scheduler launches
-  synchronously under a renewed JDBC lock with the nominal fire time as identity. Usage and the
+  synchronously under a renewed JDBC lock with the nominal fire time as identity. The runner, the
+  scheduler and `BatchOperator.start` retry a PostgreSQL serialization conflict between two
+  identities of one job created at once (`InstanceCreationRetry`). Usage and the
   full property reference are in `adhar-kit-batch/README.md`.
 - **adhar-kit-test-commons** — `@AdharBatchTest` (the real auto-configuration on a fresh database
   of a PostgreSQL 18.4 container, `@SpringBatchTest`, optional LocalStack S3), `RestartScenario`
@@ -89,9 +91,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `chunk.size`, `default-page-size` → `page.size`, `max-retries` → `retry.max-attempts`;
   `max-concurrent-jobs` and `retry-on-failure` are removed with the asynchronous launcher.
   `RetryableStepBuilder` is replaced by `AdharSteps`/`FaultTolerance`, `BatchOperator` works on
-  `JobExecution`s (and gains `recover`), the duplicate `adhar.batch.job.*`/`adhar.batch.step.*`
-  meters are gone (Spring Batch's `spring.batch.*` remain), and `metrics.BatchMetrics` is
-  `telemetry.BatchProgressMetrics`.
+  `JobExecution`s (and gains `recover`); it and `AdharJobExecutionListener` take the
+  `JobParameterSpecRegistry`, so a `sensitive` parameter is masked at DEBUG too; the duplicate
+  `adhar.batch.job.*`/`adhar.batch.step.*` meters are gone (Spring Batch's `spring.batch.*`
+  remain), and `metrics.BatchMetrics` is `telemetry.BatchProgressMetrics`.
 - **adhar-kit-commons** — `ApiVersionInterceptor` is no longer the versioning mechanism: it
   acts only outside `/api/v<major>`, where its legacy headers and the opt-in
   `validate-request-version` check are unchanged. The contract check under `/api/v<major>` is

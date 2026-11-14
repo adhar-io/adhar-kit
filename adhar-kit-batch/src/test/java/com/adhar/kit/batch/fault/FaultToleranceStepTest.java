@@ -49,7 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest(classes = {BatchTestApplication.class, TestJobs.class, FaultToleranceStepTest.Observers.class})
 // One context, one observer and one TARGET_ITEMS table serve every test here, and each test
-// clears them first: run concurrently (the parent pom's default), one test's process skips
+// clears them first: run concurrently (as the parent pom briefly did), one test's process skips
 // landed in another's write-skip assertion and a setUp emptied a table mid-run.
 @Execution(ExecutionMode.SAME_THREAD)
 class FaultToleranceStepTest {

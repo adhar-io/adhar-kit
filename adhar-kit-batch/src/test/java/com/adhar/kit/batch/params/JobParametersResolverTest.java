@@ -108,6 +108,26 @@ class JobParametersResolverTest {
     }
 
     @Test
+    @DisplayName("a sensitive value is never echoed by a problem, which reaches the log and the summary")
+    void sensitiveValueNotEchoed() {
+        JobParameterSpec spec = new JobParameterSpec("j", "", List.of(
+                new Param("account", ParamType.STRING, true, false, null, "^[0-9]+$", List.of(), ParamSource.INPUT,
+                        true, ""),
+                new Param("customer", ParamType.LONG, true, false, null, null, List.of(), ParamSource.INPUT, true, ""),
+                new Param("tier", ParamType.STRING, true, false, null, null, List.of("gold"), ParamSource.INPUT, true,
+                        "")), false);
+
+        assertThatThrownBy(() -> resolver.resolve(spec, Map.of("account", "acct-S3CRET", "customer", "S3CRET-2",
+                "tier", "S3CRET-3"), Optional.empty(), SINGAPORE))
+                .asInstanceOf(type(ParameterValidationException.class))
+                .satisfies(ex -> {
+                    assertThat(ex.getProblems()).hasSize(3);
+                    assertThat(ex.getMessage()).contains("account must match", "customer must be a whole number",
+                            "tier must be one of [gold]", "was '****'").doesNotContain("S3CRET");
+                });
+    }
+
+    @Test
     @DisplayName("a missing required value is refused; a schedule DATETIME is the scheduled time in the zone")
     void requiredAndDateTime() {
         JobParameterSpec spec = new JobParameterSpec("j", "", List.of(
@@ -131,6 +151,22 @@ class JobParametersResolverTest {
 
         assertThatThrownBy(() -> resolver.resolve(spec, Map.of("note", "a\uD800"), Optional.empty(), SINGAPORE))
                 .hasMessageContaining("lone surrogate");
+    }
+
+    @Test
+    @DisplayName("a value the JobRepository cannot store (NUL, over 2500 characters) is invalid, not a start-up failure")
+    void unstorableValue() {
+        JobParameterSpec spec = new JobParameterSpec("j", "", List.of(Param.of("note", ParamType.STRING),
+                Param.of("tag", ParamType.STRING)), false);
+
+        assertThatThrownBy(() -> resolver.resolve(spec, Map.of("note", "a\u0000b", "tag", "x".repeat(2501)),
+                Optional.empty(), SINGAPORE))
+                .asInstanceOf(type(ParameterValidationException.class))
+                .satisfies(ex -> assertThat(ex.getProblems()).containsExactly(
+                        "note holds a NUL character, which the JobRepository cannot store",
+                        "tag is longer than 2500 characters, the JobRepository's limit"));
+        assertThat(resolver.resolve(spec, Map.of("note", "a\u0001b", "tag", "x".repeat(2500)), Optional.empty(),
+                SINGAPORE).identifying()).containsEntry("note", "a\u0001b");
     }
 
     @Test

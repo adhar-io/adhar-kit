@@ -72,9 +72,31 @@ class DeadLetterSkipListenerTestContainerTest {
 
         assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
         Map<String, Object> row = jdbc.queryForMap("SELECT ITEM->>'id' AS ID, (ITEM->>'cents')::BIGINT AS CENTS, "
-                + "BUSINESS_DATE, PHASE, JOB_EXECUTION_ID FROM batch.ADHAR_BATCH_DEAD_LETTER");
+                + "BUSINESS_DATE, PHASE, JOB_EXECUTION_ID FROM batch.ADHAR_BATCH_DEAD_LETTER WHERE JOB_NAME = "
+                + "'paymentsJob'");
         assertThat(row).containsEntry("id", "p2").containsEntry("cents", -5L).containsEntry("phase", "process")
                 .containsEntry("job_execution_id", execution.getId());
         assertThat(row.get("business_date").toString()).isEqualTo("2026-11-03");
+    }
+
+    @Test
+    @DisplayName("a NUL in the item or the message, which PostgreSQL text refuses, is kept as U+FFFD")
+    void nulCharacters() throws Exception {
+        var step = steps.<Payment, Payment>chunk("nulPayments", 10)
+                .reader(new ListItemReader<>(List.of(new Payment("p\u00003", -1), new Payment("p\\u0000", -2))))
+                .processor(payment -> {
+                    throw new IllegalArgumentException("bad id " + payment.id());
+                })
+                .writer(chunk -> { })
+                .faultTolerance(FaultTolerance.none().skip(IllegalArgumentException.class, 10).deadLetter())
+                .build();
+        JobExecution execution = jobOperator.start(new JobBuilder("nulJob", jobRepository).start(step).build(),
+                new JobParametersBuilder().addString("run", "nul").toJobParameters());
+
+        assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(jdbc.queryForList("SELECT ITEM->>'id' FROM batch.ADHAR_BATCH_DEAD_LETTER WHERE JOB_NAME = "
+                + "'nulJob' ORDER BY ID", String.class)).containsExactly("p�3", "p\\u0000");
+        assertThat(jdbc.queryForList("SELECT ERROR_MESSAGE FROM batch.ADHAR_BATCH_DEAD_LETTER WHERE JOB_NAME = "
+                + "'nulJob' ORDER BY ID", String.class)).containsExactly("bad id p�3", "bad id p\\u0000");
     }
 }

@@ -1,5 +1,7 @@
 package com.adhar.kit.batch.params;
 
+import com.adhar.kit.batch.annotation.ParamSource;
+import com.adhar.kit.batch.annotation.ParamType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -7,6 +9,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.job.parameters.JobParametersBuilder;
 
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -91,6 +94,20 @@ class ParameterMaskingTest {
         assertThat(described)
                 .isEqualTo("{account=****, customer=****, region=eu}")
                 .doesNotContain("ACME", "12345");
+    }
+
+    @Test
+    @DisplayName("a job's declared sensitive names come from the registry; without one only credential-like names")
+    void sensitiveNamesFromTheRegistry() {
+        JobParameters parameters = new JobParametersBuilder().addString("customer", "ACME")
+                .addString("token", "t0k3n").toJobParameters();
+        JobParameterSpecRegistry registry = JobParameterSpecRegistry.of(List.of(new JobParameterSpec("j", "",
+                List.of(new JobParameterSpec.Param("customer", ParamType.STRING, true, false, null, null, List.of(),
+                        ParamSource.INPUT, true, "")), false)));
+
+        assertThat(ParameterMasking.describe(parameters, "j", registry)).isEqualTo("{customer=****, token=****}");
+        assertThat(ParameterMasking.describe(parameters, "other", registry)).isEqualTo("{customer=ACME, token=****}");
+        assertThat(ParameterMasking.describe(parameters, "j", null)).isEqualTo("{customer=ACME, token=****}");
     }
 
     @Test

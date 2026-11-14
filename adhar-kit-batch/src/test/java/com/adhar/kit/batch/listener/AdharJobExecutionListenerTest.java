@@ -1,6 +1,12 @@
 package com.adhar.kit.batch.listener;
 
+import com.adhar.kit.batch.annotation.ParamSource;
+import com.adhar.kit.batch.annotation.ParamType;
 import com.adhar.kit.batch.event.BatchJobFailedEvent;
+import com.adhar.kit.batch.params.JobParameterSpec;
+import com.adhar.kit.batch.params.JobParameterSpec.Param;
+import com.adhar.kit.batch.params.JobParameterSpecRegistry;
+import com.adhar.kit.batch.support.DebugLogCapture;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -30,7 +36,7 @@ class AdharJobExecutionListenerTest {
 
     private final BatchRunObserver observer = mock(BatchRunObserver.class);
     private final ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-    private final AdharJobExecutionListener listener = new AdharJobExecutionListener(publisher, List.of(observer));
+    private final AdharJobExecutionListener listener = new AdharJobExecutionListener(publisher, List.of(observer), null);
 
     private JobExecution execution(BatchStatus status, ExitStatus exitStatus,
                                    LocalDateTime start, LocalDateTime end) {
@@ -54,6 +60,24 @@ class AdharJobExecutionListenerTest {
         listener.beforeJob(exec);
 
         verify(observer).jobStarted(exec);
+    }
+
+    @Test
+    @DisplayName("beforeJob's DEBUG line masks a parameter the job declares sensitive, not only secret-like names")
+    void beforeJobMasksSensitiveParameters() {
+        var registry = JobParameterSpecRegistry.of(List.of(new JobParameterSpec("sampleJob", "", List.of(
+                new Param("account", ParamType.STRING, true, false, null, null, List.of(), ParamSource.INPUT, true, "")),
+                false)));
+        var masking = new AdharJobExecutionListener(null, List.of(observer), registry);
+        var exec = new JobExecution(42L, new JobInstance(1L, "sampleJob"), new JobParametersBuilder()
+                .addString("account", "acct-S3CRET").addString("region", "sg").toJobParameters());
+
+        try (var log = new DebugLogCapture(AdharJobExecutionListener.class)) {
+            masking.beforeJob(exec);
+
+            assertThat(log.messages()).anySatisfy(line -> assertThat(line).contains("account=****", "region=sg"))
+                    .noneSatisfy(line -> assertThat(line).contains("S3CRET"));
+        }
     }
 
     @Test
@@ -93,7 +117,7 @@ class AdharJobExecutionListenerTest {
     @Test
     @DisplayName("afterJob on failure tolerates having no publisher")
     void afterJobFailureWithoutPublisher() {
-        var noPublisher = new AdharJobExecutionListener(null, List.of(observer));
+        var noPublisher = new AdharJobExecutionListener(null, List.of(observer), null);
         var exec = execution(BatchStatus.FAILED, ExitStatus.FAILED, null, null);
 
         assertThatCode(() -> noPublisher.afterJob(exec)).doesNotThrowAnyException();
@@ -116,7 +140,7 @@ class AdharJobExecutionListenerTest {
         var next = mock(BatchRunObserver.class);
         var exec = execution(BatchStatus.COMPLETED, ExitStatus.COMPLETED, null, null);
         doThrow(new RuntimeException("registry down")).when(observer).jobFinished(exec);
-        var isolating = new AdharJobExecutionListener(null, List.of(observer, next));
+        var isolating = new AdharJobExecutionListener(null, List.of(observer, next), null);
 
         assertThatCode(() -> isolating.afterJob(exec)).doesNotThrowAnyException();
         verify(next).jobFinished(exec);

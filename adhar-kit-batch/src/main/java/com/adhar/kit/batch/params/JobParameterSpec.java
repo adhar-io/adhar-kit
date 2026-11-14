@@ -147,7 +147,8 @@ public record JobParameterSpec(String jobName, String description, List<Param> p
                 }
             }
             if (defaultValue != null) {
-                List<String> problems = JobParameterValidator.problems(name, type, pattern, allowed, defaultValue);
+                List<String> problems = JobParameterValidator.problems(name, type, pattern, allowed, defaultValue,
+                        sensitive);
                 if (!problems.isEmpty()) {
                     throw new IllegalArgumentException("The default of parameter " + name + " is invalid: "
                             + String.join("; ", problems));

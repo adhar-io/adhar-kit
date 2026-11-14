@@ -28,6 +28,10 @@ import java.util.function.Supplier;
  * and the current time must never stand in for the schedule. For any other trigger the reads are
  * best effort (uid, digest, attempt).</p>
  *
+ * <p>(2026-11-14) Design 0025 §5.7 lists "unresolved business date" under exit 2. That is the
+ * owner Job read WITHOUT a scheduled time (exit 2, reason {@code business-date}); an API that
+ * cannot be read is treated like §5.7's "DataSource unreachable at start", exit 1.</p>
+ *
  * @author Adhar Platform Team
  * @since 0.1.0
  */

@@ -10,6 +10,7 @@ import com.adhar.kit.batch.telemetry.BatchProgressMetrics;
 import com.adhar.kit.batch.telemetry.BatchTelemetryAutoConfiguration;
 import com.adhar.kit.batch.telemetry.ItemObservationTracingFilter;
 import com.adhar.kit.batch.operator.BatchOperator;
+import com.adhar.kit.batch.params.JobParameterSpecRegistry;
 import com.adhar.kit.batch.scheduler.BatchScheduler;
 import com.adhar.kit.batch.step.AdharSteps;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -59,6 +60,16 @@ class BatchAutoConfigurationTest {
             assertThat(context).hasSingleBean(BatchProgressMetrics.class);
             assertThat(context).hasSingleBean(BatchMdc.class);
             assertThat(context).hasSingleBean(ItemObservationTracingFilter.class);
+        });
+    }
+
+    @Test
+    @DisplayName("the job listener and the operator mask by the declared parameters, the registry bean")
+    void loggersMaskByTheRegistry() {
+        withJob.run(context -> {
+            JobParameterSpecRegistry registry = context.getBean(JobParameterSpecRegistry.class);
+            assertThat(context.getBean(AdharJobExecutionListener.class)).extracting("specs").isSameAs(registry);
+            assertThat(context.getBean(BatchOperator.class)).extracting("specs").isSameAs(registry);
         });
     }
 

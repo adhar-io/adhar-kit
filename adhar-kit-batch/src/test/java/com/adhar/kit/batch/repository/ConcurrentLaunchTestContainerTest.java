@@ -6,6 +6,7 @@ import com.adhar.kit.batch.support.TestJobs;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.job.DefaultJobKeyGenerator;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.JobInstance;
@@ -102,8 +103,43 @@ class ConcurrentLaunchTestContainerTest {
                 Integer.class, "k04-concurrent")).isEqualTo(1);
         // Exactly one instance row exists for this identity: the SERIALIZABLE instance creation held.
         assertThat(jdbcTemplate.queryForObject(
-                "select count(*) from batch.batch_job_instance where job_name = ?", Integer.class,
-                TestJobs.SLOW_JOB)).isEqualTo(1);
+                "select count(*) from batch.batch_job_instance where job_name = ? and job_key = ?", Integer.class,
+                TestJobs.SLOW_JOB, new DefaultJobKeyGenerator().generateKey(identity))).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("concurrent launches of DIFFERENT identities of one job all start, despite PG's serialization conflicts")
+    void concurrentLaunchesOfDifferentIdentitiesAllStart() throws Exception {
+        // Without InstanceCreationRetry every round but one launch per round is refused (probe 2026-11-14:
+        // 59 of 80 launches, CannotAcquireLockException "could not serialize access").
+        for (int round = 0; round < 5; round++) {
+            CountDownLatch go = new CountDownLatch(1);
+            ExecutorService pool = Executors.newFixedThreadPool(LAUNCHES);
+            List<Future<JobExecution>> launches = new ArrayList<>();
+            List<JobParameters> identities = new ArrayList<>();
+            try {
+                for (int i = 0; i < LAUNCHES; i++) {
+                    JobParameters identity = new JobParametersBuilder()
+                            .addString("adhar.scheduled-time", "k04-distinct-" + round + "-" + i, true)
+                            .toJobParameters();
+                    identities.add(identity);
+                    launches.add(pool.submit(() -> {
+                        go.await();
+                        return InstanceCreationRetry.start(jobOperator, slowJob, identity);
+                    }));
+                }
+                go.countDown();
+                pool.shutdown();
+                assertThat(pool.awaitTermination(2, TimeUnit.MINUTES)).isTrue();
+            } finally {
+                pool.shutdownNow();
+            }
+            for (int i = 0; i < LAUNCHES; i++) {
+                assertThat(launches.get(i).get().getStatus()).isEqualTo(BatchStatus.COMPLETED);
+                JobInstance instance = jobRepository.getJobInstance(TestJobs.SLOW_JOB, identities.get(i));
+                assertThat(jobRepository.getJobExecutions(instance)).hasSize(1);
+            }
+        }
     }
 
     private Callable<Outcome> launch(JobParameters identity, CountDownLatch go) {

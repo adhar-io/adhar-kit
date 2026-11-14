@@ -31,20 +31,23 @@ public final class JobParameterValidator {
      * @return what is wrong with it, empty when it is valid
      */
     public static List<String> problems(Param param, String value) {
-        return problems(param.name(), param.type(), param.pattern(), param.allowed(), value);
+        return problems(param.name(), param.type(), param.pattern(), param.allowed(), value, param.sensitive());
     }
 
-    static List<String> problems(String name, ParamType type, String pattern, List<String> allowed, String value) {
+    /** A sensitive value is never echoed: the message reaches the log and the termination summary. */
+    static List<String> problems(String name, ParamType type, String pattern, List<String> allowed, String value,
+                                 boolean sensitive) {
         List<String> problems = new ArrayList<>();
+        String shown = sensitive ? ParameterMasking.MASK : value;
         if (typed(type, value).isEmpty()) {
-            problems.add(name + " must be " + describe(type) + ", was '" + value + "'");
+            problems.add(name + " must be " + describe(type) + ", was '" + shown + "'");
             return problems;
         }
         if (pattern != null && !value.matches(pattern)) {
-            problems.add(name + " must match " + pattern + ", was '" + value + "'");
+            problems.add(name + " must match " + pattern + ", was '" + shown + "'");
         }
         if (!allowed.isEmpty() && !allowed.contains(value)) {
-            problems.add(name + " must be one of " + allowed + ", was '" + value + "'");
+            problems.add(name + " must be one of " + allowed + ", was '" + shown + "'");
         }
         return problems;
     }
