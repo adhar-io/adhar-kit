@@ -561,6 +561,11 @@
                         <properties>
                             <configurationParameters>
                                 junit.jupiter.execution.timeout.default = 5 m
+                                junit.jupiter.execution.parallel.enabled = true
+                                junit.jupiter.execution.parallel.mode.default = concurrent
+                                junit.jupiter.execution.parallel.mode.classes.default = concurrent
+                                junit.jupiter.execution.parallel.config.strategy = dynamic
+                                junit.jupiter.execution.parallel.config.dynamic.factor = 1
                             </configurationParameters>
                         </properties>
                     </configuration>
@@ -574,6 +579,17 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-failsafe-plugin</artifactId>
                     <version>${maven-failsafe-plugin.version}</version>
+                    <configuration>
+                        <properties>
+                            <configurationParameters>
+                                junit.jupiter.execution.parallel.enabled = true
+                                junit.jupiter.execution.parallel.mode.default = concurrent
+                                junit.jupiter.execution.parallel.mode.classes.default = concurrent
+                                junit.jupiter.execution.parallel.config.strategy = dynamic
+                                junit.jupiter.execution.parallel.config.dynamic.factor = 1
+                            </configurationParameters>
+                        </properties>
+                    </configuration>
                     <executions>
                         <execution>
                             <goals>
