@@ -100,6 +100,12 @@ public class QuartzSchemaMigrator implements InitializingBean {
                 .defaultSchema(layout.schema())
                 .createSchemas(true)
                 .table(HISTORY_TABLE)
+                // The schema is never empty: the main stream ran first. Its own history starts at a
+                // baseline below every Quartz version, so V2_5_2 is applied, and a schema that already
+                // holds Quartz tables from elsewhere fails on them instead of being adopted.
+                .baselineOnMigrate(true)
+                .baselineVersion("1")
+                .baselineDescription("adhar-kit quartz stream")
                 .locations(LOCATION)
                 .resourceProvider(new DirectoryMigrations(LOCATION, QuartzSchemaMigrator.class.getClassLoader()))
                 .failOnMissingLocations(true)

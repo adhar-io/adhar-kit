@@ -1,9 +1,9 @@
--- Quartz 2.5.2's job store tables (design 0025 §5.20.3), the in-service engine `quartz` of
+-- Quartz 2.5.2's job store tables (design 0025 section 5.20.3), the in-service engine quartz of
 -- BatchScheduler. A copy of org/quartz/impl/jdbcjobstore/tables_postgres.sql from the
 -- quartz-2.5.2 jar, unchanged but for two removals: its DROP statements (a migration never drops
 -- what an earlier one may hold) and its trailing COMMIT (Flyway runs the migration in a
 -- transaction of its own). Names stay UNQUALIFIED and UNQUOTED: Flyway's default schema puts them
--- in the batch schema, and Quartz's statements, prefixed `<schema>.QRTZ_`, fold to the same
+-- in the batch schema, and Quartz's statements, prefixed <schema>.QRTZ_, fold to the same
 -- lower-case names.
 --
 -- The second migration stream of the kit: history <schema>.adhar_batch_quartz_schema_history, run

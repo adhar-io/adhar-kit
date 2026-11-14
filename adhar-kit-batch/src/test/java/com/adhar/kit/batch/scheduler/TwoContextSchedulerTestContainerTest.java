@@ -1,6 +1,6 @@
 package com.adhar.kit.batch.scheduler;
 
-import com.adhar.kit.batch.scheduler.BatchScheduler.SlotOutcome;
+import com.adhar.kit.batch.params.JobParameterSpec;
 import com.adhar.kit.batch.support.BatchTestApplication;
 import com.adhar.kit.batch.support.PostgresDatabases;
 import com.adhar.kit.batch.support.TestJobs;
@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.JobInstance;
+import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -106,7 +107,7 @@ class TwoContextSchedulerTestContainerTest {
                 .allMatch(EnumSet.of(SlotOutcome.LOCKED_ELSEWHERE, SlotOutcome.ALREADY_RAN)::contains);
 
         JobRepository repository = first.getBean(JobRepository.class);
-        JobInstance instance = repository.getJobInstance(TestJobs.SLOW_JOB, BatchScheduler.slotParameters(SLOT));
+        JobInstance instance = repository.getJobInstance(TestJobs.SLOW_JOB, slot(SLOT));
         assertThat(instance).isNotNull();
         List<JobExecution> executions = repository.getJobExecutions(instance);
         assertThat(executions).as("exactly one JobExecution for the slot").hasSize(1);
@@ -119,5 +120,10 @@ class TwoContextSchedulerTestContainerTest {
         BatchScheduler scheduler = context.getBean(BatchScheduler.class);
         Job job = context.getBean(TestJobs.SLOW_JOB, Job.class);
         return () -> scheduler.runSlot(TestJobs.SLOW_JOB, job, SLOT);
+    }
+
+    /** The parameters of a slot of a job that declares none, as both engines derive them. */
+    private static JobParameters slot(Instant nominal) {
+        return SlotIdentity.of(JobParameterSpec.none("job"), SlotIdentity.UNDECLARED, nominal).parameters();
     }
 }

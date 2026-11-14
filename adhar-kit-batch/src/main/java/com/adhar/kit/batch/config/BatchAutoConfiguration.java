@@ -35,6 +35,8 @@ import com.adhar.kit.batch.runtime.RecoveryPolicy;
 import com.adhar.kit.batch.runtime.RunContextResolver;
 import com.adhar.kit.batch.runtime.TerminationSummaryWriter;
 import com.adhar.kit.batch.scheduler.BatchScheduler;
+import com.adhar.kit.batch.scheduler.SimpleSchedulerEngine;
+import com.adhar.kit.batch.scheduler.quartz.QuartzConfiguration;
 import com.adhar.kit.batch.step.AdharSteps;
 import io.micrometer.observation.ObservationRegistry;
 import lombok.extern.slf4j.Slf4j;
@@ -55,11 +57,16 @@ import org.springframework.boot.batch.jdbc.autoconfigure.BatchDataSource;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Condition;
+import org.springframework.context.annotation.ConditionContext;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
+import org.springframework.core.type.AnnotatedTypeMetadata;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.util.ClassUtils;
 
 import javax.sql.DataSource;
 import java.time.Clock;
@@ -77,7 +84,8 @@ import java.time.Clock;
  * refusal of an in-memory repository, {@link AdharSteps}, the kit's listeners attached to every
  * job and step, {@link BatchOperator}, a {@link SchedulerLock}, the
  * {@link com.adhar.kit.batch.BatchFacade} and, when {@code adhar.batch.scheduler.enabled}, the
- * embedded {@link BatchScheduler}. Metrics, the log context and the trace filter are
+ * embedded {@link BatchScheduler} on its engine {@code simple} or, with
+ * {@code adhar.batch.scheduler.engine=quartz}, {@code quartz} ({@link QuartzConfiguration}). Metrics, the log context and the trace filter are
  * {@link com.adhar.kit.batch.telemetry.BatchTelemetryAutoConfiguration}.</p>
  *
  * @author Adhar Platform Team
@@ -102,7 +110,7 @@ import java.time.Clock;
 @ConditionalOnBooleanProperty(name = "adhar.batch.enabled", matchIfMissing = true)
 @ConditionalOnBean(Job.class)
 @EnableConfigurationProperties(BatchProperties.class)
-@Import(AdharBatchRepositoryConfiguration.class)
+@Import({AdharBatchRepositoryConfiguration.class, QuartzConfiguration.class})
 public class BatchAutoConfiguration {
 
     /**
@@ -420,24 +428,60 @@ public class BatchAutoConfiguration {
     }
 
     /**
-     * The embedded scheduler, when {@code adhar.batch.scheduler.enabled}.
+     * The embedded scheduler on its engine {@code simple}, when {@code adhar.batch.scheduler.enabled}.
      */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnBooleanProperty(name = "adhar.batch.scheduler.enabled")
+    @ConditionalOnProperty(name = "adhar.batch.scheduler.engine", havingValue = "simple", matchIfMissing = true)
     static class SchedulerConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
         BatchScheduler batchScheduler(JobOperator jobOperator, JobRepository jobRepository, JobResolver jobResolver,
-                                      ObjectProvider<SchedulerLock> schedulerLock, BatchProperties properties) {
+                                      ObjectProvider<SchedulerLock> schedulerLock,
+                                      ObjectProvider<JobParameterSpecRegistry> specs,
+                                      JobParametersResolver parametersResolver, BatchProperties properties) {
             BatchProperties.Scheduler settings = properties.getScheduler();
             SchedulerLock lock = schedulerLock.getIfAvailable();
             if (lock == null && settings.getLock() == BatchProperties.Scheduler.Lock.JDBC) {
                 log.warn("adhar.batch.scheduler.lock=jdbc but there is no DataSource: the embedded scheduler runs "
                         + "without a lock, so only one instance of this service may run");
             }
-            return new BatchScheduler(jobOperator, jobRepository, jobResolver, lock, settings,
-                    properties.getShutdown().getTimeout(), Clock.systemUTC());
+            return new BatchScheduler(new SimpleSchedulerEngine(jobOperator, jobRepository, jobResolver,
+                    specs.getIfAvailable(), parametersResolver, lock, settings, properties.getShutdown().getTimeout(),
+                    Clock.systemUTC()));
+        }
+    }
+
+    /**
+     * {@code adhar.batch.scheduler.engine=quartz} without Quartz on the classpath: the start fails
+     * naming the dependency, rather than running no schedule at all.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnBooleanProperty(name = "adhar.batch.scheduler.enabled")
+    @ConditionalOnProperty(name = "adhar.batch.scheduler.engine", havingValue = "quartz")
+    @Conditional(QuartzMissingConfiguration.QuartzAbsent.class)
+    static class QuartzMissingConfiguration {
+
+        QuartzMissingConfiguration() {
+            throw new IllegalStateException("adhar.batch.scheduler.engine=quartz needs Quartz on the classpath: add "
+                    + "the dependency " + QuartzConfiguration.DEPENDENCY + " (managed by Spring Boot), or use the "
+                    + "engine simple");
+        }
+
+        /**
+         * Any of the classes the engine quartz needs is missing (Quartz itself, Spring's
+         * {@code SchedulerFactoryBean}, or Spring Boot's Quartz auto-configuration).
+         */
+        static class QuartzAbsent implements Condition {
+
+            @Override
+            public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+                ClassLoader classLoader = context.getClassLoader();
+                return !ClassUtils.isPresent(QuartzConfiguration.SCHEDULER_CLASS, classLoader)
+                        || !ClassUtils.isPresent(QuartzConfiguration.FACTORY_BEAN_CLASS, classLoader)
+                        || !ClassUtils.isPresent(QuartzConfiguration.CUSTOMIZER_CLASS, classLoader);
+            }
         }
     }
 }

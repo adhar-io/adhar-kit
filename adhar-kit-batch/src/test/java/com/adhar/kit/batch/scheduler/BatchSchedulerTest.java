@@ -3,7 +3,7 @@ package com.adhar.kit.batch.scheduler;
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.lock.SchedulerLock;
 import com.adhar.kit.batch.operator.JobResolver;
-import com.adhar.kit.batch.scheduler.BatchScheduler.SlotOutcome;
+import com.adhar.kit.batch.params.JobParameterSpec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -85,7 +85,7 @@ class BatchSchedulerTest {
     }
 
     private JobExecution completed() {
-        var execution = new JobExecution(1L, new JobInstance(1L, "job"), BatchScheduler.slotParameters(NOW));
+        var execution = new JobExecution(1L, new JobInstance(1L, "job"), slot(NOW));
         execution.setStatus(BatchStatus.COMPLETED);
         return execution;
     }
@@ -157,7 +157,7 @@ class BatchSchedulerTest {
     @Test
     @DisplayName("a slot's identity is its nominal time in whole seconds; the trigger is not identifying")
     void slotParameters() {
-        JobParameters parameters = BatchScheduler.slotParameters(Instant.parse("2026-11-06T02:00:00.750Z"));
+        JobParameters parameters = slot(Instant.parse("2026-11-06T02:00:00.750Z"));
 
         assertThat(parameters.getString(BatchScheduler.SCHEDULED_TIME_PARAMETER)).isEqualTo("2026-11-06T02:00:00Z");
         assertThat(parameters.getParameter(BatchScheduler.SCHEDULED_TIME_PARAMETER).identifying()).isTrue();
@@ -168,8 +168,8 @@ class BatchSchedulerTest {
     @Test
     @DisplayName("two slots in one minute (\"0/30 * * * * *\") are two identities, not one")
     void twoSlotsInOneMinuteAreTwoIdentities() {
-        JobParameters first = BatchScheduler.slotParameters(Instant.parse("2026-11-06T02:00:00Z"));
-        JobParameters second = BatchScheduler.slotParameters(Instant.parse("2026-11-06T02:00:30.250Z"));
+        JobParameters first = slot(Instant.parse("2026-11-06T02:00:00Z"));
+        JobParameters second = slot(Instant.parse("2026-11-06T02:00:30.250Z"));
 
         assertThat(second.getString(BatchScheduler.SCHEDULED_TIME_PARAMETER)).isEqualTo("2026-11-06T02:00:30Z");
         // The JobInstance key, which is what the repository refuses a second run of.
@@ -189,7 +189,7 @@ class BatchSchedulerTest {
 
         assertThat(scheduler.runSlot("job", job, NOW)).isEqualTo(SlotOutcome.RAN);
 
-        verify(jobOperator).start(job, BatchScheduler.slotParameters(NOW));
+        verify(jobOperator).start(job, slot(NOW));
         verify(lock).unlock("job");
         assertThat(scheduler.runningJobs()).isEmpty();
     }
@@ -230,7 +230,7 @@ class BatchSchedulerTest {
     @DisplayName("a slot that already has a JobInstance is not run twice")
     void alreadyRan() throws Exception {
         lockFree();
-        when(jobRepository.getJobInstance("job", BatchScheduler.slotParameters(NOW)))
+        when(jobRepository.getJobInstance("job", slot(NOW)))
                 .thenReturn(new JobInstance(7L, "job"));
 
         assertThat(scheduler.runSlot("job", job, NOW)).isEqualTo(SlotOutcome.ALREADY_RAN);
@@ -249,7 +249,7 @@ class BatchSchedulerTest {
 
         assertThat(scheduler.runSlot("job", job, NOW)).isEqualTo(SlotOutcome.RAN);
 
-        verify(jobOperator, times(2)).start(job, BatchScheduler.slotParameters(NOW));
+        verify(jobOperator, times(2)).start(job, slot(NOW));
     }
 
     @Test
@@ -337,5 +337,10 @@ class BatchSchedulerTest {
         assertThatThrownBy(() -> scheduler.scheduleJob("ghost", DAILY))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(scheduler.listScheduledJobs()).isEmpty();
+    }
+
+    /** The parameters of a slot of a job that declares none, as both engines derive them. */
+    private static JobParameters slot(Instant nominal) {
+        return SlotIdentity.of(JobParameterSpec.none("job"), SlotIdentity.UNDECLARED, nominal).parameters();
     }
 }

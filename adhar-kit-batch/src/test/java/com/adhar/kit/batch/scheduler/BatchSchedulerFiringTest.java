@@ -3,7 +3,7 @@ package com.adhar.kit.batch.scheduler;
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.lock.SchedulerLock;
 import com.adhar.kit.batch.operator.JobResolver;
-import com.adhar.kit.batch.scheduler.BatchScheduler.SlotOutcome;
+import com.adhar.kit.batch.params.JobParameterSpec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -129,7 +129,7 @@ class BatchSchedulerFiringTest {
     }
 
     private JobExecution execution(BatchStatus status) {
-        var execution = new JobExecution(1L, instance, BatchScheduler.slotParameters(NOON));
+        var execution = new JobExecution(1L, instance, identity(NOON));
         execution.setStatus(status);
         return execution;
     }
@@ -147,7 +147,7 @@ class BatchSchedulerFiringTest {
      * equals another of the same name whatever its value, so every slot's parameters are equal.
      */
     private static JobParameters slot(Instant nominal) {
-        String expected = BatchScheduler.slotParameters(nominal).getString(BatchScheduler.SCHEDULED_TIME_PARAMETER);
+        String expected = identity(nominal).getString(BatchScheduler.SCHEDULED_TIME_PARAMETER);
         return argThat(parameters -> parameters != null
                 && expected.equals(parameters.getString(BatchScheduler.SCHEDULED_TIME_PARAMETER)));
     }
@@ -164,7 +164,7 @@ class BatchSchedulerFiringTest {
 
     /** Lets the renewal thread finish anything due before a moment well after its next tick. */
     private void drainRenewals() throws Exception {
-        var renewer = (ScheduledExecutorService) ReflectionTestUtils.getField(scheduler, "renewer");
+        var renewer = (ScheduledExecutorService) ReflectionTestUtils.getField(scheduler.engine(), "renewer");
         renewer.schedule(() -> { }, 50, TimeUnit.MILLISECONDS).get(PATIENCE_MS, TimeUnit.MILLISECONDS);
     }
 
@@ -324,7 +324,7 @@ class BatchSchedulerFiringTest {
         started();
         awaitLatch(finished);
 
-        var pool = (ScheduledThreadPoolExecutor) ReflectionTestUtils.getField(scheduler, "executor");
+        var pool = (ScheduledThreadPoolExecutor) ReflectionTestUtils.getField(scheduler.engine(), "executor");
         await().atMost(Duration.ofMillis(PATIENCE_MS)).until(() -> pool.getActiveCount() == 0);
         assertThat(pool.getQueue()).isEmpty();
     }
@@ -344,7 +344,7 @@ class BatchSchedulerFiringTest {
         running.scheduleJob("job", "0 0 14 * * *");
         assertThat(running.nextFireTime("job")).contains(NOON.plus(Duration.ofHours(2)));
 
-        var pool = (ScheduledThreadPoolExecutor) ReflectionTestUtils.getField(running, "executor");
+        var pool = (ScheduledThreadPoolExecutor) ReflectionTestUtils.getField(running.engine(), "executor");
         assertThat(pool.getQueue()).hasSize(1);
     }
 
@@ -357,7 +357,7 @@ class BatchSchedulerFiringTest {
         assertThat(running.cancelScheduledJob("job")).isTrue();
 
         assertThat(running.nextFireTime("job")).isEmpty();
-        var pool = (ScheduledThreadPoolExecutor) ReflectionTestUtils.getField(running, "executor");
+        var pool = (ScheduledThreadPoolExecutor) ReflectionTestUtils.getField(running.engine(), "executor");
         assertThat(pool.getQueue()).isEmpty();
     }
 
@@ -856,5 +856,10 @@ class BatchSchedulerFiringTest {
         public Clock withZone(ZoneId zone) {
             return this;
         }
+    }
+
+    /** The parameters of a slot of a job that declares none, as both engines derive them. */
+    private static JobParameters identity(Instant nominal) {
+        return SlotIdentity.of(JobParameterSpec.none("job"), SlotIdentity.UNDECLARED, nominal).parameters();
     }
 }
