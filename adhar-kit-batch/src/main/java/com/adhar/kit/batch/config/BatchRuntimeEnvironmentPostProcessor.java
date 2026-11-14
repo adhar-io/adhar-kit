@@ -24,6 +24,11 @@ import java.util.Map;
  *       DEBUG instead. Set the logger's level explicitly to get the framework lines back.</li>
  *   <li>With the embedded scheduler enabled, {@code spring.batch.job.enabled} defaults to false:
  *       a service that runs its jobs on a schedule must not also run every job at startup.</li>
+ *   <li>With its engine {@code quartz}, the {@code spring.quartz.*} settings the kit owns (design
+ *       0025 §5.20.4): {@code job-store-type=jdbc}, {@code jdbc.initialize-schema=never},
+ *       {@code overwrite-existing-jobs=true} and {@code wait-for-jobs-to-complete-on-shutdown=false}.
+ *       They are defaults only so that an application value is SEEN: the kit's Quartz configuration
+ *       then fails the start naming a value that contradicts one.</li>
  * </ul>
  *
  * <p>In Kubernetes mode ({@code adhar.batch.mode=kubernetes}, or {@code auto} with a job named
@@ -67,6 +72,13 @@ public class BatchRuntimeEnvironmentPostProcessor implements EnvironmentPostProc
             "org.springframework.batch.core.launch.support.CommandLineJobOperator",
             "org.springframework.boot.batch.autoconfigure.JobLauncherApplicationRunner");
 
+    /** The {@code spring.quartz.*} values the engine quartz needs (design 0025 §5.20.4). */
+    public static final Map<String, String> QUARTZ_DEFAULTS = Map.of(
+            "spring.quartz.job-store-type", "jdbc",
+            "spring.quartz.jdbc.initialize-schema", "never",
+            "spring.quartz.overwrite-existing-jobs", "true",
+            "spring.quartz.wait-for-jobs-to-complete-on-shutdown", "false");
+
     @Override
     public int getOrder() {
         // After application.properties/yaml and the environment have been loaded.
@@ -93,6 +105,9 @@ public class BatchRuntimeEnvironmentPostProcessor implements EnvironmentPostProc
         PARAMETER_LOGGERS.forEach(logger -> defaults.put("logging.level." + logger, "WARN"));
         if (environment.getProperty("adhar.batch.scheduler.enabled", Boolean.class, false)) {
             defaults.put("spring.batch.job.enabled", "false");
+            if ("quartz".equalsIgnoreCase(environment.getProperty("adhar.batch.scheduler.engine", "simple").strip())) {
+                defaults.putAll(QUARTZ_DEFAULTS);
+            }
         }
         environment.getPropertySources().addLast(new MapPropertySource(PROPERTY_SOURCE_NAME, defaults));
     }

@@ -91,6 +91,9 @@ public class BatchSchemaMigrator implements InitializingBean {
                 .createSchemas(true)
                 .table(HISTORY_TABLE)
                 .locations(LOCATION)
+                // This directory only: the Quartz stream (QuartzSchemaMigrator) lives in its quartz/
+                // subdirectory, and Flyway's own scan would apply it here, to every service.
+                .resourceProvider(new DirectoryMigrations(LOCATION, BatchSchemaMigrator.class.getClassLoader()))
                 .failOnMissingLocations(true)
                 .placeholders(Map.of(TABLE_PREFIX_PLACEHOLDER, layout.tablePrefix()))
                 .validateMigrationNaming(true)

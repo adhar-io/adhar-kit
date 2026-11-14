@@ -3,9 +3,15 @@ package com.adhar.kit.batch.config;
 import com.adhar.kit.batch.runtime.BatchRole;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.time.DayOfWeek;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -53,6 +59,7 @@ import java.util.regex.Pattern;
  *     distribution: partitioned     # partitioned | chunked (Phase 4, refused until then) (ADHAR_BATCH_DISTRIBUTION)
  *     scheduler:                    # embedded mode - not the platform path
  *       enabled: false
+ *       engine: simple              # simple | quartz (design 0025 §5.20)
  *       time-zone: UTC
  *       misfire-threshold: 10m
  *       lock: jdbc                  # jdbc | none
@@ -61,6 +68,19 @@ import java.util.regex.Pattern;
  *       pool-size: 2
  *       jobs:
  *         importJob: "0 0 2 * * *"
+ *     quartz:                       # engine quartz only: a clustered JDBC job store in the batch schema
+ *       scheduler-name: orders      # the cluster's identity; default spring.application.name
+ *       cluster-checkin-interval: 15s
+ *       misfire: latest             # skip | latest | all: the default per trigger
+ *       max-catch-up: 24            # the most slots misfire 'all' runs after one outage
+ *       jobs:
+ *         importJob:
+ *           name: import            # the schedule's name (naming v1's batchjob); default the bean name as a DNS label
+ *       triggers:
+ *         importJob:
+ *           - name: nightly
+ *             kind: cron            # cron | interval | daily
+ *             expression: "0 0 2 * * ?"
  * }</pre>
  *
  * <p>Earlier keys are gone, not aliased: {@code table-prefix} is {@code repository.table-prefix},
@@ -125,6 +145,8 @@ public class BatchProperties {
     private final Retry retry = new Retry();
 
     private final Scheduler scheduler = new Scheduler();
+
+    private final Quartz quartz = new Quartz();
 
     private final Partition partition = new Partition();
 
@@ -208,6 +230,10 @@ public class BatchProperties {
         return scheduler;
     }
 
+    public Quartz getQuartz() {
+        return quartz;
+    }
+
     public Partition getPartition() {
         return partition;
     }
@@ -233,6 +259,11 @@ public class BatchProperties {
         require(repository.tablePrefix != null && TABLE_PREFIX.matcher(repository.tablePrefix).matches(),
                 "adhar.batch.repository.table-prefix must be letters, digits and underscores (at most 30), was '"
                         + repository.tablePrefix + "'");
+        String prefix = repository.tablePrefix.toUpperCase(Locale.ROOT);
+        require(!prefix.startsWith("QRTZ_") && !prefix.startsWith("ADHAR_"),
+                "adhar.batch.repository.table-prefix must not begin with QRTZ_ or ADHAR_, was '"
+                        + repository.tablePrefix + "': the batch schema holds the Quartz store's tables (QRTZ_*) and "
+                        + "the kit's own (ADHAR_*), and Spring Batch's tables would collide with them");
         require(chunk.size > 0, "adhar.batch.chunk.size must be positive, was " + chunk.size);
         require(page.size > 0, "adhar.batch.page.size must be positive, was " + page.size);
         require(retry.maxAttempts >= 1, "adhar.batch.retry.max-attempts must be at least 1, was "
@@ -254,6 +285,14 @@ public class BatchProperties {
                         + scheduler.lockLease + "), was " + scheduler.lockRenewInterval);
         require(scheduler.poolSize >= 1, "adhar.batch.scheduler.pool-size must be at least 1, was "
                 + scheduler.poolSize);
+        require(isPositive(quartz.clusterCheckinInterval),
+                "adhar.batch.quartz.cluster-checkin-interval must be positive");
+        require(quartz.maxCatchUp >= 1, "adhar.batch.quartz.max-catch-up must be at least 1, was "
+                + quartz.maxCatchUp);
+        require(scheduler.engine != Scheduler.Engine.QUARTZ || scheduler.lock != Scheduler.Lock.NONE,
+                "adhar.batch.scheduler.lock=none is refused with adhar.batch.scheduler.engine=quartz: the clustered "
+                        + "job store is the lock, and a store that is not clustered would fire every trigger on every "
+                        + "replica. Remove the property (jdbc), or use the engine simple");
         require(partition.gridSize == null || partition.gridSize >= 1,
                 "adhar.batch.partition.grid-size must be at least 1, was " + partition.gridSize);
         require(isPositive(partition.pollInterval), "adhar.batch.partition.poll-interval must be positive");
@@ -681,6 +720,13 @@ public class BatchProperties {
         private boolean enabled = false;
 
         /**
+         * Which engine fires the schedules: {@code simple} (cron schedules on the service's own
+         * threads, a lock row per job) or {@code quartz} (a clustered Quartz JDBC job store in the
+         * batch schema, which needs {@code spring-boot-starter-quartz}; design 0025 §5.20).
+         */
+        private Engine engine = Engine.SIMPLE;
+
+        /**
          * Time zone of the cron expressions.
          */
         private ZoneId timeZone = ZoneId.of("UTC");
@@ -728,6 +774,14 @@ public class BatchProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+
+        public Engine getEngine() {
+            return engine;
+        }
+
+        public void setEngine(Engine engine) {
+            this.engine = engine;
         }
 
         public ZoneId getTimeZone() {
@@ -787,6 +841,16 @@ public class BatchProperties {
         }
 
         /**
+         * The engines of {@code BatchScheduler} (design 0025 §5.20.2, D24).
+         */
+        public enum Engine {
+            /** Cron schedules on the service's own threads, a lock row per job (§5.16). */
+            SIMPLE,
+            /** A clustered Quartz JDBC job store in the batch schema (§5.20). */
+            QUARTZ
+        }
+
+        /**
          * Scheduler lock implementations.
          */
         public enum Lock {
@@ -794,6 +858,323 @@ public class BatchProperties {
             JDBC,
             /** No lock: only the JobInstance identity of a slot prevents a double run. */
             NONE
+        }
+    }
+
+    /**
+     * The engine {@code quartz} of the embedded scheduler (design 0025 §5.20): a clustered Quartz
+     * JDBC job store in the batch schema, shared by the service's replicas. The shared
+     * {@code adhar.batch.scheduler.*} keys still apply: {@code time-zone} is every trigger's default
+     * zone, {@code misfire-threshold} Quartz's {@code misfireThreshold}, {@code pool-size} its
+     * {@code threadCount}, and {@code jobs} cron schedules.
+     */
+    public static class Quartz {
+
+        /**
+         * The cluster's identity, Quartz's {@code instanceName} (the {@code SCHED_NAME} column):
+         * equal across one service's replicas and distinct per service. Unset, the application's
+         * {@code spring.application.name}; one of the two is required.
+         */
+        private String schedulerName;
+
+        /**
+         * How often a replica checks in to the cluster, and so how fast a dead replica's work is
+         * re-fired on another one.
+         */
+        private Duration clusterCheckinInterval = Duration.ofSeconds(15);
+
+        /**
+         * What a trigger does with the slots it missed while every replica was down, unless the
+         * trigger sets its own: {@code skip}, {@code latest} (one run, with the newest missed slot's
+         * identity) or {@code all} (every missed slot, oldest first).
+         */
+        private Misfire misfire = Misfire.LATEST;
+
+        /**
+         * The most missed slots {@code misfire: all} runs after one outage; older ones are skipped
+         * and counted.
+         */
+        private int maxCatchUp = 24;
+
+        /**
+         * Per job (by bean name): its schedule's name.
+         */
+        private Map<String, JobSettings> jobs = new LinkedHashMap<>();
+
+        /**
+         * Per job (by bean name): its triggers, reconciled into the trigger group
+         * {@code adhar-batch-config} at every start.
+         */
+        private Map<String, List<TriggerSettings>> triggers = new LinkedHashMap<>();
+
+        public String getSchedulerName() {
+            return schedulerName;
+        }
+
+        public void setSchedulerName(String schedulerName) {
+            this.schedulerName = schedulerName;
+        }
+
+        public Duration getClusterCheckinInterval() {
+            return clusterCheckinInterval;
+        }
+
+        public void setClusterCheckinInterval(Duration clusterCheckinInterval) {
+            this.clusterCheckinInterval = clusterCheckinInterval;
+        }
+
+        public Misfire getMisfire() {
+            return misfire;
+        }
+
+        public void setMisfire(Misfire misfire) {
+            this.misfire = misfire;
+        }
+
+        public int getMaxCatchUp() {
+            return maxCatchUp;
+        }
+
+        public void setMaxCatchUp(int maxCatchUp) {
+            this.maxCatchUp = maxCatchUp;
+        }
+
+        public Map<String, JobSettings> getJobs() {
+            return jobs;
+        }
+
+        public void setJobs(Map<String, JobSettings> jobs) {
+            this.jobs = jobs;
+        }
+
+        public Map<String, List<TriggerSettings>> getTriggers() {
+            return triggers;
+        }
+
+        public void setTriggers(Map<String, List<TriggerSettings>> triggers) {
+            this.triggers = triggers;
+        }
+
+        /**
+         * Misfire policies (design 0025 §5.20.6).
+         */
+        public enum Misfire {
+            /** Nothing runs; the next regular slot does. */
+            SKIP,
+            /** One run now, with the identity of the newest missed slot. */
+            LATEST,
+            /** Every missed slot, oldest first, each with its own identity, up to {@code max-catch-up}. */
+            ALL
+        }
+
+        /**
+         * One job's schedule settings.
+         */
+        public static class JobSettings {
+
+            /**
+             * The schedule's name: the {@code <batchjob>} of the run names (naming v1) and the
+             * Quartz JobDetail's key. Unset, the bean name as a DNS-1035 label of at most 40
+             * characters ({@code importJob} becomes {@code import-job}).
+             */
+            private String name;
+
+            public String getName() {
+                return name;
+            }
+
+            public void setName(String name) {
+                this.name = name;
+            }
+        }
+
+        /**
+         * One configured trigger (design 0025 §5.20.6).
+         */
+        public static class TriggerSettings {
+
+            /**
+             * The trigger's name within its job; the Quartz trigger is {@code <scheduleName>.<name>}.
+             */
+            private String name;
+
+            /**
+             * {@code cron} (a Quartz cron expression), {@code interval} (every {@code every} on the
+             * grid {@code start + n x every}) or {@code daily} ({@code every} between {@code from} and
+             * {@code to} on {@code days}).
+             */
+            private Kind kind = Kind.CRON;
+
+            /**
+             * {@code cron}: a Quartz cron expression, seconds first, optional year.
+             */
+            private String expression;
+
+            /**
+             * {@code interval} and {@code daily}: the period, at least one second.
+             */
+            private Duration every;
+
+            /**
+             * {@code interval}: the grid's anchor. Unset, the Unix epoch.
+             */
+            private Instant start;
+
+            /**
+             * {@code daily}: the first time of day of the window.
+             */
+            private LocalTime from;
+
+            /**
+             * {@code daily}: the last time of day of the window.
+             */
+            private LocalTime to;
+
+            /**
+             * {@code daily}: the days of the week. Unset, every day.
+             */
+            private List<DayOfWeek> days = new ArrayList<>();
+
+            /**
+             * The trigger's time zone. Unset, {@code adhar.batch.scheduler.time-zone}.
+             */
+            private ZoneId timeZone;
+
+            /**
+             * The trigger's calendar (design 0025 §5.20.6), by name.
+             */
+            private String calendar;
+
+            /**
+             * The trigger's misfire policy. Unset, {@code adhar.batch.quartz.misfire}.
+             */
+            private Misfire misfire;
+
+            /**
+             * Quartz's priority among triggers due at the same time.
+             */
+            private int priority = 5;
+
+            /**
+             * Values for the job's declared INPUT parameters.
+             */
+            private Map<String, String> parameters = new LinkedHashMap<>();
+
+            public String getName() {
+                return name;
+            }
+
+            public void setName(String name) {
+                this.name = name;
+            }
+
+            public Kind getKind() {
+                return kind;
+            }
+
+            public void setKind(Kind kind) {
+                this.kind = kind;
+            }
+
+            public String getExpression() {
+                return expression;
+            }
+
+            public void setExpression(String expression) {
+                this.expression = expression;
+            }
+
+            public Duration getEvery() {
+                return every;
+            }
+
+            public void setEvery(Duration every) {
+                this.every = every;
+            }
+
+            public Instant getStart() {
+                return start;
+            }
+
+            public void setStart(Instant start) {
+                this.start = start;
+            }
+
+            public LocalTime getFrom() {
+                return from;
+            }
+
+            public void setFrom(LocalTime from) {
+                this.from = from;
+            }
+
+            public LocalTime getTo() {
+                return to;
+            }
+
+            public void setTo(LocalTime to) {
+                this.to = to;
+            }
+
+            public List<DayOfWeek> getDays() {
+                return days;
+            }
+
+            public void setDays(List<DayOfWeek> days) {
+                this.days = days;
+            }
+
+            public ZoneId getTimeZone() {
+                return timeZone;
+            }
+
+            public void setTimeZone(ZoneId timeZone) {
+                this.timeZone = timeZone;
+            }
+
+            public String getCalendar() {
+                return calendar;
+            }
+
+            public void setCalendar(String calendar) {
+                this.calendar = calendar;
+            }
+
+            public Misfire getMisfire() {
+                return misfire;
+            }
+
+            public void setMisfire(Misfire misfire) {
+                this.misfire = misfire;
+            }
+
+            public int getPriority() {
+                return priority;
+            }
+
+            public void setPriority(int priority) {
+                this.priority = priority;
+            }
+
+            public Map<String, String> getParameters() {
+                return parameters;
+            }
+
+            public void setParameters(Map<String, String> parameters) {
+                this.parameters = parameters;
+            }
+
+            /**
+             * Trigger kinds.
+             */
+            public enum Kind {
+                /** A Quartz {@code CronTrigger}. */
+                CRON,
+                /** A repeating {@code SimpleTrigger} on the kit's grid. */
+                INTERVAL,
+                /** A {@code DailyTimeIntervalTrigger}. */
+                DAILY
+            }
         }
     }
 }

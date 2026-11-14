@@ -4,6 +4,8 @@ org.springframework.boot.EnvironmentPostProcessor=\
 com.adhar.kit.batch.config.BatchRuntimeEnvironmentPostProcessor
 
 # The kit's JobRepository schema migration is a database initializer: Spring Boot makes the
-# JobRepository (and JPA) wait for it.
+# JobRepository (and JPA) wait for it. So is its Quartz stream (engine quartz): Spring Boot's
+# Quartz scheduler waits for the Quartz tables.
 org.springframework.boot.sql.init.dependency.DatabaseInitializerDetector=\
-com.adhar.kit.batch.repository.BatchSchemaMigratorDetector
+com.adhar.kit.batch.repository.BatchSchemaMigratorDetector,\
+com.adhar.kit.batch.repository.QuartzSchemaMigratorDetector
