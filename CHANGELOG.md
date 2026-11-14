@@ -42,7 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `adhar.batch.partition.{transport,grid-size,poll-interval,timeout}` and
   `adhar.batch.distribution` (`chunked` reserved, exit 2 `unsupported`). The runner now recovers
   an execution recorded FAILED or STOPPED whose steps are still running (a pod killed before its
-  step stopped) instead of skipping every later run as a duplicate.
+  step stopped) instead of skipping every later run as a duplicate, at once when nobody holds its
+  lease. A role, distribution or partition setting that does not bind (`ADHAR_BATCH_ROLE=leader`,
+  a `JOB_COMPLETION_INDEX` that is not a number) exits 2 instead of 1.
+  Every partitioned step the kit builds (local and remote) is split by `PartitionPlanSplitter`:
+  the partitioner's output is recorded as the identity's plan before any partition, and restarts
+  are split from it, so a manager killed between Spring Batch's two writes of a partition no longer
+  restarts it with an empty range and completes with rows missing. Workers record themselves as
+  their partition's `PartitionOwner`, and the manager's `WorkerLivenessWatch` fails a partition
+  whose worker pod is gone, replaced or ended instead of waiting out the timeout. A scheduled gang
+  member reads its owner as a Volcano Job: business date from
+  `volcano.sh/cronjob-scheduled-timestamp`, attempt from `status.retryCount`.
 - **adhar-kit-test-commons** — `@AdharBatchTest` (the real auto-configuration on a fresh database
   of a PostgreSQL 18.4 container, `@SpringBatchTest`, optional LocalStack S3), `RestartScenario`
   (fail at item N, restart, assert the same instance resumed and every row was written once),

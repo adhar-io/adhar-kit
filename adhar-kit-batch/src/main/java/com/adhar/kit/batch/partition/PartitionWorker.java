@@ -32,7 +32,7 @@ import java.util.function.BooleanSupplier;
  * <pre>
  * loop:
  *   terminating                  stop: exit 143 (the partition in hand was stopped by WorkerStopHandler)
- *   a request claimed            StaleRequestGuard admits it  -> execute the partition
+ *   a request claimed            StaleRequestGuard admits it  -> record this pod as its owner, execute the partition
  *                                otherwise                    -> discard it (a failed attempt's leftover)
  *   nothing to claim             the identity's last execution COMPLETED -> exit 0
  *                                                              ABANDONED -> exit 6
@@ -41,6 +41,11 @@ import java.util.function.BooleanSupplier;
  *                                completing, CompleteJob, the Indexed Job's success policy, a deadline) ends
  *                                the pod
  * </pre>
+ *
+ * <p>A worker holds no lease. It records itself as the partition's {@link PartitionOwner} before running
+ * it, and the manager's {@link WorkerLivenessWatch} fails a partition whose owner pod is gone, so a
+ * worker SIGKILLed or OOM-killed mid-partition costs the run one restart instead of the manager's
+ * whole timeout.</p>
  *
  * <p>Workers are interchangeable: any of them takes any request, and how many there are is independent
  * of the grid size. A worker never exits because an execution FAILED or STOPPED: on an Indexed Job an
@@ -108,7 +113,7 @@ public class PartitionWorker implements PartitionConsumer {
                     channel.send(message);
                     return stopped(served);
                 }
-                execute(request, verdict.partition());
+                execute(request, verdict.partition(), context);
                 served++;
                 continue;
             }
@@ -124,7 +129,7 @@ public class PartitionWorker implements PartitionConsumer {
         }
     }
 
-    private void execute(StepExecutionRequest request, StepExecution partition) {
+    private void execute(StepExecutionRequest request, StepExecution partition, RunContext context) {
         Optional<Step> step = findStep(beanFactory, request.getStepName());
         if (step.isEmpty()) {
             // Fail it at once: left STARTING, the manager would wait for it until its timeout.
@@ -139,6 +144,11 @@ public class PartitionWorker implements PartitionConsumer {
         }
         log.info("Running partition {} (step execution {}) of execution {}", partition.getStepName(),
                 partition.getId(), partition.getJobExecutionId());
+        if (!context.podName().isBlank()) {
+            // Before it runs: a worker killed from here on leaves a partition the manager can see is orphaned.
+            new PartitionOwner(partition.getId(), context.podName(), context.podUid()).writeTo(partition);
+            jobRepository.updateExecutionContext(partition);
+        }
         stop.serving(partition);
         try {
             step.get().execute(partition);

@@ -1,6 +1,8 @@
 package com.adhar.kit.batch.partition;
 
 import com.adhar.kit.batch.runtime.BatchRole;
+import com.adhar.kit.batch.runtime.ExitCodes;
+import org.springframework.boot.ExitCodeGenerator;
 import org.springframework.boot.autoconfigure.condition.ConditionOutcome;
 import org.springframework.boot.autoconfigure.condition.SpringBootCondition;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -48,7 +50,8 @@ public class OnBatchRoleCondition extends SpringBootCondition {
      * @param environment the application's environment
      * @return the pod's role: {@code adhar.batch.role}, with {@code indexed} resolved through
      *         {@code JOB_COMPLETION_INDEX}; {@code single} when unset
-     * @throws IllegalStateException when {@code JOB_COMPLETION_INDEX} is not a number
+     * @throws IllegalStateException when {@code JOB_COMPLETION_INDEX} is not a number; it carries exit
+     *         code 2, so the pod fails as an invalid request instead of being retried
      */
     public static BatchRole effectiveRole(Environment environment) {
         BatchRole role = Binder.get(environment).bind(ROLE_PROPERTY, BatchRole.class).orElse(BatchRole.SINGLE);
@@ -56,7 +59,20 @@ public class OnBatchRoleCondition extends SpringBootCondition {
         try {
             return role.effective(index.isEmpty() ? OptionalInt.empty() : OptionalInt.of(Integer.parseInt(index)));
         } catch (NumberFormatException ex) {
-            throw new IllegalStateException(COMPLETION_INDEX + " must be a number, was '" + index + "'", ex);
+            throw new InvalidCompletionIndex(COMPLETION_INDEX + " must be a number, was '" + index + "'", ex);
+        }
+    }
+
+    /** A completion index that is not a number: an invalid request (exit 2), which no retry fixes. */
+    static final class InvalidCompletionIndex extends IllegalStateException implements ExitCodeGenerator {
+
+        InvalidCompletionIndex(String message, Throwable cause) {
+            super(message, cause);
+        }
+
+        @Override
+        public int getExitCode() {
+            return ExitCodes.INVALID_REQUEST;
         }
     }
 }

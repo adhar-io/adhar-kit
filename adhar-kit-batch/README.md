@@ -16,7 +16,7 @@ Design: `adhar/docs/design/0025-batch-platform.md` (§5). The platform runs a ba
 | Steps | `AdharSteps` → `AdharChunkStepBuilder`; `FaultTolerance` (retry and skip presets, `deadLetter()`) |
 | I/O | `KeysetPagingItemReaderBuilder`, `PostgresUpsertItemWriterBuilder`, `JsonLines{Reader,Writer}Builder`, `S3ItemReaderBuilder`, `S3ItemWriterBuilder`, plus the CSV/JSON/JDBC/JPA builders |
 | Partitioning (one pod) | `LocalPartitioning`, `SqlKeyRangePartitioner`, `ObjectPrefixPartitioner` |
-| Remote partitioning (a manager and workers) | `RemotePartitioning`, `@ConditionalOnBatchRole`, `PartitionWorker`, `JdbcPartitionTransport`, `StaleRequestGuard`, `WorkerStopHandler` |
+| Remote partitioning (a manager and workers) | `RemotePartitioning`, `@ConditionalOnBatchRole`, `PartitionWorker`, `JdbcPartitionTransport`, `StaleRequestGuard`, `WorkerStopHandler`, `PartitionPlanSplitter`, `WorkerLivenessWatch` |
 | Telemetry | `BatchProgressMetrics`, `BatchMdc`, `ItemObservationTracingFilter` |
 | Events | `BatchRunEvent` (`Started`, `Completed`, `Failed`, `Stopped`, `Skipped`, `Recovered`) |
 | Operations | `BatchOperator` (`start`, `restart`, `stop`, `abandon`, `recover`, `findExecutions`) |
@@ -122,7 +122,7 @@ timeout, starts the named job once and exits.
 |---|---|
 | 0 | Completed, or skipped: already complete, a duplicate run still alive |
 | 1 | The JVM or context failed before the run (retried) |
-| 2 | Invalid request: parameters, unknown job, incrementer, in-memory repository, migration, business date, unsupported (not retried) |
+| 2 | Invalid request: parameters, unknown job, incrementer, in-memory repository, migration, business date, unsupported, a role, distribution or partition setting that does not bind (not retried) |
 | 3 | Failed, not retryable: `NonRetryableBatchException`, skip limit exceeded (not retried) |
 | 4 | Stopped on request |
 | 5 | Failed, retryable |
@@ -148,7 +148,13 @@ Step importManager(JobRepository jobRepository, DataSource dataSource, Step impo
 
 The worker's reader is `@StepScope` and reads `#{stepExecutionContext['minKey']}` /
 `['maxKey']`. A restart re-runs only the partitions that did not complete, each from its last
-commit, over the ranges recorded by the first attempt. `ObjectPrefixPartitioner` makes one
+commit, over the ranges recorded by the first attempt. The partitioner runs once per identity: its
+output is the **plan** (`adhar.partition.plan` in the manager step's context, saved before any
+partition is), and every restart is split from it (`PartitionPlanSplitter`). A manager killed while
+it recorded the partitions (Spring Batch saves each one empty first, then its range) therefore
+cannot leave a partition that restarts with no range and reads nothing: a partition the plan names
+but no attempt recorded, or whose last record is empty, starts from its last written record or
+its planned range. `ObjectPrefixPartitioner` makes one
 partition per S3 prefix (`#{stepExecutionContext['prefix']}`).
 
 ## Remote partitioning (a manager and workers)
@@ -185,9 +191,16 @@ run's identity from its declared parameters exactly as the manager does.
 - **Workers** are interchangeable: each claims a request (a single `DELETE … RETURNING`, so one
   worker per request), runs the partition and takes the next, until the identity's execution
   COMPLETED (exit 0). A FAILED or STOPPED execution does not end a worker: a restart is coming.
-- **Restarts re-run only unfinished partitions**, each from its last commit. A worker killed
-  mid-partition leaves its partition STARTED; the restarted manager recovers the old execution
-  (the lease, as for a single run) and runs that partition again.
+- **Restarts re-run only unfinished partitions**, each from its last commit, over the plan the
+  first attempt recorded (see local partitioning above).
+- **A worker killed mid-partition** (SIGKILL, OOM) does not hold the run until the timeout.
+  Workers hold no lease; each records itself as its partition's owner (`PartitionOwner`: pod
+  name, uid, step execution) before running it, and in a cluster the manager's
+  `WorkerLivenessWatch` reads those pods every three poll intervals. A running partition whose
+  owner pod is gone (404), replaced (another uid under its name) or ended is marked FAILED: the
+  other partitions finish, the manager step fails retryable (exit 5) and the Job's retry runs
+  that partition from its last commit. A terminating pod is left to stop its own partition. On
+  Volcano the gang's `PodFailed → RestartJob` usually comes first.
 - **Stale requests** never run: the manager clears the run's group before it sends, and a worker
   discards a request whose execution is not STARTED or not the latest, or whose partition already
   started.
@@ -198,6 +211,10 @@ run's identity from its declared parameters exactly as the manager does.
   fails the run as retryable (exit 5) rather than STOPPED (exit 4, an operator's stop), so the Job
   retries it and the restart re-runs that partition. A partition that failed with a
   `NonRetryableBatchException` or a skip limit fails the run with exit 3.
+- **Scheduled gangs.** On Volcano, `ADHAR_BATCH_K8S_JOB` is the pod's `volcano.sh/job-name`. A
+  name `batch/v1` does not know is read as a Volcano Job (`batch.volcano.sh/v1alpha1`, the composed
+  Role grants `get` on it): the business date comes from the Volcano CronJob's
+  `volcano.sh/cronjob-scheduled-timestamp`, the attempt from the gang's `status.retryCount`.
 - **Role `single`** (a local run, a test, a service) plays every part: `manager(…)` runs the same
   partitions in the one process.
 

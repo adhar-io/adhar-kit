@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -94,6 +95,22 @@ class DaprSubscriptionRegistrarTest {
         }
         registrar.afterSingletonsInstantiated();
         return registrar;
+    }
+
+    @Test
+    void theTopicsDefaultRouteDoesNotDependOnReflectionOrder() throws Exception {
+        // getDeclaredMethods has no defined order: on Linux the handler naming its own route came
+        // first and took the default, so /dapr/events/pubsub/orders vanished (CI, 2026-11-14).
+        Method onOrder = OrderHandlers.class.getMethod("onOrder", Order.class);
+        Method duplicate = OrderHandlers.class.getMethod("duplicateDefault", Order.class);
+        Method cancelled = OrderHandlers.class.getMethod("onCancelled", DaprCloudEvent.class);
+        List<Method> forward = new ArrayList<>(List.of(onOrder, duplicate, cancelled));
+        List<Method> reversed = new ArrayList<>(List.of(cancelled, duplicate, onOrder));
+        forward.sort(DaprSubscriptionRegistrar.REGISTRATION_ORDER);
+        reversed.sort(DaprSubscriptionRegistrar.REGISTRATION_ORDER);
+
+        assertThat(reversed).isEqualTo(forward);
+        assertThat(forward.indexOf(onOrder)).isLessThan(forward.indexOf(duplicate));
     }
 
     @Test

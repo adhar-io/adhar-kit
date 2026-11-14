@@ -2,6 +2,7 @@ package com.adhar.kit.batch.partition;
 
 import com.adhar.kit.batch.runtime.BatchRole;
 import com.adhar.kit.batch.runtime.ExitCodes;
+import com.adhar.kit.batch.runtime.KubernetesOwnerLookup;
 import com.adhar.kit.batch.runtime.RunContext;
 import com.adhar.kit.batch.runtime.RunOutcome;
 import com.adhar.kit.batch.runtime.RunTrigger;
@@ -9,6 +10,10 @@ import com.adhar.kit.batch.support.BatchTestApplication;
 import com.adhar.kit.batch.support.PartitionedJobs;
 import com.adhar.kit.batch.support.PostgresDatabases;
 import com.adhar.kit.batch.support.TestJobs;
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.client.WireMock;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.github.tomakehurst.wiremock.stubbing.StubMapping;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -77,13 +82,23 @@ class RemotePartitioningTestContainerTest {
     }
 
     private ConfigurableApplicationContext context(BatchRole role, Map<String, Object> extra) {
+        return context(role, extra, null);
+    }
+
+    /** {@code lookup}: the Kubernetes API a run in a cluster reads; {@code null} outside one. */
+    private ConfigurableApplicationContext context(BatchRole role, Map<String, Object> extra,
+                                                   KubernetesOwnerLookup lookup) {
         Map<String, Object> properties = BatchTestApplication.postgres(url);
         properties.put("adhar.batch.role", role.label());
         properties.put("adhar.batch.partition.grid-size", String.valueOf(GRID));
         properties.put("adhar.batch.partition.poll-interval", "100ms");
         properties.putAll(extra);
-        ConfigurableApplicationContext context = BatchTestApplication.builder(PartitionedJobs.class)
-                .properties(properties).run();
+        org.springframework.boot.builder.SpringApplicationBuilder builder = BatchTestApplication
+                .builder(PartitionedJobs.class).properties(properties);
+        if (lookup != null) {
+            builder.initializers(context -> context.getBeanFactory().registerSingleton("kubernetesOwnerLookup", lookup));
+        }
+        ConfigurableApplicationContext context = builder.run();
         contexts.add(context);
         return context;
     }
@@ -109,9 +124,13 @@ class RemotePartitioningTestContainerTest {
     }
 
     private CompletableFuture<RunOutcome> serve(ConfigurableApplicationContext worker, AtomicBoolean stopping) {
+        return serve(worker, stopping, "importer-worker");
+    }
+
+    private CompletableFuture<RunOutcome> serve(ConfigurableApplicationContext worker, AtomicBoolean stopping, String pod) {
         Job job = worker.getBean(PartitionedJobs.JOB, Job.class);
         RunContext context = new RunContext(PartitionedJobs.JOB, "importer", BatchRole.WORKER, RunTrigger.MANUAL, "",
-                "", "", "importer-worker", "", "", Optional.empty(), ZoneOffset.UTC, Optional.empty(), "", 1,
+                "", "", pod, "", "", Optional.empty(), ZoneOffset.UTC, Optional.empty(), "", 1,
                 OptionalInt.empty(), "test");
         return CompletableFuture.supplyAsync(() -> worker.getBean(PartitionWorker.class)
                 .consume(job, parameters, context, stopping::get));
@@ -215,6 +234,88 @@ class RemotePartitioningTestContainerTest {
         assertThat(targetRows()).isEqualTo(ROWS);
         assertThat(distinctTargetRows()).isEqualTo(ROWS);
         assertThat(within(served, Duration.ofSeconds(30)).exitCode()).isZero();
+    }
+
+    @Test
+    @DisplayName("a partition recorded without its range (the manager killed mid-split) runs its planned range on restart")
+    void halfWrittenSplit() throws Exception {
+        ConfigurableApplicationContext manager = context(BatchRole.MANAGER, Map.of("adhar.batch.partition.timeout", "1s"));
+        TestJobs.seed(manager.getBean(JdbcTemplate.class), ROWS);
+        JobExecution failed = within(start(manager), Duration.ofMinutes(1));
+        assertThat(failed.getStatus()).isEqualTo(BatchStatus.FAILED);
+        // What a manager killed between Spring Batch's two statements leaves: the partition's step
+        // execution saved with the empty context, its range never written.
+        java.io.ByteArrayOutputStream empty = new java.io.ByteArrayOutputStream();
+        new org.springframework.batch.core.repository.dao.DefaultExecutionContextSerializer().serialize(Map.of(), empty);
+        int blanked = jdbc().update("UPDATE batch.batch_step_execution_context SET short_context = ?, "
+                + "serialized_context = NULL WHERE step_execution_id = (SELECT step_execution_id FROM "
+                + "batch.batch_step_execution WHERE step_name = ? AND job_execution_id = ?)",
+                empty.toString(java.nio.charset.StandardCharsets.ISO_8859_1), PartitionedJobs.WORKER_STEP + ":partition1",
+                failed.getId());
+        assertThat(blanked).isOne();
+
+        ConfigurableApplicationContext restarted = manager();
+        CompletableFuture<RunOutcome> served = serve(worker(0), new AtomicBoolean());
+        JobExecution completed = within(start(restarted), Duration.ofMinutes(2));
+
+        assertThat(completed.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(targetRows()).as("before the plan: COMPLETED with partition1's 20 rows missing").isEqualTo(ROWS);
+        assertThat(distinctTargetRows()).isEqualTo(ROWS);
+        assertThat(within(served, Duration.ofSeconds(30)).exitCode()).isZero();
+    }
+
+    @Test
+    @DisplayName("a worker killed mid-partition: the manager fails that partition at once, not at its timeout, and a restart finishes it")
+    void deadWorker() throws Exception {
+        WireMockServer api = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        api.start();
+        try {
+            StubMapping aAlive = api.stubFor(WireMock.get("/api/v1/namespaces/batch-test/pods/importer-worker-a")
+                    .willReturn(WireMock.okJson("{\"metadata\":{\"uid\":\"\"},\"status\":{\"phase\":\"Running\"}}")));
+            api.stubFor(WireMock.get("/api/v1/namespaces/batch-test/pods/importer-worker-b")
+                    .willReturn(WireMock.okJson("{\"metadata\":{\"uid\":\"\"},\"status\":{\"phase\":\"Running\"}}")));
+            KubernetesOwnerLookup lookup = new KubernetesOwnerLookup(java.net.URI.create(api.baseUrl()), () -> "token",
+                    "batch-test", java.net.http.HttpClient.newHttpClient(), Duration.ofSeconds(5));
+            ConfigurableApplicationContext manager = context(BatchRole.MANAGER,
+                    Map.of("adhar.batch.partition.timeout", "5m"), lookup);
+            TestJobs.seed(manager.getBean(JdbcTemplate.class), ROWS);
+            ConfigurableApplicationContext a = worker(0);
+            PartitionedJobs.Gate gate = a.getBean(PartitionedJobs.Gate.class);
+            gate.holdAt(33);
+            serve(a, new AtomicBoolean(), "importer-worker-a");
+            CompletableFuture<JobExecution> attempt1 = start(manager);
+            assertThat(gate.awaitHeld(Duration.ofMinutes(1))).as("worker a is inside its second partition").isTrue();
+            CompletableFuture<RunOutcome> b = serve(worker(0), new AtomicBoolean(), "importer-worker-b");
+
+            // Worker a's pod is killed (SIGKILL, OOM): the API no longer has it, its JVM never commits.
+            api.removeStub(aAlive);
+            long killedAt = System.nanoTime();
+            JobExecution first = within(attempt1, Duration.ofMinutes(1));
+
+            assertThat(Duration.ofNanos(System.nanoTime() - killedAt)).as("not the 5 minute timeout")
+                    .isLessThan(Duration.ofSeconds(30));
+            assertThat(first.getStatus()).isEqualTo(BatchStatus.FAILED);
+            assertThat(ExitCodes.of(first)).isEqualTo(ExitCodes.FAILED_RETRYABLE);
+            JobExecution recorded = manager.getBean(JobRepository.class).getJobExecution(first.getId());
+            assertThat(recorded.getStepExecutions().stream().filter(step -> step.getStatus() == BatchStatus.FAILED
+                    && step.getStepName().startsWith(PartitionedJobs.WORKER_STEP + ":")))
+                    .as("only worker a's partition; worker b finished the rest").singleElement()
+                    .satisfies(step -> assertThat(step.getExitStatus().getExitDescription())
+                            .contains("worker pod importer-worker-a is gone"));
+            await("the watch ends with the manager step").atMost(Duration.ofSeconds(10)).until(() -> Thread
+                    .getAllStackTraces().keySet().stream().noneMatch(thread -> thread.getName().equals("batch-worker-watch")));
+
+            // The 'dead' JVM wakes up: its chunk's commit is fenced. The restart finishes the partition.
+            gate.release();
+            JobExecution completed = within(start(manager()), Duration.ofMinutes(2));
+
+            assertThat(completed.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+            assertThat(targetRows()).isEqualTo(ROWS);
+            assertThat(distinctTargetRows()).isEqualTo(ROWS);
+            assertThat(within(b, Duration.ofSeconds(30)).exitCode()).isZero();
+        } finally {
+            api.stop();
+        }
     }
 
     @Test

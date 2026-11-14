@@ -89,6 +89,22 @@ class RunContextResolverTest {
     }
 
     @Test
+    @DisplayName("a scheduled gang member: the business date from its Volcano Job, the attempt from the gang's restarts")
+    void scheduledGangMember() {
+        // ADHAR_BATCH_K8S_JOB is the pod's volcano.sh/job-name label on a gang (composition batchjob-kubernetes).
+        env.putAll(Map.of("ADHAR_BATCH_K8S_JOB", "settlement-29470650", "POD_NAME", "settlement-29470650-worker-2"));
+        API.stubFor(get("/apis/batch.volcano.sh/v1alpha1/namespaces/team-a-prod/jobs/settlement-29470650")
+                .willReturn(okJson(KubernetesOwnerLookupTest.VOLCANO_JOB)));
+
+        RunContext context = resolve();
+
+        assertThat(context.scheduledTime()).contains(OffsetDateTime.parse("2026-11-04T01:30:00+08:00"));
+        assertThat(context.businessDate()).contains(LocalDate.of(2026, 11, 4));
+        assertThat(context.k8sJobUid()).isEqualTo("vcjob-uid-1");
+        assertThat(context.attempt()).as("one RestartJob so far").isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("a manual run has no scheduled time even when its Job has one, and survives an API that fails")
     void manualRun() {
         env.put("ADHAR_BATCH_TRIGGER", "manual");

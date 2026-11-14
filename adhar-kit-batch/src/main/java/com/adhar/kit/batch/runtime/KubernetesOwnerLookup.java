@@ -32,7 +32,17 @@ import java.util.function.Supplier;
  * JDK's {@link HttpClient} (no Kubernetes client library in a run image): the owner Job (its
  * {@value #SCHEDULED_TIMESTAMP} annotation, its uid, its failed pods) and a pod (this one for the
  * image digest, or an execution's owner to see whether it is gone). The composed Role grants
- * {@code get} on {@code jobs} and {@code pods} in the run's namespace and nothing else.
+ * {@code get} on {@code jobs} (in {@code batch} and {@code batch.volcano.sh}) and {@code pods} in the
+ * run's namespace and nothing else.
+ *
+ * <p>The owner is a {@code batch/v1} Job, or, for a gang, a Volcano Job: its pods carry the name as
+ * {@code volcano.sh/job-name}, which the composition hands over in the same {@code ADHAR_BATCH_K8S_JOB},
+ * so a name {@code batch/v1} does not know is looked up as a Volcano Job. A Volcano CronJob records
+ * the nominal time as {@value #VOLCANO_SCHEDULED_TIMESTAMP} (RFC 3339 in the CronJob's time zone,
+ * volcano-sh/apis v1.16 {@code CronJobScheduledTimestampAnnotation}, behind the controller's
+ * {@code CronVolcanoJobSupport} gate, on by default), and a Volcano Job's retries are its
+ * {@code status.retryCount}: {@code RestartJob} replaces the whole gang, so its failed pods would
+ * count each restart once per member.</p>
  *
  * <p>Outside a cluster (no {@code KUBERNETES_SERVICE_HOST} or no token) it is
  * {@linkplain #isAvailable() unavailable}: nothing is read and every answer is "unknown".</p>
@@ -45,6 +55,9 @@ public class KubernetesOwnerLookup {
 
     /** The CronJob controller's annotation on the Jobs it creates: the nominal scheduled time. */
     public static final String SCHEDULED_TIMESTAMP = "batch.kubernetes.io/cronjob-scheduled-timestamp";
+
+    /** The Volcano CronJob controller's annotation on the Volcano Jobs it creates: the nominal scheduled time. */
+    public static final String VOLCANO_SCHEDULED_TIMESTAMP = "volcano.sh/cronjob-scheduled-timestamp";
 
     /** The run's container in the composed pod template. */
     public static final String CONTAINER = "batch";
@@ -113,17 +126,25 @@ public class KubernetesOwnerLookup {
     }
 
     /**
-     * @param name a Job in the run's namespace
-     * @return the Job, empty when unavailable or not found
+     * @param name a Job, or a Volcano Job, in the run's namespace
+     * @return the Job, empty when unavailable or neither exists (a cluster without Volcano answers
+     *         404 for its kind)
      * @throws KubernetesLookupException when the API answers with anything but the Job or 404
      */
     public Optional<OwnerJob> job(String name) {
-        return get("/apis/batch/v1/namespaces/" + encode(namespace) + "/jobs/" + encode(name)).map(job -> {
-            Object scheduled = Json.at(job, "metadata", "annotations", SCHEDULED_TIMESTAMP);
-            Object failed = Json.at(job, "status", "failed");
-            return new OwnerJob(string(Json.at(job, "metadata", "uid")), timestamp(scheduled),
-                    failed instanceof BigDecimal count ? count.intValue() : 0);
-        });
+        Optional<OwnerJob> job = get("/apis/batch/v1/namespaces/" + encode(namespace) + "/jobs/" + encode(name))
+                .map(found -> owner(found, SCHEDULED_TIMESTAMP, Json.at(found, "status", "failed")));
+        if (job.isPresent() || !isAvailable()) {
+            return job;
+        }
+        return get("/apis/batch.volcano.sh/v1alpha1/namespaces/" + encode(namespace) + "/jobs/" + encode(name))
+                .map(found -> owner(found, VOLCANO_SCHEDULED_TIMESTAMP, Json.at(found, "status", "retryCount")));
+    }
+
+    private static OwnerJob owner(Object job, String scheduledAnnotation, Object retries) {
+        Object scheduled = Json.at(job, "metadata", "annotations", scheduledAnnotation);
+        return new OwnerJob(string(Json.at(job, "metadata", "uid")), timestamp(scheduledAnnotation, scheduled),
+                retries instanceof BigDecimal count ? count.intValue() : 0);
     }
 
     /**
@@ -176,14 +197,14 @@ public class KubernetesOwnerLookup {
         return "";
     }
 
-    private static Optional<OffsetDateTime> timestamp(Object value) {
+    private static Optional<OffsetDateTime> timestamp(String annotation, Object value) {
         if (!(value instanceof String text) || text.isBlank()) {
             return Optional.empty();
         }
         try {
             return Optional.of(OffsetDateTime.parse(text));
         } catch (DateTimeParseException ex) {
-            log.warn("The owner Job's {} annotation is not a timestamp: '{}'", SCHEDULED_TIMESTAMP, text);
+            log.warn("The owner Job's {} annotation is not a timestamp: '{}'", annotation, text);
             return Optional.empty();
         }
     }
@@ -233,7 +254,7 @@ public class KubernetesOwnerLookup {
      *
      * @param uid           the Job's uid
      * @param scheduledTime the CronJob's nominal time, empty for a Job no CronJob created
-     * @param failed        the Job's failed pods so far
+     * @param failed        the Job's failed pods so far; for a Volcano Job, its gang restarts ({@code retryCount})
      */
     public record OwnerJob(String uid, Optional<OffsetDateTime> scheduledTime, int failed) {
     }

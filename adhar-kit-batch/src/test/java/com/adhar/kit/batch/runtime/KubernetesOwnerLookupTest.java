@@ -85,6 +85,40 @@ class KubernetesOwnerLookupTest {
                 .withHeader("Authorization", equalTo("Bearer sa-token")));
     }
 
+    /** A Volcano Job a Volcano CronJob created, as v1.16's controller writes it (RFC 3339 in the CronJob's zone). */
+    static final String VOLCANO_JOB = """
+            {"apiVersion":"batch.volcano.sh/v1alpha1","kind":"Job",
+             "metadata":{"name":"settlement-29470650","uid":"vcjob-uid-1","annotations":{
+              "volcano.sh/cronjob-scheduled-timestamp":"2026-11-04T01:30:00+08:00"}},
+             "status":{"state":{"phase":"Running"},"failed":5,"retryCount":1}}""";
+
+    @Test
+    @DisplayName("a gang's owner is a Volcano Job: its uid, its Volcano CronJob's nominal time, its gang restarts")
+    void volcanoOwnerJob() {
+        API.stubFor(get("/apis/batch.volcano.sh/v1alpha1/namespaces/team-a-prod/jobs/settlement-29470650")
+                .willReturn(okJson(VOLCANO_JOB)));
+
+        Optional<OwnerJob> job = lookup.job("settlement-29470650");
+
+        assertThat(job).as("five failed pods are ONE RestartJob of a five-pod gang").contains(new OwnerJob(
+                "vcjob-uid-1", Optional.of(OffsetDateTime.parse("2026-11-04T01:30:00+08:00")), 1));
+        API.verify(getRequestedFor(urlEqualTo("/apis/batch/v1/namespaces/team-a-prod/jobs/settlement-29470650")));
+        API.verify(getRequestedFor(urlEqualTo(
+                "/apis/batch.volcano.sh/v1alpha1/namespaces/team-a-prod/jobs/settlement-29470650"))
+                .withHeader("Authorization", equalTo("Bearer sa-token")));
+    }
+
+    @Test
+    @DisplayName("a batch/v1 Job is never looked up as a Volcano Job; a name neither knows is no owner")
+    void volcanoOnlyWhenBatchDoesNotKnowTheName() {
+        API.stubFor(get("/apis/batch/v1/namespaces/team-a-prod/jobs/importer-29470650").willReturn(okJson(JOB)));
+
+        assertThat(lookup.job("importer-29470650")).isPresent();
+        API.verify(0, getRequestedFor(urlEqualTo(
+                "/apis/batch.volcano.sh/v1alpha1/namespaces/team-a-prod/jobs/importer-29470650")));
+        assertThat(lookup.job("nobody")).as("both 404: a cluster without Volcano answers 404 for its kind").isEmpty();
+    }
+
     @Test
     @DisplayName("a Job no CronJob created has no scheduled time; a malformed annotation is no time either")
     void unscheduledJob() {

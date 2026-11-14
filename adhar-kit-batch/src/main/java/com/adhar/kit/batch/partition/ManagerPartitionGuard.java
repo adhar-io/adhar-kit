@@ -10,6 +10,7 @@ import org.springframework.batch.core.step.StepExecution;
 import org.springframework.dao.OptimisticLockingFailureException;
 
 import java.time.LocalDateTime;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The manager half of remote partitioning's safety (design 0025 §5.9, §5.10), a listener of the
@@ -20,6 +21,8 @@ import java.time.LocalDateTime;
  *       or stopped attempt left unclaimed is gone before the live attempt asks for its own
  *       partitions (F20; the workers' {@link StaleRequestGuard} catches a request claimed before
  *       the clear).</li>
+ *   <li><b>While the partitions run</b> its {@link WorkerLivenessWatch} fails a partition whose
+ *       worker pod is gone, so the run restarts it instead of waiting out the timeout.</li>
  *   <li><b>When the manager step ends without completing</b> (most often: it stopped waiting at
  *       {@code adhar.batch.partition.timeout}) it marks every partition still running FAILED. That is
  *       what {@code JobOperator.recover} does for a dead manager, and it is done here for the same
@@ -40,16 +43,21 @@ public class ManagerPartitionGuard implements StepExecutionListener {
     private final JdbcPartitionTransport transport;
     private final JobRepository jobRepository;
     private final String workerStepName;
+    private final WorkerLivenessWatch watch;
+    private final AtomicReference<AutoCloseable> watching = new AtomicReference<>();
 
     /**
      * @param transport      the partition channel
      * @param jobRepository  the shared JobRepository
      * @param workerStepName the worker step: its partitions are named {@code <workerStepName>:<partition>}
+     * @param watch          watches the workers while the partitions run
      */
-    public ManagerPartitionGuard(JdbcPartitionTransport transport, JobRepository jobRepository, String workerStepName) {
+    public ManagerPartitionGuard(JdbcPartitionTransport transport, JobRepository jobRepository, String workerStepName,
+                                 WorkerLivenessWatch watch) {
         this.transport = transport;
         this.jobRepository = jobRepository;
         this.workerStepName = workerStepName;
+        this.watch = watch;
     }
 
     @Override
@@ -60,10 +68,13 @@ public class ManagerPartitionGuard implements StepExecutionListener {
         if (left > 0) {
             log.info("Cleared {} partition request(s) an earlier attempt of this run left in {}", left, group);
         }
+        stopWatching();
+        watching.set(watch.start(stepExecution));
     }
 
     @Override
     public ExitStatus afterStep(StepExecution stepExecution) {
+        stopWatching();
         // The group is NOT cleared here: it is the identity's, not this attempt's, and a manager that
         // ends late (recovered behind its back) would delete the live attempt's requests. The next
         // attempt clears it before it sends, and workers discard what is left meanwhile.
@@ -72,6 +83,17 @@ public class ManagerPartitionGuard implements StepExecutionListener {
         }
         // null keeps the step's own exit status.
         return null;
+    }
+
+    private void stopWatching() {
+        AutoCloseable running = watching.getAndSet(null);
+        if (running != null) {
+            try {
+                running.close();
+            } catch (Exception ex) {
+                log.debug("Could not stop the worker watch: {}", ex.getMessage());
+            }
+        }
     }
 
     private void fenceUnfinishedPartitions(StepExecution manager) {

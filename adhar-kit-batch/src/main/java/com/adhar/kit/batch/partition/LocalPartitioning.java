@@ -11,7 +11,7 @@ import org.springframework.core.task.SimpleAsyncTaskExecutor;
  * Partitions inside ONE run pod (design 0025 §5.10, Phase 1): a manager step splits the input with
  * a {@link Partitioner}, and {@code threads} threads run the worker step over the partitions. A
  * restart re-runs only the partitions that did not complete; each partition resumes from its own
- * last commit.
+ * last commit, over the range the first attempt planned ({@link PartitionPlanSplitter}).
  *
  * <pre>{@code
  * @Bean
@@ -81,6 +81,8 @@ public record LocalPartitioning(int gridSize, int threads) {
     public Step step(String name, JobRepository jobRepository, Partitioner partitioner, Step worker) {
         return new StepBuilder(name, jobRepository)
                 .partitioner(worker.getName(), partitioner)
+                .splitter(new PartitionPlanSplitter(jobRepository, worker.getName(), partitioner,
+                        worker.isAllowStartIfComplete()))
                 .step(worker)
                 .partitionHandler(handler(worker))
                 .build();

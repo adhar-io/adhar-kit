@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -14,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -79,6 +82,22 @@ class RunnerExitCodeIT {
         assertThat(result.exitCode()).as(result.stdout()).isEqualTo(2);
         assertThat(result.summary().get("reason").asText()).isEqualTo("parameters");
         assertThat(result.summary().has("executionId")).isFalse();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"ADHAR_BATCH_ROLE=leader", "ADHAR_BATCH_ROLE=indexed,JOB_COMPLETION_INDEX=one",
+            "ADHAR_BATCH_ROLE=manager,ADHAR_BATCH_PARTITION_TRANSPORT=nats", "ADHAR_BATCH_DISTRIBUTION=sharded",
+            "ADHAR_BATCH_ROLE=worker,ADHAR_BATCH_PARTITION_GRIDSIZE=four"})
+    @DisplayName("2: a role, distribution or partition setting the pod cannot read is an invalid request, never retried")
+    void unreadableRunSelector(String settings) throws Exception {
+        Map<String, String> env = new HashMap<>(Map.of("ADHAR_BATCH_PARAMS", "{\"businessDate\":\"2026-11-03\"}"));
+        for (String setting : settings.split(",")) {
+            String[] pair = setting.split("=", 2);
+            env.put(pair[0], pair[1]);
+        }
+        Result result = run(env);
+
+        assertThat(result.exitCode()).as(result.stdout()).isEqualTo(2);
     }
 
     @Test

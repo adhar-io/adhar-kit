@@ -65,6 +65,16 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- In-service scheduling on Quartz (optional, design 0025 §5.20, D24): the engine
+             `quartz` of BatchScheduler, a clustered JDBC job store in the batch schema. A service
+             that sets adhar.batch.scheduler.engine=quartz adds the starter; Boot 4.1 manages
+             Quartz 2.5.2, whose tables_postgres.sql the kit's quartz migration stream copies. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-quartz</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Spring Boot Starter -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

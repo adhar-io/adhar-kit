@@ -2,6 +2,7 @@ package com.adhar.kit.batch.partition;
 
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.runtime.BatchRole;
+import com.adhar.kit.batch.runtime.KubernetesOwnerLookup;
 import org.springframework.batch.core.partition.Partitioner;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.Step;
@@ -43,7 +44,7 @@ import java.time.Duration;
  * <ul>
  *   <li>{@code manager}: the remote manager step. Partitions {@code adhar.batch.partition.grid-size},
  *       polls the repository every {@code poll-interval}, gives up after {@code timeout}; the stale-request
- *       guard and the fence ({@link ManagerPartitionGuard}) and the outcome rules of
+ *       guard, the fence and the worker watch ({@link ManagerPartitionGuard}) and the outcome rules of
  *       {@link PartitionOutcomeAggregator} are attached.</li>
  *   <li>{@code worker}: a placeholder that refuses to execute. A worker never starts the job; it serves
  *       partitions ({@link PartitionWorker}) of the worker step, which {@link ConditionalOnBatchRole}
@@ -67,6 +68,7 @@ public class RemotePartitioning {
     private final BatchProperties.Partition settings;
     private final BatchRole role;
     private final ListableBeanFactory beanFactory;
+    private final ObjectProvider<KubernetesOwnerLookup> lookup;
 
     /**
      * @param jobRepository the shared JobRepository
@@ -74,14 +76,17 @@ public class RemotePartitioning {
      * @param settings      {@code adhar.batch.partition.*}
      * @param role          the pod's effective role ({@link OnBatchRoleCondition#effectiveRole})
      * @param beanFactory   finds the worker step in the single role
+     * @param lookup        reads the worker pods for the manager's {@link WorkerLivenessWatch} (a Kubernetes run's)
      */
     public RemotePartitioning(JobRepository jobRepository, ObjectProvider<JdbcPartitionTransport> transport,
-                              BatchProperties.Partition settings, BatchRole role, ListableBeanFactory beanFactory) {
+                              BatchProperties.Partition settings, BatchRole role, ListableBeanFactory beanFactory,
+                              ObjectProvider<KubernetesOwnerLookup> lookup) {
         this.jobRepository = jobRepository;
         this.transport = transport;
         this.settings = settings;
         this.role = role;
         this.beanFactory = beanFactory;
+        this.lookup = lookup;
     }
 
     /**
@@ -95,7 +100,8 @@ public class RemotePartitioning {
      * @param name           the manager step's name
      * @param workerStepName the worker step's name (and bean name): partitions are named
      *                       {@code <workerStepName>:partition<n>}
-     * @param partitioner    splits the input; called by the manager only, once per execution that is not a restart
+     * @param partitioner    splits the input; called by the manager only, once per run identity (its output is
+     *                       the plan every restart is split from, {@link PartitionPlanSplitter})
      * @return the manager step for this pod's role
      */
     public Step manager(String name, String workerStepName, Partitioner partitioner) {
@@ -121,12 +127,15 @@ public class RemotePartitioning {
         Duration timeout = settings.getTimeout();
         return new RemotePartitioningManagerStepBuilder(name, jobRepository)
                 .partitioner(workerStepName, partitioner)
+                .splitter(new PartitionPlanSplitter(jobRepository, workerStepName, partitioner, false))
                 .gridSize(gridSize)
                 .outputChannel(channel.requests())
                 .pollInterval(settings.getPollInterval().toMillis())
                 .timeout(timeout == null ? -1 : timeout.toMillis())
                 .aggregator(new PartitionOutcomeAggregator(jobRepository))
-                .listener(new ManagerPartitionGuard(channel, jobRepository, workerStepName))
+                .listener(new ManagerPartitionGuard(channel, jobRepository, workerStepName, new WorkerLivenessWatch(
+                        jobRepository, lookup.getIfAvailable(KubernetesOwnerLookup::unavailable), workerStepName,
+                        settings.getPollInterval().multipliedBy(3))))
                 .build();
     }
 

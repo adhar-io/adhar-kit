@@ -27,7 +27,12 @@ import java.util.Optional;
  * </ul>
  *
  * <p>With no lease at all (the owner died before writing it, or it was started outside a
- * Kubernetes run), the execution's last update stands in for the heartbeat.</p>
+ * Kubernetes run), the execution's last update stands in for the heartbeat. An execution that has
+ * already ended FAILED or STOPPED with a step still marked running, and no lease, is recovered at
+ * once: its owner released the lease when its job ended, so no process of the run holds it, and the
+ * step left running is a remote partition the manager could not fence (or one that died with its
+ * pod). Calling it a duplicate would exit 0, which ends a gang (CompleteJob) or an Indexed Job (its
+ * success policy) as a success for a run that failed.</p>
  *
  * @author Adhar Platform Team
  * @since 0.1.0
@@ -54,12 +59,16 @@ public class RecoveryPolicy {
     }
 
     /**
-     * @param running the last execution of the identity, not yet ended
+     * @param running the last execution of the identity, not yet ended, or ended with a step still running
      * @param self    this run
      * @return what to do, and why
      */
     public Verdict decide(JobExecution running, RunContext self) {
         Optional<Lease> found = lease.find(running.getId());
+        if (found.isEmpty() && !running.getStatus().isRunning()) {
+            return new Verdict(Decision.RECOVER, "it ended " + running.getStatus() + " with a step still running "
+                    + "and nobody holds its lease");
+        }
         if (found.isEmpty()) {
             Duration idle = idle(running);
             return idle.compareTo(staleAfter) > 0

@@ -4,6 +4,7 @@ import com.adhar.kit.batch.config.BatchAutoConfiguration;
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.repository.BatchRepositoryLayout;
 import com.adhar.kit.batch.runtime.AdharBatchRunner;
+import com.adhar.kit.batch.runtime.KubernetesOwnerLookup;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.beans.factory.ListableBeanFactory;
@@ -62,6 +63,7 @@ public class RemotePartitioningAutoConfiguration {
      * @param properties    {@code adhar.batch.*}
      * @param environment   the role ({@code ADHAR_BATCH_ROLE}, {@code JOB_COMPLETION_INDEX})
      * @param beanFactory   the application's beans
+     * @param lookup        the Kubernetes run's reads of the API (the manager watches its workers' pods)
      * @return what a job builds its manager step with
      */
     @Bean
@@ -69,9 +71,10 @@ public class RemotePartitioningAutoConfiguration {
     public RemotePartitioning remotePartitioning(JobRepository jobRepository,
                                                  ObjectProvider<JdbcPartitionTransport> transport,
                                                  BatchProperties properties, Environment environment,
-                                                 ListableBeanFactory beanFactory) {
+                                                 ListableBeanFactory beanFactory,
+                                                 ObjectProvider<KubernetesOwnerLookup> lookup) {
         return new RemotePartitioning(jobRepository, transport, properties.getPartition(),
-                OnBatchRoleCondition.effectiveRole(environment), beanFactory);
+                OnBatchRoleCondition.effectiveRole(environment), beanFactory, lookup);
     }
 
     /**

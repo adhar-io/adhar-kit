@@ -23,7 +23,7 @@ import java.util.function.Supplier;
  * composition and the downward API) and one GET each of the owner Job and the pod.
  *
  * <p>A scheduled run's business date is the owner Job's {@value KubernetesOwnerLookup#SCHEDULED_TIMESTAMP}
- * in the job's time zone. If the API cannot be asked for it, the run fails as a start-up failure
+ * (a gang's Volcano Job: {@value KubernetesOwnerLookup#VOLCANO_SCHEDULED_TIMESTAMP}) in the job's time zone. If the API cannot be asked for it, the run fails as a start-up failure
  * (exit 1, retried by the Job): a transient API error must not become a permanent "invalid" run,
  * and the current time must never stand in for the schedule. For any other trigger the reads are
  * best effort (uid, digest, attempt).</p>

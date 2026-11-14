@@ -144,9 +144,27 @@ public class DaprSubscriptionRegistrar implements SmartInitializingSingleton, Pr
             return;
         }
         Object bean = applicationContext.getBean(beanName);
+        // Reflection returns methods in no defined order (macOS and Linux JVMs differ), and when two
+        // handlers claim one topic's default route the first registered keeps it: register in a fixed
+        // order so the same code subscribes the same way everywhere (CI on Linux, 2026-11-14).
+        annotated.sort(REGISTRATION_ORDER);
         for (Method method : annotated) {
             registerMethod(beanName, bean, method);
         }
+    }
+
+    /**
+     * Handlers on the conventional route before those that name their own, then by signature: of
+     * two handlers claiming a topic's default route, the one that did not ask for a custom route
+     * keeps it.
+     */
+    static final Comparator<Method> REGISTRATION_ORDER = Comparator
+            .comparing(DaprSubscriptionRegistrar::namesItsOwnRoute)
+            .thenComparing(Method::toGenericString);
+
+    private static boolean namesItsOwnRoute(Method method) {
+        DaprSubscribe subscribe = AnnotatedElementUtils.findMergedAnnotation(method, DaprSubscribe.class);
+        return subscribe != null && !subscribe.route().isBlank();
     }
 
     private void registerMethod(String beanName, Object bean, Method method) {

@@ -59,6 +59,9 @@ class LocalPartitionedRestartTest {
                     .containsEntry("worker:partition0", BatchStatus.COMPLETED).hasSize(4);
             // Partition 2 (ids 21..30) committed 21..25 before it failed on 27; the rest rolled back.
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TARGET_ITEMS", Integer.class)).isEqualTo(35);
+            assertThat(failed.getStepExecutions().stream().filter(step -> step.getStepName().equals("manager"))
+                    .findFirst().orElseThrow().getExecutionContext().containsKey(PartitionPlanSplitter.PLAN))
+                    .as("split by the kit: the ranges are planned once").isTrue();
 
             // Rows that arrive after the first attempt are not this instance's input: the restart
             // reuses the recorded ranges instead of partitioning again.

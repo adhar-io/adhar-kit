@@ -366,6 +366,27 @@ class AdharBatchRunnerTest extends RunnerFixture {
     }
 
     @Test
+    @DisplayName("FAILED with a step still running and no lease is recovered at once, never a duplicate exit 0")
+    void failedWithARunningStepAndNoLease() {
+        // A manager whose step ended FAILED released its lease, but could not fence a partition a
+        // worker was running: exit 0 here would end the gang (CompleteJob) or the Indexed Job (its
+        // success policy) as a success.
+        JobExecution failed = started("2026-12-19", null, null);
+        StepExecution partition = jobRepository.createStepExecution("reportStep", failed);
+        partition.setStatus(BatchStatus.STARTED);
+        jobRepository.update(partition);
+        failed.setStatus(BatchStatus.FAILED);
+        failed.setEndTime(LocalDateTime.now());
+        jobRepository.update(failed);
+
+        RunOutcome outcome = run();
+
+        assertThat(outcome.kind()).isEqualTo(RunOutcome.Kind.COMPLETED);
+        assertThat(outcome.execution().getId()).isNotEqualTo(failed.getId());
+        assertThat(jobRepository.getStepExecution(partition.getId()).getStatus()).isEqualTo(BatchStatus.FAILED);
+    }
+
+    @Test
     @DisplayName("a stale lease is recovered even though its pod still answers")
     void staleLease() {
         JobExecution running = started("2026-12-03", "reporter-other", "uid-other");
