@@ -56,6 +56,9 @@ class BatchSchemaMigratorTest {
         for (String table : BatchRepositoryLayout.KIT_TABLES) {
             jdbc.execute("CREATE TABLE " + SCHEMA + "." + table + " (ID BIGINT)");
         }
+        for (String sequence : BatchRepositoryLayout.KIT_SEQUENCES) {
+            jdbc.execute("CREATE SEQUENCE " + SCHEMA + "." + sequence);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -101,6 +104,8 @@ class BatchSchemaMigratorTest {
                 .hasMessageContaining("BATCH_STEP_EXECUTION_CONTEXT")
                 .hasMessageContaining("BATCH_JOB_INSTANCE_SEQ")
                 .hasMessageContaining("ADHAR_SCHEDULER_LOCK")
+                .hasMessageContaining("INT_CHANNEL_MESSAGE")
+                .hasMessageContaining("INT_MESSAGE_SEQ")
                 .hasMessageContaining("adhar.batch.repository.migrate is false")
                 .hasMessageContaining(BatchSchemaMigrator.LOCATION);
     }
@@ -116,6 +121,18 @@ class BatchSchemaMigratorTest {
         assertThatThrownBy(() -> new BatchSchemaMigrator(h2, layout("BATCH_"), false).verify())
                 .isInstanceOf(BatchSchemaMigrationException.class)
                 .hasMessageContaining("[BATCH_JOB_EXECUTION_PARAMS, BATCH_STEP_EXECUTION_SEQ, ADHAR_BATCH_DEAD_LETTER]");
+    }
+
+    @Test
+    @DisplayName("the partition channel (V6_0_2) is part of the schema: its table and its sequence are verified")
+    void verifiesThePartitionChannel() {
+        createObjects("BATCH_");
+        jdbc.execute("DROP TABLE batch.INT_CHANNEL_MESSAGE");
+        jdbc.execute("DROP SEQUENCE batch.INT_MESSAGE_SEQ");
+
+        assertThatThrownBy(() -> new BatchSchemaMigrator(h2, layout("BATCH_"), false).verify())
+                .isInstanceOf(BatchSchemaMigrationException.class)
+                .hasMessageContaining("[INT_CHANNEL_MESSAGE, INT_MESSAGE_SEQ]");
     }
 
     @Test

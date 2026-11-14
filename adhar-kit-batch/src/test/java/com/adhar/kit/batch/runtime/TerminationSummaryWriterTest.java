@@ -87,6 +87,32 @@ class TerminationSummaryWriterTest {
     }
 
     @Test
+    @DisplayName("a partitioned run counts its partitions once: the manager step's sums are not added again")
+    void partitionedCountsOnce() throws Exception {
+        JobExecution execution = execution(BatchStatus.COMPLETED, 0);
+        StepExecution manager = new StepExecution(100L, "importManager", execution);
+        manager.setStatus(BatchStatus.COMPLETED);
+        manager.setReadCount(30);
+        manager.setWriteCount(30);
+        manager.getExecutionContext().put(org.springframework.batch.core.step.Step.STEP_TYPE_KEY,
+                org.springframework.batch.core.partition.PartitionStep.class.getName());
+        execution.addStepExecution(manager);
+        for (int i = 0; i < 3; i++) {
+            StepExecution partition = new StepExecution(101L + i, "importStep:partition" + i, execution);
+            partition.setStatus(BatchStatus.COMPLETED);
+            partition.setReadCount(10);
+            partition.setWriteCount(10);
+            execution.addStepExecution(partition);
+        }
+
+        JsonNode json = new ObjectMapper().readTree(render(RunOutcome.of(execution), context(RunTrigger.MANUAL)));
+
+        assertThat(json.get("read").asLong()).isEqualTo(30);
+        assertThat(json.get("written").asLong()).isEqualTo(30);
+        assertThat(json.get("steps")).hasSize(4);
+    }
+
+    @Test
     @DisplayName("a skipped run has a reason and its instance, but no execution, status or counts")
     void skipped() throws Exception {
         String summary = render(RunOutcome.skipped(RunOutcome.DUPLICATE, 0, 42L, null, "pod x is running it"),

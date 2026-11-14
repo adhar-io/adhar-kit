@@ -141,6 +141,9 @@ public class BatchSchemaMigrator implements InitializingBean {
         for (String table : BatchRepositoryLayout.KIT_TABLES) {
             requirePresent(tables, table, missing);
         }
+        for (String sequence : BatchRepositoryLayout.KIT_SEQUENCES) {
+            requirePresent(sequences, sequence, missing);
+        }
         if (!missing.isEmpty()) {
             throw new BatchSchemaMigrationException("The JobRepository schema '" + layout.schema()
                     + "' is missing " + missing + ". "

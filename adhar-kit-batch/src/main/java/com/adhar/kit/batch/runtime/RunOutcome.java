@@ -13,7 +13,7 @@ import java.util.Locale;
  * @param reason    why, for {@link Kind#SKIPPED} ({@value #ALREADY_COMPLETE}, {@value #DUPLICATE},
  *                  {@code calendar}) and {@link Kind#INVALID} ({@code parameters},
  *                  {@value #UNKNOWN_JOB}, {@value #INCREMENTER}, {@value #RESOURCELESS_REPOSITORY},
- *                  {@code migration}, {@code business-date}); {@code null} otherwise
+ *                  {@value #UNSUPPORTED}, {@code migration}, {@code business-date}); {@code null} otherwise
  * @param exitCode  the process exit code
  * @param execution the execution the run started or found, {@code null} when there is none
  * @param instanceId the JobInstance, when known without an execution of this run
@@ -38,6 +38,12 @@ public record RunOutcome(Kind kind, String reason, int exitCode, JobExecution ex
 
     /** Invalid: the JobRepository keeps nothing. */
     public static final String RESOURCELESS_REPOSITORY = "resourceless-repository";
+
+    /**
+     * Invalid: the run names a value reserved for a later phase ({@code adhar.batch.distribution=chunked},
+     * a partition transport other than {@code jdbc}), or a role this application cannot play.
+     */
+    public static final String UNSUPPORTED = "unsupported";
 
     /** The process status of a JVM ended by SIGTERM (128 + 15). */
     public static final int SIGTERM_STATUS = 143;

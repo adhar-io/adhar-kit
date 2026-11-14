@@ -97,15 +97,18 @@ class BatchAutoConfigurationTestContainerTest {
         List<String> versions = jdbcTemplate.queryForList(
                 "select version from batch.adhar_batch_schema_history where success and version is not null "
                         + "order by installed_rank", String.class);
-        assertThat(versions).containsExactly("6.0.0", "6.0.1");
+        assertThat(versions).containsExactly("6.0.0", "6.0.1", "6.0.2");
         assertThat(jdbcTemplate.queryForList(
                 "select table_name from information_schema.tables where table_schema = 'batch'", String.class))
                 .contains("batch_job_instance", "batch_job_execution", "batch_job_execution_params",
                         "batch_job_execution_context", "batch_step_execution", "batch_step_execution_context",
-                        "adhar_scheduler_lock", "adhar_batch_execution_lease", "adhar_batch_dead_letter");
+                        "adhar_scheduler_lock", "adhar_batch_execution_lease", "adhar_batch_dead_letter",
+                        "int_channel_message");
         // Nothing of Spring Batch's leaks into the application's own schema.
         assertThat(jdbcTemplate.queryForObject("select count(*) from information_schema.tables "
                 + "where table_schema = 'public' and table_name like 'batch\\_%'", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("select count(*) from information_schema.tables "
+                + "where table_schema = 'public' and table_name like 'int\\_%'", Integer.class)).isZero();
         assertThat(context.getBean(BatchSchemaMigrator.class).getLayout().managed()).isTrue();
     }
 

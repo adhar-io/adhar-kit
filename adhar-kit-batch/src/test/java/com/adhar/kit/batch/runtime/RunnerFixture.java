@@ -133,7 +133,7 @@ abstract class RunnerFixture {
                 jobResolver, specs, new JobParametersResolver(), new RunContextResolver(env::get, lookup, properties),
                 new RecoveryPolicy(lease, lookup, properties.getRecovery().getStaleAfter(), Clock.systemUTC()), lease,
                 stop, new TerminationSummaryWriter(terminationLog, new PrintStream(stdout, true, StandardCharsets.UTF_8)),
-                exitCodes, publisher, heartbeats);
+                exitCodes, publisher, heartbeats, null);
         AdharBatchRunner runner = new AdharBatchRunner(() -> with, properties, env::get, Clock.systemUTC(),
                 duration -> {
                     sleeps.add(duration);

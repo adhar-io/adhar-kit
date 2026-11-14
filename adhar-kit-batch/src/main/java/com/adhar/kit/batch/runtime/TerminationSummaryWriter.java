@@ -3,6 +3,9 @@ package com.adhar.kit.batch.runtime;
 import com.adhar.kit.batch.fault.DeadLetterSkipListener;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.partition.PartitionStep;
+import org.springframework.batch.core.partition.support.SimpleStepExecutionSplitter;
+import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.step.StepExecution;
 
 import java.io.IOException;
@@ -153,11 +156,14 @@ public class TerminationSummaryWriter {
         businessDate.ifPresent(date -> json.text("businessDate", date.toString()));
         List<StepExecution> steps = counted ? steps(execution) : List.of();
         if (counted) {
-            json.number("read", steps.stream().mapToLong(StepExecution::getReadCount).sum());
-            json.number("written", steps.stream().mapToLong(StepExecution::getWriteCount).sum());
-            json.number("skipped", steps.stream().mapToLong(StepExecution::getSkipCount).sum());
-            json.number("deadLettered", steps.stream().mapToLong(TerminationSummaryWriter::deadLettered).sum());
-            json.number("filtered", steps.stream().mapToLong(StepExecution::getFilterCount).sum());
+            // A partitioned step's manager carries the sum of its partitions, which are steps of the
+            // run too: counting both would report every item twice.
+            List<StepExecution> counting = steps.stream().filter(step -> !isPartitionManager(step)).toList();
+            json.number("read", counting.stream().mapToLong(StepExecution::getReadCount).sum());
+            json.number("written", counting.stream().mapToLong(StepExecution::getWriteCount).sum());
+            json.number("skipped", counting.stream().mapToLong(StepExecution::getSkipCount).sum());
+            json.number("deadLettered", counting.stream().mapToLong(TerminationSummaryWriter::deadLettered).sum());
+            json.number("filtered", counting.stream().mapToLong(StepExecution::getFilterCount).sum());
         }
         json.text("start", time(counted ? execution.getStartTime() : null, start));
         json.text("end", time(counted ? execution.getEndTime() : null, end));
@@ -186,6 +192,12 @@ public class TerminationSummaryWriter {
         List<StepExecution> steps = new ArrayList<>(execution.getStepExecutions());
         steps.sort(Comparator.comparingLong(StepExecution::getId));
         return steps;
+    }
+
+    /** A step whose execution split partitions: PartitionStep records its type, its splitter the grid size. */
+    private static boolean isPartitionManager(StepExecution step) {
+        return PartitionStep.class.getName().equals(step.getExecutionContext().get(Step.STEP_TYPE_KEY))
+                || step.getExecutionContext().containsKey(SimpleStepExecutionSplitter.class.getSimpleName() + ".GRID_SIZE");
     }
 
     private static long deadLettered(StepExecution step) {

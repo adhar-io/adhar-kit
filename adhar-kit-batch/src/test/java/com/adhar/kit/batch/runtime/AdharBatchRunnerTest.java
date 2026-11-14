@@ -12,6 +12,7 @@ import org.mockito.AdditionalAnswers;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.core.job.JobInstance;
 import org.springframework.batch.core.job.parameters.JobParameter;
 import org.springframework.batch.core.job.parameters.JobParameters;
@@ -187,7 +188,36 @@ class AdharBatchRunnerTest extends RunnerFixture {
 
         manual(RunnerJobs.REPORT_JOB, "{\"businessDate\":\"2026-11-03\"}");
         properties.setRole(BatchRole.WORKER);
-        assertThat(run().exitCode()).isEqualTo(2);
+        RunOutcome worker = run();
+        assertThat(worker.exitCode()).isEqualTo(2);
+        assertThat(worker.reason()).isEqualTo(RunOutcome.UNSUPPORTED);
+        assertThat(worker.message()).as("without remote partitioning, a worker names what to add")
+                .contains("spring-batch-integration", "spring-integration-jdbc");
+    }
+
+    @Test
+    @DisplayName("a reserved distribution or partition transport is refused before anything runs, exit 2 unsupported")
+    void reservedValuesAreRefused() {
+        // A date no other test uses: the single run at the end completes this identity.
+        manual(RunnerJobs.REPORT_JOB, "{\"businessDate\":\"2026-09-17\"}");
+        properties.setDistribution(com.adhar.kit.batch.config.BatchProperties.Distribution.CHUNKED);
+        RunOutcome chunked = run();
+        assertThat(chunked.exitCode()).isEqualTo(2);
+        assertThat(chunked.reason()).isEqualTo(RunOutcome.UNSUPPORTED);
+        assertThat(chunked.message()).contains("adhar.batch.distribution=chunked", "Phase 4");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM SLOT_RUNS", Integer.class)).isZero();
+
+        properties.setDistribution(com.adhar.kit.batch.config.BatchProperties.Distribution.PARTITIONED);
+        properties.getPartition().setTransport(com.adhar.kit.batch.config.BatchProperties.Partition.Transport.KAFKA);
+        properties.setRole(BatchRole.MANAGER);
+        RunOutcome kafka = run();
+        assertThat(kafka.exitCode()).isEqualTo(2);
+        assertThat(kafka.reason()).isEqualTo(RunOutcome.UNSUPPORTED);
+        assertThat(kafka.message()).contains("adhar.batch.partition.transport=kafka");
+
+        // A single run ignores the transport: only partitioned roles use it.
+        properties.setRole(BatchRole.SINGLE);
+        assertThat(run().exitCode()).isZero();
     }
 
     @Test
@@ -309,6 +339,30 @@ class AdharBatchRunnerTest extends RunnerFixture {
             assertThat(event.getExecutionId()).isEqualTo(running.getId());
             assertThat(event.getReason()).contains("is gone");
         });
+    }
+
+    @Test
+    @DisplayName("STOPPED with a step still running (killed before its step stopped) is recovered, never a duplicate forever")
+    void stoppedWithARunningStep() {
+        // A pod told to stop records STOPPED at once (JobOperator.stop); killed before its step stops,
+        // it leaves the step STARTED, and Spring Batch refuses every restart as "already running".
+        JobExecution stopped = started("2026-12-09", "reporter-other", "uid-other");
+        StepExecution step = jobRepository.createStepExecution("reportStep", stopped);
+        step.setStatus(BatchStatus.STARTED);
+        jobRepository.update(step);
+        stopped.setStatus(BatchStatus.STOPPED);
+        stopped.setEndTime(LocalDateTime.now());
+        jobRepository.update(stopped);
+        API.stubFor(get("/api/v1/namespaces/team-a-prod/pods/reporter-other").willReturn(aResponse().withStatus(404)));
+
+        RunOutcome outcome = run();
+
+        assertThat(outcome.exitCode()).isZero();
+        assertThat(outcome.kind()).isEqualTo(RunOutcome.Kind.COMPLETED);
+        assertThat(outcome.execution().getId()).isNotEqualTo(stopped.getId());
+        assertThat(jobRepository.getStepExecution(step.getId()).getStatus()).isEqualTo(BatchStatus.FAILED);
+        assertThat(events(BatchRunEvent.Recovered.class)).singleElement()
+                .satisfies(event -> assertThat(event.getExecutionId()).isEqualTo(stopped.getId()));
     }
 
     @Test

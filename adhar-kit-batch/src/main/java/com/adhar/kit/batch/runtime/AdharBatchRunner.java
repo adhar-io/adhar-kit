@@ -40,6 +40,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
@@ -57,9 +58,11 @@ import java.util.function.Supplier;
  * guard   the JobRepository is JDBC                          else exit 2 (resourceless-repository)
  * context RunContextResolver: env, downward API, owner Job, pod
  * job     the job named by ADHAR_BATCH_JOB                   else exit 2 (unknown-job, incrementer)
+ *         a reserved distribution or transport, or a worker without remote partitioning: exit 2 (unsupported)
  * params  ADHAR_BATCH_PARAMS &gt; schedule &gt; defaults, validated  else exit 2 (parameters, business-date)
+ * worker  role worker (or indexed above 0): serve the identity's partitions (PartitionConsumer), start nothing
  * last execution of the identity:
- *   none, FAILED, STOPPED  start (a restart when the instance exists)
+ *   none, FAILED, STOPPED  start (a restart when the instance exists); with a step still running, as STARTED
  *   COMPLETED              exit 0 skipped already-complete (or 3: adhar.batch.exit.already-complete=fail)
  *   ABANDONED              exit 6
  *   STARTING/STARTED/STOPPING  RecoveryPolicy: recover then start | wait for a terminating owner | exit 0 skipped duplicate
@@ -177,9 +180,9 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
             return RunOutcome.invalid(RunOutcome.UNKNOWN_JOB, ex.getMessage());
         }
         currentJob = job.getName();
-        if (context.role() == BatchRole.WORKER) {
-            return RunOutcome.invalid(ParameterValidationException.PARAMETERS, "Role worker needs remote "
-                    + "partitioning, which this kit does not provide yet: run the job as single");
+        RunOutcome unsupported = unsupported(context);
+        if (unsupported != null) {
+            return unsupported;
         }
         JobParameterSpec spec = with().specs().find(job.getName())
                 .orElseGet(() -> with().specs().spec(context.jobName()));
@@ -192,7 +195,36 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
                 context.scheduledTime(), context.zone());
         attempt.businessDate = resolved.businessDate().or(context::businessDate);
         JobParameters parameters = withProvenance(resolved.parameters(), context);
+        if (context.role() == BatchRole.WORKER) {
+            // A worker starts nothing: it serves the partitions the manager of the same identity
+            // hands out, and the manager's execution decides the run (design 0025 §5.10).
+            return with().partitions().consume(job, parameters, context, with().stop()::isStopping);
+        }
         return runIdentity(job, parameters, context);
+    }
+
+    /**
+     * @return the refusal of a run this kit cannot carry out, {@code null} when it can
+     */
+    private RunOutcome unsupported(RunContext context) {
+        if (properties.getDistribution() == BatchProperties.Distribution.CHUNKED) {
+            return RunOutcome.invalid(RunOutcome.UNSUPPORTED, "adhar.batch.distribution=chunked (remote chunking, "
+                    + "ADHAR_BATCH_DISTRIBUTION) is reserved for Phase 4 and not available in this kit: run the job "
+                    + "partitioned");
+        }
+        boolean partitioned = context.role() == BatchRole.MANAGER || context.role() == BatchRole.WORKER;
+        BatchProperties.Partition.Transport transport = properties.getPartition().getTransport();
+        if (partitioned && transport != BatchProperties.Partition.Transport.JDBC) {
+            return RunOutcome.invalid(RunOutcome.UNSUPPORTED, "adhar.batch.partition.transport="
+                    + transport.name().toLowerCase(Locale.ROOT) + " (ADHAR_BATCH_PARTITION_TRANSPORT) is a "
+                    + "reserved name: jdbc is the only partition transport");
+        }
+        if (context.role() == BatchRole.WORKER && with().partitions() == null) {
+            return RunOutcome.invalid(RunOutcome.UNSUPPORTED, "Role " + context.role().label() + " needs remote "
+                    + "partitioning: add org.springframework.batch:spring-batch-integration and "
+                    + "org.springframework.integration:spring-integration-jdbc to the application");
+        }
+        return null;
     }
 
     private RunOutcome runIdentity(Job job, JobParameters parameters, RunContext context) {
@@ -201,7 +233,8 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
             JobInstance instance = with().jobRepository().getJobInstance(job.getName(), parameters);
             JobExecution last = instance == null ? null : with().jobRepository().getLastJobExecution(instance);
             BatchStatus status = last == null ? null : last.getStatus();
-            if (status == null || status == BatchStatus.FAILED || status == BatchStatus.STOPPED) {
+            if (status == null || ((status == BatchStatus.FAILED || status == BatchStatus.STOPPED)
+                    && runningSteps(last) == 0)) {
                 return start(job, parameters);
             }
             switch (status) {
@@ -217,8 +250,14 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
                             "the last execution's state is UNKNOWN: inspect and abandon it before running again");
                 }
                 default -> {
+                    // Still running, or ended with steps that never did: a pod stopped by a signal records
+                    // the execution STOPPED at once (JobOperator.stop), and if it is killed before its
+                    // steps stop (a gang's dead worker, a grace period too short), they stay STARTED and
+                    // Spring Batch refuses every restart as "already running". Both are its owner's to
+                    // finish or a recovery's to take over.
                     Verdict verdict = with().recovery().decide(last, context);
-                    log.info("Execution {} of this identity is {}: {} ({})", last.getId(), status,
+                    log.info("Execution {} of this identity is {}{}: {} ({})", last.getId(), status,
+                            status.isRunning() ? "" : " with " + runningSteps(last) + " step(s) still running",
                             verdict.decision(), verdict.reason());
                     switch (verdict.decision()) {
                         case RECOVER -> {
@@ -249,6 +288,10 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
                 }
             }
         }
+    }
+
+    private static long runningSteps(JobExecution execution) {
+        return execution.getStepExecutions().stream().filter(step -> step.getStatus().isRunning()).count();
     }
 
     private RunOutcome start(Job job, JobParameters parameters) {
@@ -382,13 +425,16 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
         }
     }
 
-    /** What the runner works with(). */
+    /**
+     * What the runner works with(). {@code partitions} serves a worker's partitions; it is
+     * {@code null} when the application has no remote partitioning on its classpath.
+     */
     public record Collaborators(JobRepository jobRepository, JobOperator jobOperator, JobResolver jobResolver,
                                 JobParameterSpecRegistry specs, JobParametersResolver parametersResolver,
                                 RunContextResolver contextResolver, RecoveryPolicy recovery, ExecutionLease lease,
                                 GracefulStopLifecycle stop, TerminationSummaryWriter summary,
                                 BatchExitCodeGenerator exitCodes, BatchRunEventPublisher events,
-                                ScheduledExecutorService heartbeats) {
+                                ScheduledExecutorService heartbeats, PartitionConsumer partitions) {
 
         /**
          * @return a single daemon thread for lease heartbeats

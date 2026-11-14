@@ -16,6 +16,7 @@ Design: `adhar/docs/design/0025-batch-platform.md` (§5). The platform runs a ba
 | Steps | `AdharSteps` → `AdharChunkStepBuilder`; `FaultTolerance` (retry and skip presets, `deadLetter()`) |
 | I/O | `KeysetPagingItemReaderBuilder`, `PostgresUpsertItemWriterBuilder`, `JsonLines{Reader,Writer}Builder`, `S3ItemReaderBuilder`, `S3ItemWriterBuilder`, plus the CSV/JSON/JDBC/JPA builders |
 | Partitioning (one pod) | `LocalPartitioning`, `SqlKeyRangePartitioner`, `ObjectPrefixPartitioner` |
+| Remote partitioning (a manager and workers) | `RemotePartitioning`, `@ConditionalOnBatchRole`, `PartitionWorker`, `JdbcPartitionTransport`, `StaleRequestGuard`, `WorkerStopHandler` |
 | Telemetry | `BatchProgressMetrics`, `BatchMdc`, `ItemObservationTracingFilter` |
 | Events | `BatchRunEvent` (`Started`, `Completed`, `Failed`, `Stopped`, `Skipped`, `Recovered`) |
 | Operations | `BatchOperator` (`start`, `restart`, `stop`, `abandon`, `recover`, `findExecutions`) |
@@ -121,7 +122,7 @@ timeout, starts the named job once and exits.
 |---|---|
 | 0 | Completed, or skipped: already complete, a duplicate run still alive |
 | 1 | The JVM or context failed before the run (retried) |
-| 2 | Invalid request: parameters, unknown job, incrementer, in-memory repository, migration, business date (not retried) |
+| 2 | Invalid request: parameters, unknown job, incrementer, in-memory repository, migration, business date, unsupported (not retried) |
 | 3 | Failed, not retryable: `NonRetryableBatchException`, skip limit exceeded (not retried) |
 | 4 | Stopped on request |
 | 5 | Failed, retryable |
@@ -149,6 +150,59 @@ The worker's reader is `@StepScope` and reads `#{stepExecutionContext['minKey']}
 `['maxKey']`. A restart re-runs only the partitions that did not complete, each from its last
 commit, over the ranges recorded by the first attempt. `ObjectPrefixPartitioner` makes one
 partition per S3 prefix (`#{stepExecutionContext['prefix']}`).
+
+## Remote partitioning (a manager and workers)
+
+A `BatchJob` with `mode: partitioned` runs one manager pod and `workers` worker pods: a Volcano
+gang (`ADHAR_BATCH_ROLE=manager|worker`) or, without Volcano, one Indexed Job whose index 0 is the
+manager (`ADHAR_BATCH_ROLE=indexed`, `JOB_COMPLETION_INDEX`). One image, one configuration:
+
+```java
+@Bean
+@AdharBatchJob(parameters = @JobParam(name = "businessDate", type = ParamType.DATE, source = ParamSource.SCHEDULE))
+Job importJob(JobRepository jobRepository, RemotePartitioning partitioning, DataSource dataSource) {
+    return new JobBuilder("importJob", jobRepository).start(partitioning.manager("importManager", "importStep",
+        SqlKeyRangePartitioner.of(dataSource, "public.inbound_records", "id").build())).build();
+}
+
+@Bean
+@ConditionalOnBatchRole(BatchRole.WORKER)          // never built in the manager
+Step importStep(AdharSteps steps, JdbcPagingItemReader<Record> rangeReader, ItemWriter<Record> writer) {
+    return steps.<Record, Record>chunk("importStep").reader(rangeReader).writer(writer).build();
+}
+```
+
+It needs `org.springframework.batch:spring-batch-integration` and
+`org.springframework.integration:spring-integration-jdbc` (optional dependencies of the kit; a
+worker without them exits 2, `unsupported`). The job exists in every role: a worker computes the
+run's identity from its declared parameters exactly as the manager does.
+
+- **The manager** (Spring Batch Integration's `RemotePartitioningManagerStepBuilder`, polling the
+  JobRepository) splits the input into `adhar.batch.partition.grid-size` partitions and writes one
+  request per partition to the **partition channel**: `batch.INT_CHANNEL_MESSAGE` (migration
+  `V6_0_2`), a queue in the application's own database, one message group per run identity
+  (`adhar-batch:<job>:<jobKey>`). It gives up after `adhar.batch.partition.timeout`.
+- **Workers** are interchangeable: each claims a request (a single `DELETE … RETURNING`, so one
+  worker per request), runs the partition and takes the next, until the identity's execution
+  COMPLETED (exit 0). A FAILED or STOPPED execution does not end a worker: a restart is coming.
+- **Restarts re-run only unfinished partitions**, each from its last commit. A worker killed
+  mid-partition leaves its partition STARTED; the restarted manager recovers the old execution
+  (the lease, as for a single run) and runs that partition again.
+- **Stale requests** never run: the manager clears the run's group before it sends, and a worker
+  discards a request whose execution is not STARTED or not the latest, or whose partition already
+  started.
+- **Fencing (INV-4).** A worker that is slow rather than dead cannot write into a partition that is
+  running again: `recover`, and a manager that stops waiting, mark the old partition FAILED, so the
+  slow worker's next chunk commit fails on its version and its writes roll back with it.
+- **SIGTERM on a worker** stops only its own partition at the next chunk boundary. The manager
+  fails the run as retryable (exit 5) rather than STOPPED (exit 4, an operator's stop), so the Job
+  retries it and the restart re-runs that partition. A partition that failed with a
+  `NonRetryableBatchException` or a skip limit fails the run with exit 3.
+- **Role `single`** (a local run, a test, a service) plays every part: `manager(…)` runs the same
+  partitions in the one process.
+
+`adhar.batch.distribution=chunked` (remote chunking) and the transports `kafka` and `amqp` are
+reserved names: a run that names one exits 2 (`unsupported`).
 
 ## S3 and RustFS
 
@@ -215,6 +269,11 @@ build when the `BatchJob` manifest's parameters differ from `@AdharBatchJob`, it
 | `adhar.batch.retry.max-attempts` / `.initial-backoff` / `.max-backoff` | `3` / `1s` / `30s` | Retry presets |
 | `adhar.batch.dead-letter.enabled` | `true` | JDBC dead-letter table |
 | `adhar.batch.telemetry.trace-items` | `false` | Per-item spans |
+| `adhar.batch.partition.transport` | env `ADHAR_BATCH_PARTITION_TRANSPORT` (`jdbc`) | `jdbc`; `kafka` and `amqp` are reserved |
+| `adhar.batch.partition.grid-size` | env `ADHAR_BATCH_PARTITION_GRIDSIZE` (4) | Partitions per run; the platform passes 4 × workers |
+| `adhar.batch.partition.poll-interval` | `5s` | How often the manager and idle workers read the repository |
+| `adhar.batch.partition.timeout` | env `ADHAR_BATCH_PARTITION_TIMEOUT` (none) | How long the manager waits for every partition; the platform passes the deadline less 5 minutes |
+| `adhar.batch.distribution` | env `ADHAR_BATCH_DISTRIBUTION` (`partitioned`) | `partitioned` \| `chunked` (Phase 4, refused until then) |
 | `adhar.batch.scheduler.enabled` / `.time-zone` / `.misfire-threshold` / `.lock` | `false` / `UTC` / `10m` / `jdbc` | Embedded mode |
 | `adhar.batch.scheduler.lock-lease` / `.lock-renew-interval` / `.pool-size` / `.jobs.<job>` | `2m` / `30s` / `2` / — | Embedded mode |
 

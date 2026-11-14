@@ -17,6 +17,7 @@ import com.adhar.kit.batch.lock.JdbcSchedulerLock;
 import com.adhar.kit.batch.lock.SchedulerLock;
 import com.adhar.kit.batch.telemetry.BatchProgressMetrics;
 import com.adhar.kit.batch.operator.BatchOperator;
+import com.adhar.kit.batch.partition.WorkerStopHandler;
 import com.adhar.kit.batch.operator.JobResolver;
 import com.adhar.kit.batch.params.JobParameterSpecRegistry;
 import com.adhar.kit.batch.params.JobParametersResolver;
@@ -29,6 +30,7 @@ import com.adhar.kit.batch.runtime.ExecutionLease;
 import com.adhar.kit.batch.runtime.GracefulStopLifecycle;
 import com.adhar.kit.batch.runtime.JdbcExecutionLease;
 import com.adhar.kit.batch.runtime.KubernetesOwnerLookup;
+import com.adhar.kit.batch.runtime.PartitionConsumer;
 import com.adhar.kit.batch.runtime.RecoveryPolicy;
 import com.adhar.kit.batch.runtime.RunContextResolver;
 import com.adhar.kit.batch.runtime.TerminationSummaryWriter;
@@ -372,8 +374,10 @@ public class BatchAutoConfiguration {
         @Bean
         @ConditionalOnMissingBean
         GracefulStopLifecycle gracefulStopLifecycle(ObjectProvider<JobOperator> jobOperator,
+                                                    ObjectProvider<WorkerStopHandler> workerStop,
                                                     BatchProperties properties) {
-            return new GracefulStopLifecycle(jobOperator, properties.getShutdown().getTimeout());
+            return new GracefulStopLifecycle(jobOperator, properties.getShutdown().getTimeout(),
+                    workerStop.getIfAvailable());
         }
 
         @Bean
@@ -401,6 +405,7 @@ public class BatchAutoConfiguration {
                                           ObjectProvider<TerminationSummaryWriter> summary,
                                           ObjectProvider<BatchExitCodeGenerator> exitCodes,
                                           ObjectProvider<BatchRunEventPublisher> events,
+                                          ObjectProvider<PartitionConsumer> partitions,
                                           BatchProperties properties, Environment environment) {
             return new AdharBatchRunner(() -> {
                 ExecutionLease leases = lease.getIfAvailable(ExecutionLease::none);
@@ -409,7 +414,7 @@ public class BatchAutoConfiguration {
                         contextResolver.getObject(), new RecoveryPolicy(leases, lookup.getObject(),
                         properties.getRecovery().getStaleAfter(), Clock.systemUTC()), leases, stop.getObject(),
                         summary.getObject(), exitCodes.getObject(), events.getObject(),
-                        AdharBatchRunner.Collaborators.heartbeatThread());
+                        AdharBatchRunner.Collaborators.heartbeatThread(), partitions.getIfAvailable());
             }, properties, environment::getProperty, Clock.systemUTC(), AdharBatchRunner.Sleeper.threadSleep());
         }
     }

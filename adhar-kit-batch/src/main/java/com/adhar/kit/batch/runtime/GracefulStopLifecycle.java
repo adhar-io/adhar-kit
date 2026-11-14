@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.runtime;
 
+import com.adhar.kit.batch.partition.WorkerStopHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.launch.JobExecutionNotRunningException;
@@ -23,6 +24,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * finish, which includes writing the termination summary. The JVM then exits with its own signal
  * status; nothing calls {@code System.exit} during the shutdown, which would block.</p>
  *
+ * <p>A worker pod of a remote-partitioned job has no execution of its own: it stops only the
+ * partition it is running ({@link WorkerStopHandler}), so the other workers finish theirs and the
+ * manager decides the run.</p>
+ *
  * <p>Spring Batch's own {@code JobExecutionShutdownHook} only signals the stop and returns,
  * racing the DataSource's close; the kit does not use it.</p>
  *
@@ -34,6 +39,7 @@ public class GracefulStopLifecycle implements SmartLifecycle {
 
     private final ObjectProvider<JobOperator> jobOperator;
     private final Duration timeout;
+    private final WorkerStopHandler workerStop;
     private final AtomicBoolean running = new AtomicBoolean();
     private final AtomicBoolean stopping = new AtomicBoolean();
     private final AtomicReference<JobExecution> execution = new AtomicReference<>();
@@ -44,8 +50,19 @@ public class GracefulStopLifecycle implements SmartLifecycle {
      * @param timeout     {@code adhar.batch.shutdown.timeout}
      */
     public GracefulStopLifecycle(ObjectProvider<JobOperator> jobOperator, Duration timeout) {
+        this(jobOperator, timeout, null);
+    }
+
+    /**
+     * @param jobOperator stops the execution; resolved only when needed
+     * @param timeout     {@code adhar.batch.shutdown.timeout}
+     * @param workerStop  stops a worker's current partition; {@code null} without remote partitioning
+     */
+    public GracefulStopLifecycle(ObjectProvider<JobOperator> jobOperator, Duration timeout,
+                                 WorkerStopHandler workerStop) {
         this.jobOperator = jobOperator;
         this.timeout = timeout;
+        this.workerStop = workerStop;
     }
 
     /**
@@ -107,6 +124,8 @@ public class GracefulStopLifecycle implements SmartLifecycle {
         JobExecution current = execution.get();
         if (current != null) {
             stopExecution(current);
+        } else if (workerStop != null) {
+            workerStop.stop();
         }
         try {
             if (!latch.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {

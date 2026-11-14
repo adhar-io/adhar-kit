@@ -30,6 +30,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scheduler and `BatchOperator.start` retry a PostgreSQL serialization conflict between two
   identities of one job created at once (`InstanceCreationRetry`). Usage and the
   full property reference are in `adhar-kit-batch/README.md`.
+- **adhar-kit-batch** — remote partitioning (design 0025 §5.10, Phase 2): `RemotePartitioning`
+  builds the manager step with Spring Batch Integration in JobRepository-polling mode over the
+  `jdbc` partition channel (`batch.INT_CHANNEL_MESSAGE`, migration `V6_0_2`; optional
+  `spring-batch-integration` and `spring-integration-jdbc`), one message group per run identity;
+  `ADHAR_BATCH_ROLE` `manager`, `worker` and `indexed` (`JOB_COMPLETION_INDEX`) with
+  `@ConditionalOnBatchRole`; `PartitionWorker` serves partitions until the run completed;
+  `StaleRequestGuard` and the manager's group clear keep a failed attempt's requests from running;
+  the manager fences partitions still running when it stops waiting; `WorkerStopHandler` stops only
+  a terminating worker's own partition, which the manager turns into a retryable failure;
+  `adhar.batch.partition.{transport,grid-size,poll-interval,timeout}` and
+  `adhar.batch.distribution` (`chunked` reserved, exit 2 `unsupported`). The runner now recovers
+  an execution recorded FAILED or STOPPED whose steps are still running (a pod killed before its
+  step stopped) instead of skipping every later run as a duplicate.
 - **adhar-kit-test-commons** — `@AdharBatchTest` (the real auto-configuration on a fresh database
   of a PostgreSQL 18.4 container, `@SpringBatchTest`, optional LocalStack S3), `RestartScenario`
   (fail at item N, restart, assert the same instance resumed and every row was written once),

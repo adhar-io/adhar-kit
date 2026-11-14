@@ -44,8 +44,22 @@ public record BatchRepositoryLayout(boolean managed, String databaseProduct, Str
     static final List<String> SPRING_BATCH_SEQUENCES = List.of("JOB_INSTANCE_SEQ", "JOB_EXECUTION_SEQ",
             "STEP_EXECUTION_SEQ");
 
+    /**
+     * The partition channel of remote partitioning (Spring Integration's table, {@code V6_0_2}).
+     * Its prefix is {@value #PARTITION_CHANNEL_PREFIX}: Spring Integration appends
+     * {@code CHANNEL_MESSAGE} itself.
+     */
+    public static final String PARTITION_CHANNEL_TABLE = "INT_CHANNEL_MESSAGE";
+
+    /** The prefix Spring Integration's channel message store is given for {@link #PARTITION_CHANNEL_TABLE}. */
+    public static final String PARTITION_CHANNEL_PREFIX = "INT_";
+
     /** The kit's own tables. */
-    static final List<String> KIT_TABLES = List.of(SCHEDULER_LOCK_TABLE, EXECUTION_LEASE_TABLE, DEAD_LETTER_TABLE);
+    static final List<String> KIT_TABLES = List.of(SCHEDULER_LOCK_TABLE, EXECUTION_LEASE_TABLE, DEAD_LETTER_TABLE,
+            PARTITION_CHANNEL_TABLE);
+
+    /** The kit's own sequences (the partition channel's message order). */
+    static final List<String> KIT_SEQUENCES = List.of("INT_MESSAGE_SEQ");
 
     private static final String POSTGRESQL = "PostgreSQL";
 

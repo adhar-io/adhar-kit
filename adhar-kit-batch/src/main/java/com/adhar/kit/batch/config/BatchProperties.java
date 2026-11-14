@@ -44,6 +44,13 @@ import java.util.regex.Pattern;
  *       enabled: true               # FaultTolerance.deadLetter() writes skipped items to the JDBC table
  *     telemetry:
  *       trace-items: false          # per-item spans (off: a million items would be a million spans)
+ *     partition:                    # remote partitioning (roles manager, worker, indexed)
+ *       transport: jdbc             # jdbc; kafka and amqp are reserved names (env ADHAR_BATCH_PARTITION_TRANSPORT)
+ *       grid-size: 4                # partitions per run; the platform passes 4 x workers (ADHAR_BATCH_PARTITION_GRIDSIZE)
+ *       poll-interval: 5s           # how often the manager and idle workers look at the repository
+ *       timeout:                    # how long the manager waits for every partition; unset waits until
+ *                                   # the pod's deadline (ADHAR_BATCH_PARTITION_TIMEOUT)
+ *     distribution: partitioned     # partitioned | chunked (Phase 4, refused until then) (ADHAR_BATCH_DISTRIBUTION)
  *     scheduler:                    # embedded mode - not the platform path
  *       enabled: false
  *       time-zone: UTC
@@ -56,8 +63,7 @@ import java.util.regex.Pattern;
  *         importJob: "0 0 2 * * *"
  * }</pre>
  *
- * <p>{@code partition.*} (remote partitioning) arrives with Phase 2. Earlier keys are gone, not
- * aliased: {@code table-prefix} is {@code repository.table-prefix},
+ * <p>Earlier keys are gone, not aliased: {@code table-prefix} is {@code repository.table-prefix},
  * {@code default-chunk-size} is {@code chunk.size}, {@code default-page-size} is
  * {@code page.size}, {@code max-retries} is {@code retry.max-attempts};
  * {@code max-concurrent-jobs} (the asynchronous launcher) and {@code retry-on-failure} were
@@ -119,6 +125,16 @@ public class BatchProperties {
     private final Retry retry = new Retry();
 
     private final Scheduler scheduler = new Scheduler();
+
+    private final Partition partition = new Partition();
+
+    /**
+     * Which manager and worker beans a partitioned run's role selects: {@code partitioned}
+     * (remote partitioning) or {@code chunked} (remote chunking, Phase 4: reserved, and refused
+     * until then). The platform sets it through {@code ADHAR_BATCH_DISTRIBUTION}, only on a
+     * chunked run.
+     */
+    private Distribution distribution = Distribution.PARTITIONED;
 
     public boolean isEnabled() {
         return enabled;
@@ -192,6 +208,18 @@ public class BatchProperties {
         return scheduler;
     }
 
+    public Partition getPartition() {
+        return partition;
+    }
+
+    public Distribution getDistribution() {
+        return distribution;
+    }
+
+    public void setDistribution(Distribution distribution) {
+        this.distribution = distribution;
+    }
+
     /**
      * Checks the values a misconfiguration would otherwise turn into a confusing failure much
      * later (a schema name that needs quoting, a renewal slower than the lease it renews).
@@ -226,6 +254,11 @@ public class BatchProperties {
                         + scheduler.lockLease + "), was " + scheduler.lockRenewInterval);
         require(scheduler.poolSize >= 1, "adhar.batch.scheduler.pool-size must be at least 1, was "
                 + scheduler.poolSize);
+        require(partition.gridSize == null || partition.gridSize >= 1,
+                "adhar.batch.partition.grid-size must be at least 1, was " + partition.gridSize);
+        require(isPositive(partition.pollInterval), "adhar.batch.partition.poll-interval must be positive");
+        require(partition.timeout == null || isPositive(partition.timeout),
+                "adhar.batch.partition.timeout must be positive when set, was " + partition.timeout);
     }
 
     private static boolean isPositive(Duration duration) {
@@ -532,6 +565,105 @@ public class BatchProperties {
 
         public void setMaxBackoff(Duration maxBackoff) {
             this.maxBackoff = maxBackoff;
+        }
+    }
+
+    /**
+     * What a partitioned run distributes (design 0025 §5.10, §5.11, D11).
+     */
+    public enum Distribution {
+        /** Remote partitioning: a manager hands partitions to workers through the partition channel. */
+        PARTITIONED,
+        /** Remote chunking over a durable queue (Phase 4). Reserved: a run that names it is refused. */
+        CHUNKED
+    }
+
+    /**
+     * Remote partitioning (design 0025 §5.10): a manager pod splits the input and workers claim the
+     * partitions through the partition channel, a table in the JobRepository's schema. The
+     * {@code BatchJob} composition sets transport, grid size and timeout on every partitioned run as
+     * {@code ADHAR_BATCH_PARTITION_TRANSPORT}, {@code ADHAR_BATCH_PARTITION_GRIDSIZE} and
+     * {@code ADHAR_BATCH_PARTITION_TIMEOUT}.
+     */
+    public static class Partition {
+
+        /**
+         * How partition requests reach the workers. {@code jdbc}, a queue in the application's own
+         * database, is the only transport in Phase 2; {@code kafka} and {@code amqp} are reserved
+         * names, and a run that names one is refused.
+         */
+        private Transport transport = Transport.JDBC;
+
+        /**
+         * Partitions a manager creates. Unset, 4: the platform always passes its own value, 4 x the
+         * run's workers unless the BatchJob says otherwise. Independent of the number of workers,
+         * which are interchangeable consumers.
+         */
+        private Integer gridSize;
+
+        /**
+         * How often the manager reads the JobRepository for finished partitions, and how often an
+         * idle worker looks for a request or for the end of the run.
+         */
+        private Duration pollInterval = Duration.ofSeconds(5);
+
+        /**
+         * How long the manager waits for every partition to finish before it fails the run
+         * (retryable) and fences the partitions still running. Unset, it waits until the pod's
+         * deadline; the platform passes the run's activeDeadlineSeconds less five minutes (half the
+         * deadline when that is longer), so the manager gives up before it is killed.
+         */
+        private Duration timeout;
+
+        public Transport getTransport() {
+            return transport;
+        }
+
+        public void setTransport(Transport transport) {
+            this.transport = transport;
+        }
+
+        public Integer getGridSize() {
+            return gridSize;
+        }
+
+        public void setGridSize(Integer gridSize) {
+            this.gridSize = gridSize;
+        }
+
+        /**
+         * @return {@link #getGridSize()}, or 4 when unset
+         */
+        public int effectiveGridSize() {
+            return gridSize != null ? gridSize : 4;
+        }
+
+        public Duration getPollInterval() {
+            return pollInterval;
+        }
+
+        public void setPollInterval(Duration pollInterval) {
+            this.pollInterval = pollInterval;
+        }
+
+        public Duration getTimeout() {
+            return timeout;
+        }
+
+        public void setTimeout(Duration timeout) {
+            this.timeout = timeout;
+        }
+
+        /**
+         * Partition transports.
+         */
+        public enum Transport {
+            /** A queue in the JobRepository's database (Spring Integration's JDBC channel message store). */
+            JDBC,
+            /** Reserved. */
+            KAFKA,
+            /** Reserved: RabbitMQ arrives with remote chunking (Phase 4). */
+            AMQP
         }
     }
 

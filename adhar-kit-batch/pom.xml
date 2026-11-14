@@ -51,6 +51,20 @@
             <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
 
+        <!-- Remote partitioning (optional, design 0025 §5.10): Spring Batch Integration's manager
+             and worker step builders over a JDBC-backed partition channel in the application's own
+             database. A partitioned job (ADHAR_BATCH_ROLE manager | worker | indexed) adds both. -->
+        <dependency>
+            <groupId>org.springframework.batch</groupId>
+            <artifactId>spring-batch-integration</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.integration</groupId>
+            <artifactId>spring-integration-jdbc</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Spring Boot Starter -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

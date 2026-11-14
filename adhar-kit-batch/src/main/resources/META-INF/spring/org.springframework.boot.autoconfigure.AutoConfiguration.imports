@@ -1,2 +1,3 @@
 com.adhar.kit.batch.config.BatchAutoConfiguration
 com.adhar.kit.batch.telemetry.BatchTelemetryAutoConfiguration
+com.adhar.kit.batch.partition.RemotePartitioningAutoConfiguration
