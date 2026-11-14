@@ -8,6 +8,8 @@ import com.adhar.kit.batch.support.TestJobs;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.builder.JobBuilder;
@@ -46,6 +48,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code adhar.batch.retry.*} keeps its default of three attempts with a millisecond back-off.
  */
 @SpringBootTest(classes = {BatchTestApplication.class, TestJobs.class, FaultToleranceStepTest.Observers.class})
+// One context, one observer and one TARGET_ITEMS table serve every test here, and each test
+// clears them first: run concurrently (the parent pom's default), one test's process skips
+// landed in another's write-skip assertion and a setUp emptied a table mid-run.
+@Execution(ExecutionMode.SAME_THREAD)
 class FaultToleranceStepTest {
 
     @DynamicPropertySource
