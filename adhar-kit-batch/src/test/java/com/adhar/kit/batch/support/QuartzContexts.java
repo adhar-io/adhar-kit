@@ -6,6 +6,7 @@ import org.quartz.Scheduler;
 import org.quartz.SchedulerException;
 import org.quartz.TriggerKey;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.core.env.MapPropertySource;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -51,7 +52,10 @@ public final class QuartzContexts {
      * @return the started replica
      */
     public static ConfigurableApplicationContext start(Map<String, Object> properties, Class<?>... sources) {
-        return BatchTestApplication.builder(sources).properties(properties).run();
+        return BatchTestApplication.builder(sources)
+                .initializers(context -> context.getEnvironment().getPropertySources()
+                        .addFirst(new MapPropertySource("testQuartzOverrides", properties)))
+                .run();
     }
 
     /**
