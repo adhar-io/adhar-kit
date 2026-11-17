@@ -17,15 +17,22 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.quartz.Scheduler;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.quartz.autoconfigure.SchedulerFactoryBeanCustomizer;
+import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
+import org.springframework.scheduling.quartz.SchedulerFactoryBean;
 
 import javax.sql.DataSource;
 
@@ -135,6 +142,39 @@ class BatchAutoConfigurationTest {
         withJob.withPropertyValues("adhar.batch.scheduler.enabled=true")
                 .run(context -> assertThat(context).getFailure()
                         .hasStackTraceContaining("The scheduler lock table"));
+    }
+
+    @ParameterizedTest(name = "without {0}")
+    @ValueSource(classes = {Scheduler.class, SchedulerFactoryBean.class, SchedulerFactoryBeanCustomizer.class})
+    @DisplayName("engine=quartz without Quartz on the classpath fails the start naming the dependency")
+    void quartzEngineWithoutQuartzFailsNamingTheDependency(Class<?> missing) {
+        withJob.withClassLoader(new FilteredClassLoader(missing))
+                .withPropertyValues("adhar.batch.scheduler.enabled=true", "adhar.batch.scheduler.engine=quartz")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(NestedExceptionUtils.getMostSpecificCause(context.getStartupFailure()))
+                            .isInstanceOf(IllegalStateException.class)
+                            .hasMessageContaining("adhar.batch.scheduler.engine=quartz needs Quartz on the classpath")
+                            .hasMessageContaining("org.springframework.boot:spring-boot-starter-quartz")
+                            .hasMessageContaining("or use the engine simple");
+                });
+    }
+
+    @Test
+    @DisplayName("without Quartz on the classpath the engine simple runs, and a disabled scheduler never asks for it")
+    void withoutQuartzOnlyTheQuartzEngineIsRefused() {
+        ApplicationContextRunner withoutQuartz = withJob.withClassLoader(new FilteredClassLoader(Scheduler.class));
+
+        withoutQuartz.withPropertyValues("adhar.batch.scheduler.enabled=true", "adhar.batch.scheduler.lock=none")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(BatchScheduler.class).engine().name()).isEqualTo("simple");
+                });
+        withoutQuartz.withPropertyValues("adhar.batch.scheduler.engine=quartz")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean(BatchScheduler.class);
+                });
     }
 
     @Test

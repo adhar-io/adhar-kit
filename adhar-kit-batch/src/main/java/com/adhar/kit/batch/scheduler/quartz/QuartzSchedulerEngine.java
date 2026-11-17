@@ -42,11 +42,15 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcOperations;
 
 import java.math.BigDecimal;
+import java.text.ParseException;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -379,7 +383,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                         .withIntervalInMilliseconds(every.toMillis()).repeatForever();
                 schedule = switch (misfire) {
                     case SKIP -> simple.withMisfireHandlingInstructionNextWithRemainingCount();
-                    case LATEST -> simple.withMisfireHandlingInstructionNowWithExistingCount();
+                    case LATEST -> simple.withMisfireHandlingInstructionNextWithRemainingCount();
                     case ALL -> simple.withMisfireHandlingInstructionIgnoreMisfires();
                 };
                 definition.add("every=" + every).add("start=" + start);
@@ -938,7 +942,8 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
      * Converts a Spring cron expression (six fields, the schedules of
      * {@code adhar.batch.scheduler.jobs}) to Quartz syntax (design 0025 §5.20.6): macros expanded,
      * {@code ?} in the day field that is {@code *}, numeric days of the week renumbered (Spring 0 or
-     * 7 = Sunday, 1 = Monday; Quartz 1 = Sunday).
+     * 7 = Sunday, 1 = Monday; Quartz 1 = Sunday). The converted days of the week are compared with
+     * Spring's, and spelled out where renumbering alone would change them: a wrong day still parses.
      */
     static final class SpringCron {
 
@@ -963,7 +968,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
             }
             String[] fields = expanded.split("\\s+");
             String dayOfMonth = fields[3];
-            String dayOfWeek = renumberDaysOfWeek(fields[5]);
+            String dayOfWeek = daysOfWeek(fields[5]);
             if (isAny(dayOfWeek)) {
                 dayOfWeek = "?";
                 dayOfMonth = isAny(dayOfMonth) ? "*" : dayOfMonth;
@@ -986,9 +991,65 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
             return "*".equals(field) || "?".equals(field);
         }
 
+        /**
+         * The Quartz days of the week of a Spring field. Renumbering carries a day, a list, a range
+         * and the month-relative forms ({@code 5L}, {@code 1#2}); it does not carry the forms whose
+         * meaning rests on Spring's week running Monday to Sunday ({@code *}{@code /2}, {@code 1/2},
+         * {@code 0-7}) nor a step after a named range, which Quartz reads differently. Those become
+         * the list of days Spring fires on.
+         */
+        private static String daysOfWeek(String spring) {
+            String renumbered = renumberDaysOfWeek(spring);
+            if (isAny(spring) || spring.contains("L") || spring.contains("#")) {
+                return renumbered;
+            }
+            Set<DayOfWeek> days = springDays(spring);
+            if (days.equals(quartzDays(renumbered))) {
+                return renumbered;
+            }
+            StringJoiner list = new StringJoiner(",");
+            days.forEach(day -> list.add(day.name().substring(0, 3)));
+            return list.toString();
+        }
+
+        private static Set<DayOfWeek> springDays(String field) {
+            var cron = org.springframework.scheduling.support.CronExpression.parse("0 0 0 * * " + field);
+            Set<DayOfWeek> days = new TreeSet<>();
+            for (DayOfWeek day : DayOfWeek.values()) {
+                ZonedDateTime midnight = midnightOf(day);
+                if (midnight.equals(cron.next(midnight.minusSeconds(1)))) {
+                    days.add(day);
+                }
+            }
+            return days;
+        }
+
+        private static Set<DayOfWeek> quartzDays(String field) {
+            Set<DayOfWeek> days = new TreeSet<>();
+            try {
+                CronExpression cron = new CronExpression("0 0 0 ? * " + field);
+                cron.setTimeZone(TimeZone.getTimeZone(ZoneOffset.UTC));
+                for (DayOfWeek day : DayOfWeek.values()) {
+                    if (cron.isSatisfiedBy(Date.from(midnightOf(day).toInstant()))) {
+                        days.add(day);
+                    }
+                }
+            } catch (ParseException ex) {
+                return Set.of();
+            }
+            return days;
+        }
+
+        /** Midnight UTC of that day in one fixed week (2024-01-01 is a Monday). */
+        private static ZonedDateTime midnightOf(DayOfWeek day) {
+            return LocalDate.of(2024, 1, 1).plusDays(day.getValue() - 1L).atStartOfDay(ZoneOffset.UTC);
+        }
+
         private static String renumberDaysOfWeek(String field) {
             StringBuilder out = new StringBuilder();
-            java.util.regex.Matcher numbers = Pattern.compile("(?<![/#])\\b([0-7])\\b").matcher(field);
+            // A day number may carry Spring's 'L' (5L, the last Friday of the month): it is renumbered
+            // too, or Quartz reads it as the last Thursday.
+            java.util.regex.Matcher numbers = Pattern.compile("(?<![/#])\\b([0-7])(?=L?\\b)").matcher(field);
             while (numbers.find()) {
                 int spring = Integer.parseInt(numbers.group(1));
                 numbers.appendReplacement(out, Integer.toString(spring % 7 + 1));

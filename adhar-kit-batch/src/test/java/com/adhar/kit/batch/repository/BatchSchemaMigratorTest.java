@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.repository;
 
+import org.flywaydb.core.api.resource.LoadableResource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -193,6 +194,31 @@ class BatchSchemaMigratorTest {
         assertThat(tables).doesNotContain("batch_job_instance", "flyway_schema_history");
         assertThat(jdbc.queryForList("select \"version\" from batch.adhar_batch_schema_history where \"success\" "
                 + "and \"version\" is not null", String.class)).contains("6.0.0");
+    }
+
+    @Test
+    @DisplayName("the main stream never applies the Quartz stream nested inside its location: the engine simple gets no QRTZ_ tables")
+    void theMainStreamLeavesTheQuartzStreamAlone() {
+        ClassLoader classLoader = BatchSchemaMigrator.class.getClassLoader();
+        String[] sql = {".sql"};
+
+        // Flyway would scan the location recursively; each stream lists its own directory only.
+        assertThat(new DirectoryMigrations(BatchSchemaMigrator.LOCATION, classLoader).getResources("V", sql))
+                .extracting(LoadableResource::getFilename)
+                .contains("V6_0_0__spring_batch_6_0.sql").noneMatch(name -> name.toLowerCase().contains("quartz"));
+        assertThat(new DirectoryMigrations(QuartzSchemaMigrator.LOCATION, classLoader).getResources("V", sql))
+                .extracting(LoadableResource::getFilename).containsExactly("V2_5_2__quartz_tables.sql");
+
+        // And for real: 2.5.2 sorts before 6.0.0, so a recursive scan would create the job store first.
+        assertThatThrownBy(new BatchSchemaMigrator(h2, layout("BATCH_"), true)::migrate)
+                .isInstanceOf(BatchSchemaMigrationException.class);
+        assertThat(jdbc.queryForList("select lower(table_name) from information_schema.tables "
+                + "where table_schema = ?", String.class, SCHEMA))
+                .contains("batch_job_instance")
+                .noneMatch(table -> table.startsWith("qrtz_"))
+                .doesNotContain(QuartzSchemaMigrator.HISTORY_TABLE);
+        assertThat(jdbc.queryForList("select \"version\" from batch.adhar_batch_schema_history "
+                + "where \"version\" is not null", String.class)).contains("6.0.0").doesNotContain("2.5.2");
     }
 
     @Test
