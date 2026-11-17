@@ -383,7 +383,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                         .withIntervalInMilliseconds(every.toMillis()).repeatForever();
                 schedule = switch (misfire) {
                     case SKIP -> simple.withMisfireHandlingInstructionNextWithRemainingCount();
-                    case LATEST -> simple.withMisfireHandlingInstructionNextWithRemainingCount();
+                    case LATEST -> simple.withMisfireHandlingInstructionNowWithExistingCount();
                     case ALL -> simple.withMisfireHandlingInstructionIgnoreMisfires();
                 };
                 definition.add("every=" + every).add("start=" + start);
