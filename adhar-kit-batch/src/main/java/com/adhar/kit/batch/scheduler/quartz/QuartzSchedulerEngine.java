@@ -1012,6 +1012,8 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
         final String runName;
         final ZoneId zone;
         volatile Long executionId;
+        /** Whether this replica's lease of the execution was written. */
+        volatile boolean leased;
 
         LocalRun(String bean, String jobName, String runName, ZoneId zone) {
             this.bean = bean;
@@ -1071,6 +1073,21 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
             }
         }
 
+        /**
+         * @param executionId an execution this replica leased
+         * @param instance    this replica's Quartz instance id
+         * @return whether the lease was read and is gone or names another instance: another replica
+         *         recovered the execution. {@code false} when the lease could not be read.
+         */
+        boolean taken(long executionId, String instance) {
+            try {
+                return lease.find(executionId).map(found -> !instance.equals(found.owner().pod())).orElse(true);
+            } catch (RuntimeException ex) {
+                log.warn("Could not read the lease of execution {}: {}", executionId, ex.getMessage());
+                return false;
+            }
+        }
+
         void release(long executionId) {
             try {
                 lease.release(executionId);
@@ -1092,6 +1109,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
             claim.run.executionId = execution.getId();
             try {
                 lease.acquire(execution.getId(), claim.owner);
+                claim.run.leased = true;
             } catch (RuntimeException ex) {
                 log.warn("Could not write the lease of execution {}: {}", execution.getId(), ex.getMessage());
             }

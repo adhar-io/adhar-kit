@@ -151,6 +151,15 @@ class ConcurrentLaunchTestContainerTest {
             } catch (JobInstanceAlreadyCompleteException | JobExecutionAlreadyRunningException
                      | DataIntegrityViolationException | ConcurrencyFailureException ex) {
                 return Outcome.REFUSED;
+            } catch (IllegalStateException ex) {
+                // Spring Batch stores the JobInstance and its first JobExecution in two transactions. A
+                // launch that reads the instance between them is refused with this wording (the case
+                // InstanceCreationRetry starts again); it created nothing, so it is a refusal here too.
+                if (ex.getMessage() != null
+                        && ex.getMessage().startsWith(InstanceCreationRetry.INSTANCE_WITHOUT_EXECUTION)) {
+                    return Outcome.REFUSED;
+                }
+                throw ex;
             }
         };
     }

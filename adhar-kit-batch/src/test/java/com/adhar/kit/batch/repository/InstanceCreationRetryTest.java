@@ -61,4 +61,33 @@ class InstanceCreationRetryTest {
                 .isInstanceOf(DataIntegrityViolationException.class);
         verify(jobOperator, times(2)).start(job, parameters);
     }
+
+    @Test
+    @DisplayName("an instance whose first execution another launch has not stored yet is started again, and refused as the duplicate it is")
+    void aHalfCreatedInstanceIsStartedAgain() throws Exception {
+        // TaskExecutorJobLauncher's own wording, between the other launch's two transactions.
+        when(jobOperator.start(job, parameters)).thenThrow(
+                new IllegalStateException("Cannot find any job execution for job instance: JobInstance: id=1"),
+                new JobExecutionAlreadyRunningException("running"));
+
+        assertThatThrownBy(() -> InstanceCreationRetry.start(jobOperator, job, parameters))
+                .isInstanceOf(JobExecutionAlreadyRunningException.class);
+        verify(jobOperator, times(2)).start(job, parameters);
+    }
+
+    @Test
+    @DisplayName("an instance that never gets an execution, and any other illegal state, are rethrown")
+    void otherIllegalStatesAreRethrown() throws Exception {
+        when(jobOperator.start(job, parameters)).thenThrow(new IllegalStateException("the context is closed"));
+        assertThatThrownBy(() -> InstanceCreationRetry.start(jobOperator, job, parameters))
+                .isInstanceOf(IllegalStateException.class).hasMessage("the context is closed");
+        verify(jobOperator, times(1)).start(job, parameters);
+
+        JobOperator orphaned = mock(JobOperator.class);
+        when(orphaned.start(job, parameters)).thenThrow(
+                new IllegalStateException(InstanceCreationRetry.INSTANCE_WITHOUT_EXECUTION + ": JobInstance: id=1"));
+        assertThatThrownBy(() -> InstanceCreationRetry.start(orphaned, job, parameters))
+                .isInstanceOf(IllegalStateException.class);
+        verify(orphaned, times(InstanceCreationRetry.MAX_ATTEMPTS)).start(job, parameters);
+    }
 }

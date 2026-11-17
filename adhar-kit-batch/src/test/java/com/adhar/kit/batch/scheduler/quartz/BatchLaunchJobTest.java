@@ -23,6 +23,7 @@ import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.launch.JobExecutionAlreadyRunningException;
 import org.springframework.batch.core.launch.JobInstanceAlreadyCompleteException;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.Duration;
@@ -34,6 +35,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -634,5 +637,89 @@ class BatchLaunchJobTest extends QuartzEngineFixture {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ADHAR_BATCH_EXECUTION_LEASE", Integer.class))
                 .as("the claimed lease is released").isZero();
         assertThat(engine.runningJobs()).isEmpty();
+    }
+
+    // ------------------------------------------------------------------
+    // A run recovered under a replica that was only slow (FQ6, INV-4)
+    // ------------------------------------------------------------------
+
+    private Trigger chunkRun(String run) {
+        Map<String, String> data = new LinkedHashMap<>();
+        data.put(QuartzSchedulerEngine.KIND, QuartzSchedulerEngine.KIND_NOW);
+        data.put(QuartzSchedulerEngine.PARAMS, "{\"run\":\"" + run + "\"}");
+        return oneShot(QuartzJobs.CHUNK_JOB, "adhoc-" + run, data);
+    }
+
+    @Test
+    @DisplayName("INV-4: a run recovered under a slow replica rolls its chunk back and is recorded FAILED, not UNKNOWN, so the identity restarts")
+    void aFencedRunIsRecordedFailedAndRestarts() throws Exception {
+        reconciled();
+        TestJobs.seed(jdbc, 35);
+        gate.holdAt(15);
+        org.quartz.JobExecutionContext fire = fire(chunkRun("slow"), NOON);
+        CompletableFuture<SlotOutcome> slow = CompletableFuture.supplyAsync(() -> launch(fire));
+        assertThat(gate.awaitHeld(30)).as("held in its second chunk, ten rows committed").isTrue();
+        JobExecution held = last(QuartzJobs.CHUNK_JOB);
+
+        // Another replica takes this one for dead and recovers its execution, as BatchLaunchJob does.
+        operator.recover(held);
+        ownership.release(held.getId());
+        gate.release();
+
+        assertThat(slow.get(30, TimeUnit.SECONDS)).isEqualTo(SlotOutcome.RAN);
+        JobExecution fenced = repository.getJobExecution(held.getId());
+        assertThat(fenced.getStatus()).isEqualTo(BatchStatus.FAILED);
+        assertThat(fenced.getExitStatus().getExitCode()).isEqualTo("FAILED");
+        assertThat(fenced.getExitStatus().getExitDescription()).contains("Fenced: another replica recovered");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TARGET_ITEMS", Integer.class))
+                .as("the held chunk rolled back").isEqualTo(QuartzJobs.CHUNK);
+
+        // The recoverer's restart: refused for ever had the execution stayed UNKNOWN.
+        assertThat(launch(fire(chunkRun("slow"), NOON))).isEqualTo(SlotOutcome.RAN);
+        assertThat(executions(QuartzJobs.CHUNK_JOB)).extracting(JobExecution::getStatus)
+                .containsExactly(BatchStatus.FAILED, BatchStatus.COMPLETED);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TARGET_ITEMS", Integer.class)).isEqualTo(35);
+        assertThat(jdbc.queryForObject("SELECT COUNT(DISTINCT ID) FROM TARGET_ITEMS", Integer.class)).isEqualTo(35);
+    }
+
+    /** A finished execution of cronLatest turned UNKNOWN, handed back by the operator as the run's own. */
+    private JobExecution unknownRun() throws Exception {
+        cron("cronLatest", EVERY_FIVE_MINUTES);
+        reconciled();
+        launch(fire(stored("cronLatest"), FIVE_PAST));
+        JobExecution finished = last("cronLatest");
+        jdbc.update("UPDATE BATCH_JOB_EXECUTION SET STATUS = 'UNKNOWN', EXIT_CODE = 'UNKNOWN' WHERE JOB_EXECUTION_ID = ?",
+                finished.getId());
+        BatchOperator unlucky = mock(BatchOperator.class);
+        when(unlucky.findLastExecution(anyString(), any())).thenReturn(Optional.empty());
+        when(unlucky.start(any(Job.class), any())).thenAnswer(invocation -> repository.getJobExecution(finished.getId()));
+        engineOn(unlucky);
+        return finished;
+    }
+
+    @Test
+    @DisplayName("an UNKNOWN execution nobody recovered stays UNKNOWN: its state is a person's to decide")
+    void anUnknownRunNobodyRecoveredIsLeftAlone() throws Exception {
+        JobExecution unknown = unknownRun();
+
+        assertThat(launch(fire(stored("cronLatest"), FIVE_PAST))).isEqualTo(SlotOutcome.RAN);
+
+        JobExecution after = repository.getJobExecution(unknown.getId());
+        assertThat(after.getStatus()).isEqualTo(BatchStatus.UNKNOWN);
+        assertThat(after.getExitStatus().getExitCode()).isEqualTo("UNKNOWN");
+    }
+
+    @Test
+    @DisplayName("an UNKNOWN execution whose identity another replica already restarted is recorded FAILED")
+    void anUnknownRunAlreadyRestartedIsFenced() throws Exception {
+        JobExecution unknown = unknownRun();
+        JobExecution restart = repository.createJobExecution(unknown.getJobInstance(), unknown.getJobParameters(),
+                new ExecutionContext());
+
+        assertThat(launch(fire(stored("cronLatest"), FIVE_PAST))).isEqualTo(SlotOutcome.RAN);
+
+        assertThat(repository.getJobExecution(unknown.getId()).getStatus()).isEqualTo(BatchStatus.FAILED);
+        assertThat(repository.getJobExecution(restart.getId()).getStatus()).as("the restart is not touched")
+                .isEqualTo(BatchStatus.STARTING);
     }
 }

@@ -225,7 +225,10 @@ class RemotePartitioningTestContainerTest {
         // Attempt 2: the manager clears the group before it sends its own requests.
         ConfigurableApplicationContext restarted = manager();
         CompletableFuture<JobExecution> second = start(restarted);
-        await().atMost(Duration.ofSeconds(30)).until(() -> transport.pending(group) > 0);
+        // The stale requests are still there until the restart reaches its partition step: wait for the
+        // count to settle on the grid. Had they not been cleared, it would settle above it.
+        await().atMost(Duration.ofSeconds(30)).during(Duration.ofSeconds(1))
+                .until(() -> transport.pending(group) == GRID);
         assertThat(transport.pending(group)).as("the restart's own requests only").isEqualTo(GRID);
         CompletableFuture<RunOutcome> served = serve(worker(0), new AtomicBoolean());
         JobExecution completed = within(second, Duration.ofMinutes(2));

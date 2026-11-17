@@ -27,6 +27,11 @@ import java.util.concurrent.locks.LockSupport;
  * duplicate ({@link JobExecutionAlreadyRunningException}, {@link JobInstanceAlreadyCompleteException}).
  * Used by the Kubernetes runner and the embedded scheduler.</p>
  *
+ * <p>Spring Batch creates the JobInstance and its first JobExecution in two transactions. A launch
+ * of the SAME identity that arrives between them finds an instance without executions, which
+ * Spring Batch reports as an {@link IllegalStateException}. That is the same conflict seen a moment
+ * earlier, so it is started again too, and the retry is refused as the duplicate it is.</p>
+ *
  * @author Adhar Platform Team
  * @since 0.1.0
  */
@@ -38,6 +43,9 @@ public final class InstanceCreationRetry {
 
     private static final long PAUSE_MS = 50;
 
+    /** How {@code TaskExecutorJobLauncher} words a JobInstance whose first execution is not stored yet. */
+    static final String INSTANCE_WITHOUT_EXECUTION = "Cannot find any job execution for job instance";
+
     private InstanceCreationRetry() {
     }
 
@@ -47,6 +55,7 @@ public final class InstanceCreationRetry {
      * @param parameters  its parameters
      * @return the new execution
      * @throws ConcurrencyFailureException the last of {@value #MAX_ATTEMPTS} attempts still conflicted
+     * @throws IllegalStateException       the instance still has no execution after {@value #MAX_ATTEMPTS} attempts
      * @throws JobInstanceAlreadyCompleteException the instance already completed
      * @throws JobExecutionAlreadyRunningException an execution of the instance is running
      * @throws JobRestartException                 the instance cannot be restarted
@@ -62,11 +71,21 @@ public final class InstanceCreationRetry {
                 if (attempt >= MAX_ATTEMPTS) {
                     throw ex;
                 }
-                log.debug("Starting job [{}] conflicted with a concurrent launch (attempt {}): {}", job.getName(),
-                        attempt, ex.getMessage());
-                long pause = ThreadLocalRandom.current().nextLong(PAUSE_MS, PAUSE_MS * (attempt + 1));
-                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(pause));
+                pause(job, attempt, ex);
+            } catch (IllegalStateException ex) {
+                if (attempt >= MAX_ATTEMPTS || ex.getMessage() == null
+                        || !ex.getMessage().startsWith(INSTANCE_WITHOUT_EXECUTION)) {
+                    throw ex;
+                }
+                pause(job, attempt, ex);
             }
         }
+    }
+
+    private static void pause(Job job, int attempt, RuntimeException conflict) {
+        log.debug("Starting job [{}] conflicted with a concurrent launch (attempt {}): {}", job.getName(), attempt,
+                conflict.getMessage());
+        long pause = ThreadLocalRandom.current().nextLong(PAUSE_MS, PAUSE_MS * (attempt + 1));
+        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(pause));
     }
 }

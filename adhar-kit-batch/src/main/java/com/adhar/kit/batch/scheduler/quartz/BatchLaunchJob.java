@@ -17,6 +17,7 @@ import org.quartz.Trigger;
 import org.quartz.TriggerBuilder;
 import org.quartz.TriggerKey;
 import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.parameters.JobParameters;
@@ -52,6 +53,7 @@ import java.util.Optional;
  *   ABANDONED                     -> failed(abandoned): a new identity is needed
  *   STARTING, STARTED, STOPPING   -> recovering fire, or owner with no fresh check-in: recover, then start (recovered)
  *                                    otherwise skipped(duplicate)
+ * ended UNKNOWN after another replica recovered it -> fenced: recorded FAILED, as its recoverer left it
  * </pre>
  *
  * <p>An interval trigger whose {@code RESCHEDULE_NOW} misfire moved it off the kit's grid is
@@ -257,6 +259,9 @@ public class BatchLaunchJob implements org.quartz.Job {
             JobExecution execution = engine.operator().start(job, parameters);
             engine.ownership().claim(execution);
             execution = awaitEnd(execution);
+            if (execution.getStatus() == BatchStatus.UNKNOWN) {
+                execution = fenced(execution, local);
+            }
             BatchStatus status = execution.getStatus();
             if (status == BatchStatus.COMPLETED) {
                 log.info("Scheduled run {} of job [{}] completed (execution {})", runName, bean, execution.getId());
@@ -288,6 +293,42 @@ public class BatchLaunchJob implements org.quartz.Job {
                 engine.ownership().release(local.executionId);
             }
             engine.ended(local);
+        }
+    }
+
+    /**
+     * A run another replica recovered while this one still held it (a slow replica Quartz took for
+     * dead, FQ6) fails its next commit on the repository's version check, and its writes roll back
+     * with it (INV-4). Spring Batch then records the job UNKNOWN over the recoverer's FAILED, and a
+     * JobInstance with an UNKNOWN execution can never be restarted, by the recoverer or anyone. So
+     * the recoverer's verdict is put back, when there is proof of a recoverer: this replica's lease
+     * of the execution is gone, or the identity has a newer execution. An UNKNOWN execution without
+     * that proof is left as it is: its state really is unknown, and a person decides.
+     */
+    private JobExecution fenced(JobExecution execution, QuartzSchedulerEngine.LocalRun local) {
+        try {
+            JobExecution current = engine.repository().getJobExecution(execution.getId());
+            if (current == null || current.getStatus() != BatchStatus.UNKNOWN) {
+                return execution;
+            }
+            JobExecution newest = engine.repository().getLastJobExecution(current.getJobInstance());
+            boolean restarted = newest != null && (long) newest.getId() != (long) current.getId();
+            boolean taken = local.leased && engine.ownership().taken(current.getId(), engine.instanceId());
+            if (!restarted && !taken) {
+                return execution;
+            }
+            current.setStatus(BatchStatus.FAILED);
+            current.setExitStatus(ExitStatus.FAILED.addExitDescription("Fenced: another replica recovered this "
+                    + "execution while this one still held it; the chunk it held rolled back"));
+            engine.repository().update(current);
+            log.warn("Run {} of job [{}] was recovered by another replica while this one still ran execution {}: "
+                    + "its uncommitted chunk rolled back and it is recorded FAILED", local.runName, local.bean,
+                    current.getId());
+            return current;
+        } catch (RuntimeException ex) {
+            log.warn("Could not record the fenced execution {} of run {} as FAILED: {}", execution.getId(),
+                    local.runName, ex.getMessage());
+            return execution;
         }
     }
 

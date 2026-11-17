@@ -298,10 +298,12 @@ class QuartzClusterTestContainerTest {
                         .as(job + ": latest runs one slot for the outage").containsExactly(caughtUp.slot());
                 assertThat(caughtUp.slot()).as(job + ": the newest missed slot, not an older one")
                         .isAfterOrEqualTo(newestMissed);
+                // The run starts after the handling, behind the other triggers' catch-up runs on the
+                // replica's few worker threads: within two periods, never before its slot.
                 assertThat(Duration.between(caughtUp.slot(), caughtUp.created()))
                         .as(job + ": the identity is the slot the handling time falls in (%s created %s)",
                                 caughtUp.slot(), caughtUp.created())
-                        .isBetween(Duration.ZERO, Duration.ofSeconds(PERIOD + 1));
+                        .isBetween(Duration.ZERO, Duration.ofSeconds(2L * PERIOD));
             } else {
                 assertThat(slots).as(job + ": all runs every missed slot").containsAll(missed);
                 List<Run> caughtUp = runs.stream().filter(run -> missed.contains(run.slot())).toList();
