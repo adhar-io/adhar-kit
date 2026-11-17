@@ -424,9 +424,9 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                 .withPriority(settings.getPriority())
                 .usingJobData(new JobDataMap(data))
                 .withSchedule(schedule);
-        if (startAt != null) {
-            builder.startAt(Date.from(startAt));
-        }
+        // A cron or daily trigger starts now, by the kit's clock like every other decision of the
+        // reconcile (TriggerBuilder alone would read the system's): its grid has no slot before that.
+        builder.startAt(Date.from(startAt != null ? startAt : now));
         if (settings.getCalendar() != null) {
             builder.modifiedByCalendar(settings.getCalendar());
         }
