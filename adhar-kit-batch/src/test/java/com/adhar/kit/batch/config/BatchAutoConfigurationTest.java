@@ -18,6 +18,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.quartz.Scheduler;
 import org.springframework.batch.core.job.Job;
@@ -157,6 +158,21 @@ class BatchAutoConfigurationTest {
                             .hasMessageContaining("adhar.batch.scheduler.engine=quartz needs Quartz on the classpath")
                             .hasMessageContaining("org.springframework.boot:spring-boot-starter-quartz")
                             .hasMessageContaining("or use the engine simple");
+                });
+    }
+
+    @ParameterizedTest(name = "{1} with {0}")
+    @CsvSource(delimiter = '|', value = {
+            "adhar.batch.scheduler.engine=quartz | adhar.batch.scheduler.lock=none | adhar.batch.scheduler.lock=none is refused",
+            "adhar.batch.scheduler.engine=simple | adhar.batch.repository.table-prefix=QRTZ_ | adhar.batch.repository.table-prefix must not begin with QRTZ_",
+            "adhar.batch.scheduler.engine=simple | adhar.batch.repository.table-prefix=adhar_jobs_ | adhar.batch.repository.table-prefix must not begin with QRTZ_ or ADHAR_"})
+    @DisplayName("AQ.7: lock=none under quartz, and a Spring Batch prefix in the Quartz or kit namespace, fail the start naming the property")
+    void collidingSettingsFailTheStart(String engine, String setting, String message) {
+        withJob.withPropertyValues("adhar.batch.scheduler.enabled=true", engine, setting)
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(NestedExceptionUtils.getMostSpecificCause(context.getStartupFailure()))
+                            .isInstanceOf(IllegalStateException.class).hasMessageContaining(message);
                 });
     }
 

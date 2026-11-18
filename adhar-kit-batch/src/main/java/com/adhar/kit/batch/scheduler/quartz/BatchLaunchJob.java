@@ -57,7 +57,7 @@ import java.util.Optional;
  * </pre>
  *
  * <p>An interval trigger whose {@code RESCHEDULE_NOW} misfire moved it off the kit's grid is
- * re-anchored on the first grid slot after now before the run starts. Under misfire policy
+ * re-anchored on the first grid slot after the fire's scheduled time before the run starts. Under misfire policy
  * {@code all}, a slot older than the {@code adhar.batch.quartz.max-catch-up} most recent ones is
  * skipped and counted. The launch never throws: Quartz would refire or unschedule on a
  * {@code JobExecutionException}, and the JobRepository already records what happened.</p>
@@ -175,7 +175,7 @@ public class BatchLaunchJob implements org.quartz.Job {
         Instant slot = SlotResolver.slotOf(trigger, calendar, scheduled);
         Instant now = engine.clock().instant();
         if (!SlotResolver.onGrid(trigger)) {
-            reanchor(trigger, now);
+            reanchor(trigger, scheduled);
         }
         Misfire policy = misfire(trigger.getJobDataMap());
         if (policy == Misfire.ALL) {
@@ -192,10 +192,12 @@ public class BatchLaunchJob implements org.quartz.Job {
 
     /**
      * Puts an interval trigger back on the kit's grid after a {@code RESCHEDULE_NOW} misfire moved
-     * its {@code startTime} to the handling time: the next fire is the first grid slot after now.
+     * its {@code startTime} to the handling time: the next fire is the first grid slot after the
+     * fire's scheduled time. Not after now: a launch that starts behind a grid slot (a busy worker
+     * pool, a slow database) would skip that slot, and Quartz fires a start just past at once.
      */
-    private void reanchor(Trigger trigger, Instant now) {
-        Instant next = SlotResolver.reanchored(trigger, now);
+    private void reanchor(Trigger trigger, Instant scheduled) {
+        Instant next = SlotResolver.reanchored(trigger, scheduled);
         Trigger anchored = TriggerBuilder.newTrigger()
                 .withIdentity(trigger.getKey())
                 .forJob(trigger.getJobKey())

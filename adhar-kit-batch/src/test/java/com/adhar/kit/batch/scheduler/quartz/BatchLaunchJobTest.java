@@ -197,6 +197,25 @@ class BatchLaunchJobTest extends QuartzEngineFixture {
     }
 
     @Test
+    @DisplayName("an interval misfire handled just before :10 but launched just after it still fires :10 next")
+    void aLateLaunchOfAMisfireDoesNotLoseTheNextSlot() throws Exception {
+        interval("intervalLatest", "PT5M");
+        reconciled();
+        Instant handled = TEN_PAST.minusMillis(100);
+        scheduler.rescheduleJob(configKey("intervalLatest"), stored("intervalLatest").getTriggerBuilder()
+                .startAt(Date.from(handled)).build());
+        // A slow worker thread, or a busy pod: the launch runs after the grid passed :10.
+        clock.set(TEN_PAST.plusMillis(300));
+
+        assertThat(launch(fire(stored("intervalLatest"), handled))).isEqualTo(SlotOutcome.RAN);
+
+        assertThat(slots("intervalLatest")).containsExactly("2026-11-06T12:05:00Z");
+        assertThat(stored("intervalLatest").getStartTime().toInstant())
+                .as("re-anchored on the slot after the one this fire stands for, not after the launch")
+                .isEqualTo(TEN_PAST);
+    }
+
+    @Test
     @DisplayName("an interval fire on the grid is not re-anchored")
     void aFireOnTheGridLeavesTheTriggerAlone() throws Exception {
         interval("intervalLatest", "PT5M");
@@ -690,6 +709,31 @@ class BatchLaunchJobTest extends QuartzEngineFixture {
                 .containsExactly(BatchStatus.FAILED, BatchStatus.COMPLETED);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TARGET_ITEMS", Integer.class)).isEqualTo(35);
         assertThat(jdbc.queryForObject("SELECT COUNT(DISTINCT ID) FROM TARGET_ITEMS", Integer.class)).isEqualTo(35);
+    }
+
+    @Test
+    @DisplayName("INV-4: a run whose lease now names another replica is fenced too, before anyone restarted it")
+    void aRunWhoseLeaseAnotherReplicaHoldsIsFenced() throws Exception {
+        reconciled();
+        TestJobs.seed(jdbc, 35);
+        gate.holdAt(15);
+        org.quartz.JobExecutionContext fire = fire(chunkRun("taken"), NOON);
+        CompletableFuture<SlotOutcome> slow = CompletableFuture.supplyAsync(() -> launch(fire), threads);
+        assertThat(gate.awaitHeld(30)).as("held in its second chunk, ten rows committed").isTrue();
+        JobExecution held = last(QuartzJobs.CHUNK_JOB);
+
+        // The recoverer has not restarted the identity yet; the only proof is the lease in its name.
+        operator.recover(held);
+        ownership.release(held.getId());
+        new JdbcExecutionLease(jdbc, "ADHAR_BATCH_EXECUTION_LEASE").acquire(held.getId(),
+                new ExecutionLease.Owner("replica-b", "", ""));
+        gate.release();
+
+        assertThat(slow.get(30, TimeUnit.SECONDS)).isEqualTo(SlotOutcome.RAN);
+        assertThat(executions(QuartzJobs.CHUNK_JOB)).as("nobody restarted it").hasSize(1);
+        JobExecution fenced = repository.getJobExecution(held.getId());
+        assertThat(fenced.getStatus()).isEqualTo(BatchStatus.FAILED);
+        assertThat(fenced.getExitStatus().getExitDescription()).contains("Fenced: another replica recovered");
     }
 
     /** A finished execution of cronLatest turned UNKNOWN, handed back by the operator as the run's own. */

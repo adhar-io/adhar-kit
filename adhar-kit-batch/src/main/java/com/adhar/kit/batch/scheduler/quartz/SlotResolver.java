@@ -101,17 +101,17 @@ public final class SlotResolver {
     }
 
     /**
-     * @param trigger an interval trigger
-     * @param now     the current time
-     * @return the slot an interval trigger re-anchored now first fires at: the first grid slot
-     *         after now, so its following fires land on the grid again
+     * @param trigger   an interval trigger
+     * @param scheduled the scheduled time of the fire that found it off the grid
+     * @return the slot the re-anchored trigger first fires at: the first grid slot after that
+     *         fire's, so its following fires land on the grid again and none is skipped
      */
-    public static Instant reanchored(Trigger trigger, Instant now) {
+    public static Instant reanchored(Trigger trigger, Instant scheduled) {
         Interval grid = Interval.of(trigger.getJobDataMap());
         if (grid == null) {
             throw new IllegalArgumentException("trigger " + trigger.getKey() + " has no interval grid");
         }
-        return grid.next(now);
+        return grid.next(scheduled);
     }
 
     /**
