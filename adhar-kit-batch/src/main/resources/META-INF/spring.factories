@@ -1,7 +1,9 @@
 # Defaults needed before the context exists: framework loggers that print job parameters,
 # spring.batch.job.enabled=false with the embedded scheduler, and Kubernetes mode (design 0025 5.5).
+# D26: Spring Cloud AWS S3 defaults to the platform's RustFS, only for keys the application left unset.
 org.springframework.boot.EnvironmentPostProcessor=\
-com.adhar.kit.batch.config.BatchRuntimeEnvironmentPostProcessor
+com.adhar.kit.batch.config.BatchRuntimeEnvironmentPostProcessor,\
+com.adhar.kit.batch.config.AdharS3EnvironmentPostProcessor
 
 # The kit's JobRepository schema migration is a database initializer: Spring Boot makes the
 # JobRepository (and JPA) wait for it. So is its Quartz stream (engine quartz): Spring Boot's
