@@ -78,6 +78,12 @@ public class AdharBatchTestContextCustomizerFactory implements ContextCustomizer
         properties.put("spring.datasource.password", postgres.getPassword());
         properties.put("spring.datasource.driver-class-name", "org.postgresql.Driver");
         properties.put("spring.batch.job.enabled", "false");
+        // No Kubernetes informers: app-ci runs this test INSIDE a pod, where Spring Boot detects the
+        // Kubernetes platform and adhar-kit-kubernetes starts service discovery as the CI
+        // ServiceAccount, which may not list Services. The informer cache never syncs and the
+        // context fails after two minutes (bat-part, 2026-11-18). A run pod gets the same setting
+        // from BatchRuntimeEnvironmentPostProcessor; a test has no ADHAR_BATCH_JOB to trigger it.
+        properties.put("spring.main.cloud-platform", "none");
         if (s3) {
             LocalStackTestContainer.withServices("s3");
             LocalStackTestContainer.start();

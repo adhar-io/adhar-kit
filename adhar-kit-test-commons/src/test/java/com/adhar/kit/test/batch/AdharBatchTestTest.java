@@ -60,6 +60,12 @@ class AdharBatchTestTest {
     }
 
     @Test
+    @DisplayName("no Kubernetes service discovery, even when the build runs inside a pod")
+    void noKubernetesPlatform() {
+        assertThat(environment.getProperty("spring.main.cloud-platform")).isEqualTo("none");
+    }
+
+    @Test
     @DisplayName("the test's own properties win over the kit's")
     void theTestsPropertiesWin() {
         assertThat(environment.getProperty("spring.datasource.hikari.maximum-pool-size")).isEqualTo("3");
