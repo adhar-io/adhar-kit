@@ -148,7 +148,13 @@ class InProcessTracingConcurrencyTest {
         firstCall.join(TimeUnit.SECONDS.toMillis(5));
         assertThat(firstResponse.get()).isEqualTo("echo:first");
 
-        // Permit returned after the first call completed.
+        // Permit returned after the first call completed. The server returns it in its listener's
+        // onComplete, which can run after the client already holds the response (seen in a
+        // parallel build): wait for it, bounded, rather than reading it at once.
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (limiter.availableGlobalPermits() != 1 && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
         assertThat(limiter.availableGlobalPermits()).isEqualTo(1);
     }
 
