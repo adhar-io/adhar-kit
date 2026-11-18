@@ -8,6 +8,7 @@ import com.adhar.kit.batch.support.QuartzContexts;
 import com.adhar.kit.batch.support.QuartzJobs;
 import com.adhar.kit.batch.support.TcpProxy;
 import com.adhar.kit.batch.support.TestJobs;
+import com.adhar.kit.batch.support.TestThreads;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -62,6 +63,14 @@ import static org.awaitility.Awaitility.await;
  */
 @Testcontainers(disabledWithoutDocker = true)
 class QuartzClusterTestContainerTest {
+
+    /** Threads for the work this test runs beside its own; see TestThreads. */
+    private final TestThreads threads = new TestThreads();
+
+    @AfterEach
+    void stopTestThreads() {
+        threads.close();
+    }
 
     /** The tick triggers' period: divides 60, and is longer than the misfire threshold (2 s). */
     private static final int PERIOD = 4;
@@ -210,7 +219,7 @@ class QuartzClusterTestContainerTest {
         String firstInstance = instanceId(first);
         ConfigurableApplicationContext second = replica("b", Map.of());
 
-        CompletableFuture<Void> shutdown = CompletableFuture.runAsync(first::close);
+        CompletableFuture<Void> shutdown = CompletableFuture.runAsync(first::close, threads);
         // Spring Batch records the stop request at once; the run is still in its chunk.
         await().atMost(60, TimeUnit.SECONDS).until(() -> !executions(QuartzJobs.CHUNK_JOB).get(0).status().equals("STARTED"));
         first.getBean(QuartzJobs.Gate.class).release();

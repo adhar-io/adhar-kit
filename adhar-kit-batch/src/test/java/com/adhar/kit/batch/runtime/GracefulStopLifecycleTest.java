@@ -1,6 +1,8 @@
 package com.adhar.kit.batch.runtime;
 
 import com.adhar.kit.batch.support.RunnerJobs;
+import com.adhar.kit.batch.support.TestThreads;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.BatchStatus;
@@ -28,6 +30,14 @@ import static org.mockito.Mockito.when;
  */
 class GracefulStopLifecycleTest extends RunnerFixture {
 
+    /** Threads for the work this test runs beside its own; see TestThreads. */
+    private final TestThreads threads = new TestThreads();
+
+    @AfterEach
+    void stopTestThreads() {
+        threads.close();
+    }
+
     @Test
     @DisplayName("SIGTERM mid-run: the execution stops at a chunk boundary as STOPPED, the summary is written first, "
             + "and the run can be resumed to COMPLETED")
@@ -36,7 +46,7 @@ class GracefulStopLifecycleTest extends RunnerFixture {
         env.putAll(java.util.Map.of("ADHAR_BATCH_JOB", RunnerJobs.SLOW_CHUNK_JOB, "ADHAR_BATCH_TRIGGER", "manual",
                 "ADHAR_BATCH_PARAMS", "{\"run\":\"sigterm\"}"));
         AdharBatchRunner runner = runner();
-        CompletableFuture<Void> run = CompletableFuture.runAsync(() -> runner.run(null));
+        CompletableFuture<Void> run = CompletableFuture.runAsync(() -> runner.run(null), threads);
         await().atMost(Duration.ofSeconds(10)).until(() -> !jdbc.queryForList(
                 "SELECT JOB_EXECUTION_ID FROM ADHAR_BATCH_EXECUTION_LEASE", Long.class).isEmpty());
 

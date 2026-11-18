@@ -7,6 +7,8 @@ import com.adhar.kit.batch.params.RunIdentity;
 import com.adhar.kit.batch.scheduler.SlotOutcome;
 import com.adhar.kit.batch.support.QuartzJobs;
 import com.adhar.kit.batch.support.TestJobs;
+import com.adhar.kit.batch.support.TestThreads;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.quartz.CronTrigger;
@@ -58,6 +60,14 @@ import static org.mockito.Mockito.when;
  * and real Spring Batch jobs on H2 (see {@link QuartzEngineFixture}).
  */
 class QuartzSchedulerEngineTest extends QuartzEngineFixture {
+
+    /** Threads for the work this test runs beside its own; see TestThreads. */
+    private final TestThreads threads = new TestThreads();
+
+    @AfterEach
+    void stopTestThreads() {
+        threads.close();
+    }
 
     private static final String EVERY_FIVE_MINUTES = "0 0/5 * * * ?";
     private static final Instant FIVE_PAST = NOON.plus(Duration.ofMinutes(5));
@@ -594,7 +604,7 @@ class QuartzSchedulerEngineTest extends QuartzEngineFixture {
         assertThat(jdbc.queryForList("SELECT OWNER_POD FROM ADHAR_BATCH_EXECUTION_LEASE", String.class))
                 .as("the run's lease names this Quartz instance").containsExactly("replica-a");
 
-        CompletableFuture<Void> shutdown = CompletableFuture.runAsync(engine::stop);
+        CompletableFuture<Void> shutdown = CompletableFuture.runAsync(engine::stop, threads);
         // Spring Batch records the stop request at once (STOPPING with an end time is stored as
         // STOPPED); the run itself is still held in its chunk.
         await().atMost(60, TimeUnit.SECONDS).until(() -> executions(QuartzJobs.CHUNK_JOB).get(0).getStatus()
@@ -656,7 +666,7 @@ class QuartzSchedulerEngineTest extends QuartzEngineFixture {
                 clock.set(clock.instant().plusMillis(100));
                 Thread.onSpinWait();
             }
-        });
+        }, threads);
 
         engine.stop();
         stopped.set(true);

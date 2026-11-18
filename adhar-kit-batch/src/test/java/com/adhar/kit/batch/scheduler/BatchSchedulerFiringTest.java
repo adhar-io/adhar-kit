@@ -4,6 +4,7 @@ import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.lock.SchedulerLock;
 import com.adhar.kit.batch.operator.JobResolver;
 import com.adhar.kit.batch.params.JobParameterSpec;
+import com.adhar.kit.batch.support.TestThreads;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -68,6 +69,14 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class BatchSchedulerFiringTest {
+
+    /** Threads for the work this test runs beside its own; see TestThreads. */
+    private final TestThreads threads = new TestThreads();
+
+    @AfterEach
+    void stopTestThreads() {
+        threads.close();
+    }
 
     private static final Instant NOON = Instant.parse("2026-11-06T12:00:00Z");
     private static final String EVERY_FIVE_MINUTES = "0 */5 * * * *";
@@ -391,7 +400,7 @@ class BatchSchedulerFiringTest {
         });
         BatchScheduler slots = scheduler(lock);
 
-        CompletableFuture<SlotOutcome> first = CompletableFuture.supplyAsync(() -> slots.runSlot("job", job, NOON));
+        CompletableFuture<SlotOutcome> first = CompletableFuture.supplyAsync(() -> slots.runSlot("job", job, NOON), threads);
         awaitLatch(running);
 
         assertThat(slots.runningJobs()).containsExactly("job");

@@ -9,6 +9,8 @@ import com.adhar.kit.batch.scheduler.BatchScheduler;
 import com.adhar.kit.batch.scheduler.SlotOutcome;
 import com.adhar.kit.batch.support.QuartzJobs;
 import com.adhar.kit.batch.support.TestJobs;
+import com.adhar.kit.batch.support.TestThreads;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.quartz.JobBuilder;
@@ -53,6 +55,14 @@ import static org.mockito.Mockito.when;
  * Quartz's own context objects (see {@link QuartzEngineFixture}).
  */
 class BatchLaunchJobTest extends QuartzEngineFixture {
+
+    /** Threads for the work this test runs beside its own; see TestThreads. */
+    private final TestThreads threads = new TestThreads();
+
+    @AfterEach
+    void stopTestThreads() {
+        threads.close();
+    }
 
     private static final String EVERY_FIVE_MINUTES = "0 0/5 * * * ?";
     private static final Instant FIVE_PAST = NOON.plus(Duration.ofMinutes(5));
@@ -657,7 +667,7 @@ class BatchLaunchJobTest extends QuartzEngineFixture {
         TestJobs.seed(jdbc, 35);
         gate.holdAt(15);
         org.quartz.JobExecutionContext fire = fire(chunkRun("slow"), NOON);
-        CompletableFuture<SlotOutcome> slow = CompletableFuture.supplyAsync(() -> launch(fire));
+        CompletableFuture<SlotOutcome> slow = CompletableFuture.supplyAsync(() -> launch(fire), threads);
         assertThat(gate.awaitHeld(30)).as("held in its second chunk, ten rows committed").isTrue();
         JobExecution held = last(QuartzJobs.CHUNK_JOB);
 

@@ -10,6 +10,7 @@ import com.adhar.kit.batch.runtime.RunTrigger;
 import com.adhar.kit.batch.support.BatchTestApplication;
 import com.adhar.kit.batch.support.PartitionedJobs;
 import com.adhar.kit.batch.support.TestJobs;
+import com.adhar.kit.batch.support.TestThreads;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -55,6 +56,14 @@ import static org.mockito.Mockito.mock;
  */
 class RemotePartitioningTest {
 
+    /** Threads for the work this test runs beside its own; see TestThreads. */
+    private final TestThreads threads = new TestThreads();
+
+    @AfterEach
+    void stopTestThreads() {
+        threads.close();
+    }
+
     private static final int ROWS = 40;
     private static final int GRID = 4;
 
@@ -98,7 +107,7 @@ class RemotePartitioningTest {
             } catch (Exception ex) {
                 throw new IllegalStateException(ex);
             }
-        });
+        }, threads);
     }
 
     private CompletableFuture<RunOutcome> serve(ConfigurableApplicationContext worker) {
@@ -108,7 +117,7 @@ class RemotePartitioningTest {
                 OptionalInt.empty(), "test");
         AtomicBoolean never = new AtomicBoolean();
         return CompletableFuture.supplyAsync(() -> worker.getBean(PartitionWorker.class)
-                .consume(job, parameters, context, never::get));
+                .consume(job, parameters, context, never::get), threads);
     }
 
     private static <T> T within(CompletableFuture<T> future, Duration timeout) throws Exception {
