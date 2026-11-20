@@ -193,6 +193,28 @@ class QuartzCalendarsTest extends QuartzEngineFixture {
     }
 
     @Test
+    @DisplayName("FQ7 + the zone rule: a refreshed file that moves the calendar to another zone keeps the previous one, counted")
+    void aRefreshNeverMovesACalendarToAnotherZone() throws Exception {
+        Path file = calendarFile(SG_2030);
+        useCalendarFile(file);
+        morningTrigger();
+        clock.set(FRIDAY_2030);
+        reconciled();
+        RecordingMetrics metrics = new RecordingMetrics();
+        engine.observe(metrics, null, null);
+
+        Files.writeString(file, SG_2030.replace("Asia/Singapore", "America/New_York")
+                .replace("businessDays: [2030-11-09]\n", ""));
+        engine.refreshCalendars();
+
+        assertThat(metrics.calendarFailures).containsExactly("sg-business");
+        AdharBusinessCalendar registered = (AdharBusinessCalendar) scheduler.getCalendar("sg-business");
+        assertThat(registered.zone()).as("the trigger runs in Singapore: so does its calendar").isEqualTo(SINGAPORE);
+        assertThat(registered.businessCalendar().businessDays()).as("the previous version stays registered").hasSize(1);
+        assertThat(stored(DATED_JOB).getNextFireTime().toInstant()).isEqualTo(Instant.parse("2030-11-09T01:00:00Z"));
+    }
+
+    @Test
     @DisplayName("the engine re-reads calendar files every refresh-interval while it runs, and stops when it stops")
     void refreshesWhileRunning() throws Exception {
         Path file = calendarFile(SG_2030);

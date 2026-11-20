@@ -176,7 +176,18 @@ public class CalendarRegistry {
                 log.warn("Keeping the previous version of business calendar {}: {}", name, ex.getMessage());
                 continue;
             }
-            if (read.equals(current.get(name))) {
+            BusinessCalendar previous = current.get(name);
+            if (read.equals(previous)) {
+                continue;
+            }
+            if (previous != null && !read.zoneOr(defaultZone).normalized().equals(previous.zoneOr(defaultZone).normalized())) {
+                // The start checked every trigger against the zone it read; a new one would turn
+                // each business day into another date for them, which is what the zone rule forbids.
+                failed.add(name);
+                log.warn("Keeping the previous version of business calendar {}: its time zone changed from {} to {} "
+                        + "in {}, and its triggers were checked against {} at start: restart the service to apply it",
+                        name, previous.zoneOr(defaultZone), read.zoneOr(defaultZone), source(name),
+                        previous.zoneOr(defaultZone));
                 continue;
             }
             try {

@@ -240,9 +240,38 @@ class QuartzObservabilityTest extends QuartzEngineFixture {
                 metrics, Clock.systemUTC(), inCluster);
         assertThat(named.name()).isEqualTo("schedules");
         named.close();
+        settings.setName(null);
+        ScheduleReportWriter camel = QuartzConfiguration.reportWriter(settings, "importService", "importService",
+                engine, metrics, Clock.systemUTC(), inCluster);
+        assertThat(camel.name()).as("a ConfigMap name, or every write is a 422").isEqualTo("importservice-batch-schedules");
+        camel.close();
+        settings.setName("Schedules");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> QuartzConfiguration.reportWriter(settings, "importer",
+                        "importer", engine, metrics, Clock.systemUTC(), inCluster))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("adhar.batch.quartz.report.name");
         settings.setEnabled(false);
         assertThat(QuartzConfiguration.reportWriter(settings, "importer", "importer", engine, metrics,
                 Clock.systemUTC(), inCluster)).as("switched off").isNull();
+    }
+
+    @Test
+    @DisplayName("a trigger that is gone clears its next-fire gauge, here or after another replica removed it")
+    void aRemovedTriggerClearsItsNextFire() throws Exception {
+        cron("cronLatest", EVERY_FIVE_MINUTES);
+        reconciled();
+        observed();
+        engine.start();
+        engine.scheduleJob("flakyJob", "0 0 6 * * *");
+        assertThat(metrics.nextFires).containsKeys("cron-latest/tick", "flaky-job/schedule");
+
+        engine.cancelScheduledJob("flakyJob");
+        assertThat(metrics.nextFires).as("a gauge left at its last value reads as a stalled schedule")
+                .containsOnlyKeys("cron-latest/tick");
+
+        scheduler.unscheduleJob(stored("cronLatest").getKey());
+        clock.set(FIVE_PAST);
+        engine.triggersChanged();
+        assertThat(metrics.nextFires).as("removed in the shared store, seen at the next change").isEmpty();
     }
 
     @Test

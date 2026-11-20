@@ -350,7 +350,11 @@ public class QuartzConfiguration {
             return null;
         }
         String name = StringUtils.hasText(settings.getName()) ? settings.getName()
-                : schedulerName + ScheduleReportWriter.NAME_SUFFIX;
+                : ScheduleReportWriter.defaultName(schedulerName);
+        if (!ScheduleReportWriter.isConfigMapName(name)) {
+            throw new IllegalStateException("adhar.batch.quartz.report.name '" + name + "' is not a ConfigMap name "
+                    + "(lower-case letters, digits, '-' and '.'): the API server would refuse every report");
+        }
         if (api.isEmpty()) {
             log.info("adhar.batch.quartz.report.enabled=true, but this process runs outside Kubernetes (no "
                     + "KUBERNETES_SERVICE_HOST or ServiceAccount token): the schedule report {} is not written", name);

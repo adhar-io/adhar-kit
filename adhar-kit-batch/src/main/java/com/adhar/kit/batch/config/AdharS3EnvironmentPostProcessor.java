@@ -32,7 +32,9 @@ import java.util.Map;
  *   <li>{@code spring.cloud.aws.region.static}: {@code ADHAR_S3_REGION}, else {@code us-east-1} —
  *       ALWAYS, in or out of a cluster, for the {@code classpath:} reason above;</li>
  *   <li>{@code spring.cloud.aws.credentials.access-key} / {@code secret-key}: {@code ADHAR_S3_ACCESS_KEY}
- *       / {@code ADHAR_S3_SECRET_KEY}, when both are set.</li>
+ *       / {@code ADHAR_S3_SECRET_KEY}, when both are set and the endpoint in effect is that store's
+ *       (the application set none, or set the same one): an application pointed at another store keeps
+ *       its own credential chain instead of signing for it with the platform's key.</li>
  * </ul>
  *
  * <p>Applications get the {@code ADHAR_S3_*} variables from a {@code Bucket}'s connection Secret plus the
@@ -99,7 +101,12 @@ public class AdharS3EnvironmentPostProcessor implements EnvironmentPostProcessor
         String accessKey = environment.getProperty("ADHAR_S3_ACCESS_KEY");
         String secretKey = environment.getProperty("ADHAR_S3_SECRET_KEY");
         // Both or neither: half a credential would replace the default chain with one that cannot sign.
-        if (StringUtils.hasText(accessKey) && StringUtils.hasText(secretKey)
+        // And only for the store it belongs to: an application that set its own endpoint keeps its own
+        // credential chain, rather than signing for another store with the platform's key.
+        String ownEndpoint = environment.containsProperty(ENDPOINT) ? environment.getProperty(ENDPOINT) : null;
+        boolean ourStore = ownEndpoint == null
+                || (StringUtils.hasText(endpoint) && ownEndpoint.strip().equals(endpoint.strip()));
+        if (ourStore && StringUtils.hasText(accessKey) && StringUtils.hasText(secretKey)
                 && !environment.containsProperty(ACCESS_KEY) && !environment.containsProperty(SECRET_KEY)) {
             defaults.put(ACCESS_KEY, accessKey);
             defaults.put(SECRET_KEY, secretKey);

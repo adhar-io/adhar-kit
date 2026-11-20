@@ -352,7 +352,8 @@ adhar.batch:
 - **Calendars.** D5's rule: a date is a business day when it is in `businessDays`, or is neither a
   `weekendDays` day nor in `holidays`. An excluded day never fires. A trigger and its calendar
   share one zone or the start fails; a calendar file is re-read every `refresh-interval`, and an
-  invalid one keeps the previous version (counted) — at start it fails the start.
+  invalid one, or one whose zone changed, keeps the previous version (counted) — at start it fails
+  the start.
 - **Runtime triggers.** `BatchTriggers` (a bean only on `quartz`) stores durable one-shot triggers
   keyed by the run's name, so the same identity twice is one trigger and one run:
 
@@ -377,6 +378,7 @@ adhar.batch:
   the run and the outcome; `BatchRunEvent.Skipped` (`already-complete`, `duplicate`, `misfire`) and
   `Recovered` carry the run's name (`getRunName()`).
 - **The schedule report.** In Kubernetes the service writes `ConfigMap <scheduler-name>-batch-schedules`
+  (the scheduler name lower-cased into a valid ConfigMap name)
   (key `schedules.json`, version 1, ≤ 256 KiB, `truncated` when cut), which the Console and
   `adhar batch schedules` read. Its ServiceAccount needs `create` on `configmaps` and
   `get`/`update`/`patch` on that name; without them every write is counted, never thrown.

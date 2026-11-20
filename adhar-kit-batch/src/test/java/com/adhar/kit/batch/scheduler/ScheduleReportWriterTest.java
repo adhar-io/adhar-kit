@@ -215,6 +215,38 @@ class ScheduleReportWriterTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("an application named as Spring allows still gets a ConfigMap the API server takes: name and label made valid")
+    void namesAndLabelsTheApiServerTakes() {
+        assertThat(ScheduleReportWriter.defaultName("importer")).isEqualTo("importer-batch-schedules");
+        assertThat(ScheduleReportWriter.defaultName("importService")).isEqualTo("importservice-batch-schedules");
+        assertThat(ScheduleReportWriter.defaultName("Order Import (EU)")).isEqualTo("order-import-eu-batch-schedules");
+        assertThat(ScheduleReportWriter.defaultName("__")).isEqualTo("scheduler-batch-schedules");
+        String longest = ScheduleReportWriter.defaultName("a".repeat(300));
+        assertThat(longest).hasSize(253).endsWith("-batch-schedules");
+        for (String name : List.of("importservice-batch-schedules", "order-import-eu-batch-schedules", longest, "a.b")) {
+            assertThat(ScheduleReportWriter.isConfigMapName(name)).as(name).isTrue();
+        }
+        for (String name : List.of("importService-batch-schedules", "-a", "a-", "a..b", "", "a".repeat(254))) {
+            assertThat(ScheduleReportWriter.isConfigMapName(name)).as(name).isFalse();
+        }
+        assertThat(ScheduleReportWriter.isConfigMapName(null)).isFalse();
+
+        ApiAccess api = new ApiAccess(URI.create(API.baseUrl()), () -> "t", "team-a", HttpClient.newHttpClient());
+        Map<String, Object> labels = (Map<String, Object>) Json.at(Json.parse(new ScheduleReportWriter(api, "x",
+                "Order Import (EU)", Duration.ZERO, ScheduleReportWriterTest::specExample, metrics, Clock.systemUTC(),
+                mock(ScheduledExecutorService.class)).configMap("{}")), "metadata", "labels");
+        assertThat(labels).containsEntry("adhar.io/application", "Order-Import-EU");
+        Map<String, Object> none = (Map<String, Object>) Json.at(Json.parse(new ScheduleReportWriter(api, "x", "(*)",
+                Duration.ZERO, ScheduleReportWriterTest::specExample, metrics, Clock.systemUTC(),
+                mock(ScheduledExecutorService.class)).configMap("{}")), "metadata", "labels");
+        assertThat(none).as("nothing of it is a label: no label, rather than a refused ConfigMap")
+                .doesNotContainKey("adhar.io/application").containsEntry("adhar.io/batch-schedules", "true");
+        assertThat(ScheduleReportWriter.labelValue("x".repeat(70) + "-y")).hasSize(63);
+        assertThat(ScheduleReportWriter.labelValue(null)).isNull();
+    }
+
+    @Test
     @DisplayName("a writer without API access writes nothing; a request on a shut-down executor is dropped")
     void disabledWriters() {
         ScheduledExecutorService executor = mock(ScheduledExecutorService.class);

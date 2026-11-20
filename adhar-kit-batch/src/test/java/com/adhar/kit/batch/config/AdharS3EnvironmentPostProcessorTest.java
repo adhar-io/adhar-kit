@@ -100,6 +100,30 @@ class AdharS3EnvironmentPostProcessorTest {
     }
 
     @Test
+    @DisplayName("an application that sets only its own endpoint keeps its own credential chain: the platform's key is the platform store's")
+    void ownEndpointKeepsItsOwnCredentials() {
+        Map<String, Object> bucket = Map.of(
+                "KUBERNETES_SERVICE_HOST", "10.96.0.1",
+                "ADHAR_S3_ENDPOINT", "http://rustfs.adhar-system.svc.cluster.local:9000",
+                "ADHAR_S3_ACCESS_KEY", "team-key",
+                "ADHAR_S3_SECRET_KEY", "team-secret");
+        StandardEnvironment aws = environment(bucket, Map.of(ENDPOINT, "https://s3.eu-west-1.amazonaws.com"));
+
+        AdharS3EnvironmentPostProcessor.apply(aws, true);
+
+        assertThat(aws.getProperty(ENDPOINT)).isEqualTo("https://s3.eu-west-1.amazonaws.com");
+        assertThat(aws.getProperty(PATH_STYLE)).as("the application's store, the application's addressing").isNull();
+        assertThat(aws.getProperty(ACCESS_KEY)).as("never the platform's key against another store").isNull();
+        assertThat(aws.getProperty(SECRET_KEY)).isNull();
+
+        StandardEnvironment same = environment(bucket,
+                Map.of(ENDPOINT, "http://rustfs.adhar-system.svc.cluster.local:9000"));
+        AdharS3EnvironmentPostProcessor.apply(same, true);
+        assertThat(same.getProperty(ACCESS_KEY)).as("the same store, written out: its credential").isEqualTo("team-key");
+        assertThat(same.getProperty(SECRET_KEY)).isEqualTo("team-secret");
+    }
+
+    @Test
     @DisplayName("half a credential is never supplied: it would replace the default chain with one that cannot sign")
     void halfACredential() {
         StandardEnvironment environment = environment(Map.of("ADHAR_S3_ACCESS_KEY", "team-key"), Map.of());

@@ -18,6 +18,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.StringJoiner;
 import java.util.concurrent.RejectedExecutionException;
@@ -25,6 +26,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * Writes the in-service schedule report (design 0025 §5.20.8): how the Console and the CLI see a
@@ -78,6 +80,15 @@ public class ScheduleReportWriter implements AutoCloseable {
     /** The most triggers per job a capped report keeps. */
     public static final int MAX_TRIGGERS = 50;
 
+    /** The longest ConfigMap name. */
+    private static final int MAX_NAME = 253;
+
+    /** The longest label value. */
+    private static final int MAX_LABEL_VALUE = 63;
+
+    private static final Pattern CONFIG_MAP_NAME =
+            Pattern.compile("[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*");
+
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     private final ApiAccess api;
@@ -113,6 +124,51 @@ public class ScheduleReportWriter implements AutoCloseable {
         this.metrics = metrics;
         this.clock = clock;
         this.executor = executor;
+    }
+
+    /**
+     * @param schedulerName {@code adhar.batch.quartz.scheduler-name}, which defaults to
+     *                      {@code spring.application.name} and so may be any text
+     * @return {@code <scheduler-name>-batch-schedules} as a valid ConfigMap name (a DNS-1123
+     *         subdomain): lower case, every other character a {@code -}. The API server answers
+     *         {@code 422} to {@code importService-batch-schedules} on every write, which this
+     *         advisory writer would only count.
+     */
+    public static String defaultName(String schedulerName) {
+        String name = schedulerName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9-]+", "-")
+                .replaceAll("-{2,}", "-").replaceAll("^[^a-z0-9]+", "");
+        int max = MAX_NAME - NAME_SUFFIX.length();
+        if (name.length() > max) {
+            name = name.substring(0, max);
+        }
+        name = name.replaceAll("[^a-z0-9]+$", "");
+        return (name.isEmpty() ? "scheduler" : name) + NAME_SUFFIX;
+    }
+
+    /**
+     * @param name a name
+     * @return whether the API server takes it as a ConfigMap's name (a DNS-1123 subdomain)
+     */
+    public static boolean isConfigMapName(String name) {
+        return name != null && name.length() <= MAX_NAME && CONFIG_MAP_NAME.matcher(name).matches();
+    }
+
+    /**
+     * @param value a label's value as given
+     * @return it as a valid label value (at most 63 of {@code [A-Za-z0-9._-]}, starting and ending
+     *         alphanumeric), {@code null} when nothing of it remains: an invalid value would make
+     *         the API server refuse the whole ConfigMap
+     */
+    static String labelValue(String value) {
+        if (value == null) {
+            return null;
+        }
+        String label = value.replaceAll("[^A-Za-z0-9._-]+", "-").replaceAll("^[^A-Za-z0-9]+", "");
+        if (label.length() > MAX_LABEL_VALUE) {
+            label = label.substring(0, MAX_LABEL_VALUE);
+        }
+        label = label.replaceAll("[^A-Za-z0-9]+$", "");
+        return label.isEmpty() ? null : label;
     }
 
     /**
@@ -210,8 +266,9 @@ public class ScheduleReportWriter implements AutoCloseable {
     String configMap(String report) {
         Map<String, String> labels = new LinkedHashMap<>();
         labels.put(LABEL, "true");
-        if (application != null && !application.isBlank()) {
-            labels.put(APPLICATION_LABEL, Json.sanitize(application));
+        String app = labelValue(application);
+        if (app != null) {
+            labels.put(APPLICATION_LABEL, app);
         }
         labels.put(MANAGED_BY_LABEL, "adhar-kit");
         StringJoiner labelJson = new StringJoiner(",", "{", "}");

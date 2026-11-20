@@ -56,9 +56,11 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -219,6 +221,8 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
     private final Map<String, String> scheduleNames = new HashMap<>();
     private final Map<String, String> pendingSchedules = new LinkedHashMap<>();
     private final Map<LocalRun, Boolean> running = new ConcurrentHashMap<>();
+    /** The (job, trigger) next-fire gauges last set, so a trigger that is gone clears its own. */
+    private final Set<List<String>> nextFireGauges = ConcurrentHashMap.newKeySet();
     private final AtomicLong beyondCatchUp = new AtomicLong();
     private final Object lifecycleMonitor = new Object();
     private volatile boolean reconciled;
@@ -1019,24 +1023,38 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
 
     /**
      * After a fire or a trigger change: the next-fire gauges, the instances gauge and a report.
-     * Advisory: nothing here fails a fire.
+     * A trigger that is gone (cancelled here or on another replica) clears its gauge: one left at
+     * its last value would read as a stalled schedule ten minutes later. Advisory: nothing here
+     * fails a fire.
      */
     void triggersChanged() {
         if (!reconciled) {
             return;
         }
         try {
+            Set<List<String>> seen = new HashSet<>();
             for (Map.Entry<String, Job> entry : jobs.entrySet()) {
                 if (entry.getValue().getJobParametersIncrementer() != null) {
                     continue;
                 }
                 for (Trigger trigger : scheduler.getTriggersOfJob(jobKey(entry.getKey()))) {
                     if (CONFIG_GROUP.equals(trigger.getKey().getGroup())) {
-                        metrics.nextFire(scheduleNameOf(entry.getKey()), triggerTag(trigger.getKey(), null),
-                                trigger.getNextFireTime() != null ? trigger.getNextFireTime().toInstant() : null);
+                        List<String> gauge = List.of(scheduleNameOf(entry.getKey()), triggerTag(trigger.getKey(), null));
+                        Instant next = trigger.getNextFireTime() != null ? trigger.getNextFireTime().toInstant() : null;
+                        metrics.nextFire(gauge.get(0), gauge.get(1), next);
+                        if (next != null) {
+                            seen.add(gauge);
+                        }
                     }
                 }
             }
+            for (List<String> gone : new ArrayList<>(nextFireGauges)) {
+                if (!seen.contains(gone)) {
+                    metrics.nextFire(gone.get(0), gone.get(1), null);
+                }
+            }
+            nextFireGauges.retainAll(seen);
+            nextFireGauges.addAll(seen);
             Instant now = clock.instant();
             long alive = checkIns().values().stream().filter(checkin -> fresh(checkin, now)).count();
             metrics.instances((int) alive);
