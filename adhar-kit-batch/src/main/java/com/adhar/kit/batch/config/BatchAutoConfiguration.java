@@ -35,6 +35,8 @@ import com.adhar.kit.batch.runtime.RecoveryPolicy;
 import com.adhar.kit.batch.runtime.RunContextResolver;
 import com.adhar.kit.batch.runtime.TerminationSummaryWriter;
 import com.adhar.kit.batch.scheduler.BatchScheduler;
+import com.adhar.kit.batch.scheduler.MicrometerSchedulerMetrics;
+import com.adhar.kit.batch.scheduler.SchedulerMetrics;
 import com.adhar.kit.batch.scheduler.SimpleSchedulerEngine;
 import com.adhar.kit.batch.scheduler.quartz.QuartzConfiguration;
 import com.adhar.kit.batch.step.AdharSteps;
@@ -440,16 +442,36 @@ public class BatchAutoConfiguration {
         BatchScheduler batchScheduler(JobOperator jobOperator, JobRepository jobRepository, JobResolver jobResolver,
                                       ObjectProvider<SchedulerLock> schedulerLock,
                                       ObjectProvider<JobParameterSpecRegistry> specs,
-                                      JobParametersResolver parametersResolver, BatchProperties properties) {
+                                      JobParametersResolver parametersResolver, BatchProperties properties,
+                                      ObjectProvider<SchedulerMetrics> metrics) {
             BatchProperties.Scheduler settings = properties.getScheduler();
             SchedulerLock lock = schedulerLock.getIfAvailable();
             if (lock == null && settings.getLock() == BatchProperties.Scheduler.Lock.JDBC) {
                 log.warn("adhar.batch.scheduler.lock=jdbc but there is no DataSource: the embedded scheduler runs "
                         + "without a lock, so only one instance of this service may run");
             }
-            return new BatchScheduler(new SimpleSchedulerEngine(jobOperator, jobRepository, jobResolver,
+            SimpleSchedulerEngine engine = new SimpleSchedulerEngine(jobOperator, jobRepository, jobResolver,
                     specs.getIfAvailable(), parametersResolver, lock, settings, properties.getShutdown().getTimeout(),
-                    Clock.systemUTC()));
+                    Clock.systemUTC());
+            engine.observe(metrics.getIfAvailable(SchedulerMetrics::none), properties.getQuartz());
+            return new BatchScheduler(engine);
+        }
+    }
+
+    /**
+     * The in-service scheduler's meters ({@code adhar.batch.scheduler.*}), on either engine, when
+     * the application has a {@code MeterRegistry}.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnBooleanProperty(name = "adhar.batch.scheduler.enabled")
+    @ConditionalOnClass(name = "io.micrometer.core.instrument.MeterRegistry")
+    static class SchedulerMetricsConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnBean(type = "io.micrometer.core.instrument.MeterRegistry")
+        SchedulerMetrics schedulerMetrics(io.micrometer.core.instrument.MeterRegistry registry) {
+            return new MicrometerSchedulerMetrics(registry);
         }
     }
 

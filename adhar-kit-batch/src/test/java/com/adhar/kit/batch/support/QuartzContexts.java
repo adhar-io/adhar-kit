@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.support;
 
+import com.adhar.kit.batch.scheduler.SlotIdentity;
 import com.adhar.kit.batch.scheduler.quartz.QuartzSchedulerEngine;
 import org.quartz.JobKey;
 import org.quartz.Scheduler;
@@ -73,7 +74,7 @@ public final class QuartzContexts {
         data.put(QuartzSchedulerEngine.KIND, QuartzSchedulerEngine.KIND_NOW);
         data.put(QuartzSchedulerEngine.PARAMS, json);
         scheduler.scheduleJob(QuartzSchedulerEngine.oneShot(new TriggerKey(name, QuartzSchedulerEngine.RUNTIME_GROUP),
-                new JobKey(QuartzSchedulerEngine.dnsLabel(job), QuartzSchedulerEngine.JOB_GROUP), data, Instant.now()));
+                new JobKey(SlotIdentity.dnsLabel(job), QuartzSchedulerEngine.JOB_GROUP), data, Instant.now()));
     }
 
     /**

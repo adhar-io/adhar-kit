@@ -185,8 +185,8 @@ class QuartzClusterTestContainerTest {
         assertThat(all.get(0).status()).as("the dead replica's execution, recovered").isEqualTo("FAILED");
         assertThat(all.get(1).instance()).as("the same JobInstance").isEqualTo(all.get(0).instance());
         assertThat(all.get(1).parameters()).containsEntry(QuartzSchedulerEngine.INSTANCE_PARAMETER, instanceId(second))
-                .containsEntry(QuartzSchedulerEngine.TRIGGER_KEY_PARAMETER, QuartzSchedulerEngine.RUNTIME_GROUP + ".adhoc-r1")
-                .containsEntry(QuartzSchedulerEngine.RUN_PARAMETER, RunIdentity.runName("chunk-job", Map.of("run", "r1")));
+                .containsEntry(BatchScheduler.TRIGGER_KEY_PARAMETER, QuartzSchedulerEngine.RUNTIME_GROUP + ".adhoc-r1")
+                .containsEntry(BatchScheduler.RUN_PARAMETER, RunIdentity.runName("chunk-job", Map.of("run", "r1")));
         assertThat(targetRows("*")).isEqualTo(ROWS);
         assertThat(targetRows("distinct ID")).isEqualTo(ROWS);
 
@@ -236,8 +236,8 @@ class QuartzClusterTestContainerTest {
         assertThat(all.get(1).instance()).as("the same JobInstance").isEqualTo(all.get(0).instance());
         assertThat(all.get(1).parameters())
                 .containsEntry(QuartzSchedulerEngine.INSTANCE_PARAMETER, instanceId(second))
-                .containsEntry(QuartzSchedulerEngine.TRIGGER_KEY_PARAMETER, QuartzSchedulerEngine.RUNTIME_GROUP + "." + runName)
-                .containsEntry(QuartzSchedulerEngine.RUN_PARAMETER, runName)
+                .containsEntry(BatchScheduler.TRIGGER_KEY_PARAMETER, QuartzSchedulerEngine.RUNTIME_GROUP + "." + runName)
+                .containsEntry(BatchScheduler.RUN_PARAMETER, runName)
                 .containsEntry("run", "r2");
         assertThat(targetRows("*")).isEqualTo(ROWS);
         assertThat(targetRows("distinct ID")).isEqualTo(ROWS);

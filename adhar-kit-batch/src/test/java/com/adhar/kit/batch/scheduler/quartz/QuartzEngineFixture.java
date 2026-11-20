@@ -78,6 +78,9 @@ abstract class QuartzEngineFixture {
     /** Quartz's table prefix in the test's H2 schema. */
     static final String PREFIX = "QRTZ_";
 
+    /** The application the fixture's engines belong to. */
+    static final String APPLICATION = "svc";
+
     static final String DATED_JOB = "datedJob";
     static final String FLAKY_JOB = "flakyJob";
     static final String COUNTER_JOB = "counterJob";
@@ -128,6 +131,7 @@ abstract class QuartzEngineFixture {
             jdbc.update("DELETE FROM " + table);
         }
         failures.clear();
+        calendarSettings.clear();
         gate.release();
         Jobs.FLAKY.set(false);
         clock.set(NOON);
@@ -170,9 +174,20 @@ abstract class QuartzEngineFixture {
      */
     QuartzSchedulerEngine newEngine() {
         engine = new QuartzSchedulerEngine(scheduler, operator, repository, beans.getBeansOfType(Job.class), specs,
-                resolver, ownership, jdbc, PREFIX, properties, "1.4.0", clock);
+                resolver, ownership, jdbc, PREFIX, properties, APPLICATION, "1.4.0", calendars(), clock);
         return engine;
     }
+
+    /**
+     * @return the business calendars of {@code properties}' {@code adhar.batch.quartz.calendars}
+     *         entries a test put in {@link #calendarSettings}
+     */
+    CalendarRegistry calendars() {
+        return new CalendarRegistry(calendarSettings, properties.getScheduler().getTimeZone());
+    }
+
+    /** Calendars by name, read by the next engine the test creates. */
+    final Map<String, BatchProperties.Quartz.CalendarSettings> calendarSettings = new java.util.LinkedHashMap<>();
 
     /**
      * @return a new engine, reconciled into the store

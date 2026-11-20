@@ -3,6 +3,7 @@ package com.adhar.kit.batch.telemetry;
 import com.adhar.kit.batch.fault.DeadLetterSkipListener;
 import com.adhar.kit.batch.listener.BatchRunObserver;
 import com.adhar.kit.batch.runtime.AdharBatchRunner;
+import com.adhar.kit.batch.scheduler.BatchScheduler;
 import org.slf4j.MDC;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.step.StepExecution;
@@ -18,7 +19,8 @@ import java.util.Map;
  * Puts the run into the logging MDC (design 0025 §5.13), so every log line of a job, including the
  * application's own and those of partition worker threads, carries {@value #JOB},
  * {@value #INSTANCE}, {@value #EXECUTION}, {@value #STEP}, {@value #PARTITION},
- * {@value #BUSINESS_DATE} and {@value #K8S_JOB}. The JSON encoder of adhar-kit-logging writes the
+ * {@value #BUSINESS_DATE}, {@value #K8S_JOB} and, for an in-service run, {@value #RUN} and
+ * {@value #TRIGGER}. The JSON encoder of adhar-kit-logging writes the
  * MDC into each line.
  *
  * <p>The keys are set when a job or step starts on a thread and the thread's previous MDC is
@@ -43,6 +45,10 @@ public class BatchMdc implements BatchRunObserver, Ordered {
     public static final String BUSINESS_DATE = "batch.businessDate";
     /** The Kubernetes Job of the run pod, in Kubernetes mode. */
     public static final String K8S_JOB = "k8s.job";
+    /** The run's name (naming v1), for an in-service run ({@code adhar.run}). */
+    public static final String RUN = "batch.run";
+    /** What started the run: an in-service trigger's key ({@code adhar.trigger.key}), else {@code adhar.trigger}. */
+    public static final String TRIGGER = "batch.trigger";
 
     private final ThreadLocal<Deque<Map<String, String>>> saved = ThreadLocal.withInitial(ArrayDeque::new);
 
@@ -67,6 +73,17 @@ public class BatchMdc implements BatchRunObserver, Ordered {
         String k8sJob = execution.getJobParameters().getString(AdharBatchRunner.K8S_JOB);
         if (k8sJob != null && !k8sJob.isBlank()) {
             context.put(K8S_JOB, k8sJob);
+        }
+        String run = execution.getJobParameters().getString(BatchScheduler.RUN_PARAMETER);
+        if (run != null && !run.isBlank()) {
+            context.put(RUN, run);
+        }
+        String trigger = execution.getJobParameters().getString(BatchScheduler.TRIGGER_KEY_PARAMETER);
+        if (trigger == null || trigger.isBlank()) {
+            trigger = execution.getJobParameters().getString(BatchScheduler.TRIGGER_PARAMETER);
+        }
+        if (trigger != null && !trigger.isBlank()) {
+            context.put(TRIGGER, trigger);
         }
         return context;
     }

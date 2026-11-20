@@ -243,7 +243,10 @@ and a restart over input that changed since the failed attempt is refused.
 - Traces have job, step and chunk spans only; per-item observations stay metrics
   (`adhar.batch.telemetry.trace-items=true` traces them).
 - Every log line of a run carries `batch.job`, `batch.instance`, `batch.execution`, `batch.step`,
-  `batch.partition`, `batch.businessDate` and `k8s.job` in the MDC.
+  `batch.partition`, `batch.businessDate` and `k8s.job` in the MDC; an in-service run on Quartz
+  also `batch.run` (its name, naming v1) and `batch.trigger` (the trigger's key).
+- In-service schedules add `adhar.batch.scheduler.*` meters on both engines (see
+  [In-service scheduling on Quartz](#in-service-scheduling-on-quartz)).
 
 ## Testing
 
@@ -293,6 +296,14 @@ build when the `BatchJob` manifest's parameters differ from `@AdharBatchJob`, it
 | `adhar.batch.distribution` | env `ADHAR_BATCH_DISTRIBUTION` (`partitioned`) | `partitioned` \| `chunked` (Phase 4, refused until then) |
 | `adhar.batch.scheduler.enabled` / `.time-zone` / `.misfire-threshold` / `.lock` | `false` / `UTC` / `10m` / `jdbc` | Embedded mode |
 | `adhar.batch.scheduler.lock-lease` / `.lock-renew-interval` / `.pool-size` / `.jobs.<job>` | `2m` / `30s` / `2` / — | Embedded mode |
+| `adhar.batch.scheduler.engine` | `simple` | `simple` \| `quartz` (needs `spring-boot-starter-quartz`) |
+| `adhar.batch.quartz.scheduler-name` | `${spring.application.name}` | The Quartz cluster's identity: one per service |
+| `adhar.batch.quartz.cluster-checkin-interval` / `.misfire` / `.max-catch-up` | `15s` / `latest` / `24` | Failover speed; default misfire policy (`skip` \| `latest` \| `all`); most slots `all` runs |
+| `adhar.batch.quartz.jobs.<job>.name` | the bean name as a DNS label | The schedule name, naming v1's `<batchjob>` |
+| `adhar.batch.quartz.triggers.<job>[n].*` | — | `name`, `kind` (`cron` \| `interval` \| `daily`), `expression` \| `every`/`start` \| `from`/`to`/`every`/`days`, `time-zone`, `calendar`, `misfire`, `priority`, `parameters` |
+| `adhar.batch.quartz.calendars.<name>.*` | — | `file` (a D5 `calendar.yaml`), or `time-zone`, `weekend-days`, `holidays`, `business-days` |
+| `adhar.batch.quartz.calendars.refresh-interval` | `5m` | Re-read of calendar files |
+| `adhar.batch.quartz.report.enabled` / `.name` / `.min-interval` | in Kubernetes / `<scheduler-name>-batch-schedules` / `10s` | The schedule report |
 
 Renamed directly, with no aliases: `table-prefix` → `repository.table-prefix`,
 `default-chunk-size` → `chunk.size`, `default-page-size` → `page.size`, `max-retries` →
@@ -309,3 +320,63 @@ the nominal fire time is the run's identity, so a double fire is the same JobIns
 `BatchFacade.getInstance()` (or `adhar.getBatch()`) exposes `scheduleJob`, `cancelJob`,
 `listScheduledJobs`, `getJobStats` and the `BatchOperator`. It is not the platform path: a long or
 heavy job belongs in a `BatchJob`.
+
+## In-service scheduling on Quartz
+
+`adhar.batch.scheduler.engine=quartz` (and `spring-boot-starter-quartz` on the classpath) puts the
+same `BatchScheduler` on a clustered Quartz JDBC store in the batch schema (`batch.QRTZ_*`, the
+kit's second Flyway stream). Every replica of the service shares it: a slot runs once across them,
+a replica that dies mid-run is re-fired on another and the run resumes from its last commit, and
+each trigger has a misfire policy. Both engines name a slot's run alike (`SlotIdentity`, naming v1),
+so a service switches engine without losing a JobInstance.
+
+```yaml
+adhar.batch:
+  scheduler: { enabled: true, engine: quartz, time-zone: Asia/Singapore }
+  quartz:
+    calendars:
+      sg-business: { file: /etc/adhar/batch/calendar/calendar.yaml }   # D5's calendar.yaml
+    triggers:
+      importJob:
+        - { name: nightly, kind: cron, expression: "0 30 1 ? * *", calendar: sg-business }
+        - { name: office, kind: daily, from: "09:00", to: "17:00", every: 5m, days: [MONDAY, FRIDAY] }
+        - { name: poll, kind: interval, every: 5m, misfire: skip }
+```
+
+- **Triggers.** `cron` (Quartz syntax), `interval` (on the grid `start + n × every`) and `daily`
+  (a window on days of the week; it runs in the JVM's zone). The `adhar.batch.scheduler.jobs`
+  Spring cron schedules still work: each is converted, and the two parsers' next 400 fire times,
+  in UTC and three daylight-saving zones, must agree or the start fails naming the slot. A time
+  in the hour a clock change repeats (01:30 in New York or London) is such a disagreement: write
+  it as a Quartz `cron` trigger.
+- **Calendars.** D5's rule: a date is a business day when it is in `businessDays`, or is neither a
+  `weekendDays` day nor in `holidays`. An excluded day never fires. A trigger and its calendar
+  share one zone or the start fails; a calendar file is re-read every `refresh-interval`, and an
+  invalid one keeps the previous version (counted) — at start it fails the start.
+- **Runtime triggers.** `BatchTriggers` (a bean only on `quartz`) stores durable one-shot triggers
+  keyed by the run's name, so the same identity twice is one trigger and one run:
+
+  ```java
+  Result result = triggers.fireNow("importJob", Map.of("file", "orders-0412.csv"));
+  // result.status(): SCHEDULED (stored), PENDING (stored already, or running), COMPLETED (nothing stored)
+  triggers.fireAt("reportJob", Instant.parse("2026-11-20T09:00:00Z"), Map.of());
+  triggers.list();   triggers.cancel(result.runName());
+  ```
+
+  A `fireNow` identity is the caller's parameters only: a `@JobParam(source = SCHEDULE)` is passed
+  explicitly, and a job whose identity would be empty is refused (use `fireAt`, keyed on the
+  instant). Invalid parameters throw `ParameterValidationException` before anything is stored.
+- **One service per scheduler name.** Each JobDetail records its application; a start that finds
+  another application's jobs under its `scheduler-name` fails. A job the application stopped
+  defining is removed with its triggers, so a rolling update's newest start wins.
+- **Meters** (both engines): `adhar.batch.scheduler.next.fire` (gauge, epoch seconds; job,
+  trigger), `adhar.batch.scheduler.fires` (job, trigger, outcome: `ran`, `skipped-complete`,
+  `skipped-duplicate`, `misfire-skipped`, `recovered`, `failed-to-start`),
+  `adhar.batch.scheduler.instances`, `adhar.batch.scheduler.report.failures` and
+  `adhar.batch.scheduler.calendar.failures`. One INFO line per fire names the trigger, the slot,
+  the run and the outcome; `BatchRunEvent.Skipped` (`already-complete`, `duplicate`, `misfire`) and
+  `Recovered` carry the run's name (`getRunName()`).
+- **The schedule report.** In Kubernetes the service writes `ConfigMap <scheduler-name>-batch-schedules`
+  (key `schedules.json`, version 1, ≤ 256 KiB, `truncated` when cut), which the Console and
+  `adhar batch schedules` read. Its ServiceAccount needs `create` on `configmaps` and
+  `get`/`update`/`patch` on that name; without them every write is counted, never thrown.

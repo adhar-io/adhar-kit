@@ -45,6 +45,12 @@ public class BatchScheduler implements SmartLifecycle {
     /** {@value #TRIGGER_PARAMETER} of runs started by this scheduler. */
     public static final String EMBEDDED_TRIGGER = "embedded";
 
+    /** Non-identifying provenance parameter: the run's name (naming v1), on both engines. */
+    public static final String RUN_PARAMETER = "adhar.run";
+
+    /** Non-identifying provenance parameter: the trigger that fired, {@code <group>.<name>}. */
+    public static final String TRIGGER_KEY_PARAMETER = "adhar.trigger.key";
+
     private final SchedulerEngine engine;
 
     /**

@@ -98,9 +98,9 @@ class BatchLaunchJobTest extends QuartzEngineFixture {
         assertThat(parameters.getIdentifyingParameters()).extracting(parameter -> parameter.name())
                 .containsExactly(BatchScheduler.SCHEDULED_TIME_PARAMETER);
         assertThat(parameters.getString(BatchScheduler.TRIGGER_PARAMETER)).isEqualTo(BatchScheduler.EMBEDDED_TRIGGER);
-        assertThat(parameters.getString(QuartzSchedulerEngine.TRIGGER_KEY_PARAMETER))
+        assertThat(parameters.getString(BatchScheduler.TRIGGER_KEY_PARAMETER))
                 .isEqualTo("adhar-batch-config.cron-latest.tick");
-        assertThat(parameters.getString(QuartzSchedulerEngine.RUN_PARAMETER)).isEqualTo(RunIdentity.runName("cron-latest",
+        assertThat(parameters.getString(BatchScheduler.RUN_PARAMETER)).isEqualTo(RunIdentity.runName("cron-latest",
                 Map.of(BatchScheduler.SCHEDULED_TIME_PARAMETER, "2026-11-06T12:05:00Z")));
         assertThat(parameters.getString(QuartzSchedulerEngine.INSTANCE_PARAMETER)).isEqualTo("replica-a");
         assertThat(parameters.getString(QuartzSchedulerEngine.APP_VERSION_PARAMETER)).isEqualTo("1.4.0");
@@ -300,7 +300,7 @@ class BatchLaunchJobTest extends QuartzEngineFixture {
         JobParameters parameters = last(QuartzJobs.CHUNK_JOB).getJobParameters();
         assertThat(parameters.getIdentifyingParameters()).extracting(parameter -> parameter.name()).containsExactly("run");
         assertThat(parameters.getString("run")).isEqualTo("adhoc-1");
-        assertThat(parameters.getString(QuartzSchedulerEngine.TRIGGER_KEY_PARAMETER)).isEqualTo("adhar-batch-runtime.adhoc-1");
+        assertThat(parameters.getString(BatchScheduler.TRIGGER_KEY_PARAMETER)).isEqualTo("adhar-batch-runtime.adhoc-1");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM TARGET_ITEMS", Integer.class)).isEqualTo(25);
     }
 
@@ -348,7 +348,7 @@ class BatchLaunchJobTest extends QuartzEngineFixture {
         assertThat(all).hasSize(2);
         assertThat(all.get(1).getJobInstance().getId()).isEqualTo(stopped.getJobInstance().getId());
         assertThat(all.get(1).getStatus()).isEqualTo(BatchStatus.COMPLETED);
-        assertThat(all.get(1).getJobParameters().getString(QuartzSchedulerEngine.RUN_PARAMETER))
+        assertThat(all.get(1).getJobParameters().getString(BatchScheduler.RUN_PARAMETER))
                 .isEqualTo("dated-job-0a1b2c3d");
         assertThat(all.get(1).getJobParameters().getString(BatchScheduler.TRIGGER_PARAMETER))
                 .isEqualTo(BatchScheduler.EMBEDDED_TRIGGER);
@@ -452,7 +452,7 @@ class BatchLaunchJobTest extends QuartzEngineFixture {
         assertThat(launch(recoveryFire(stored(TestJobs.IMPORT_JOB), FIVE_PAST))).isEqualTo(SlotOutcome.RECOVERED);
 
         assertCompletedFromTheLastCommit(orphan);
-        assertThat(last(TestJobs.IMPORT_JOB).getJobParameters().getString(QuartzSchedulerEngine.TRIGGER_KEY_PARAMETER))
+        assertThat(last(TestJobs.IMPORT_JOB).getJobParameters().getString(BatchScheduler.TRIGGER_KEY_PARAMETER))
                 .as("the provenance names the trigger that fired originally, not Quartz's recovery trigger")
                 .isEqualTo("adhar-batch-config.import-job.tick");
     }
@@ -616,7 +616,7 @@ class BatchLaunchJobTest extends QuartzEngineFixture {
 
     private void engineOn(BatchOperator racing) {
         engine = new QuartzSchedulerEngine(scheduler, racing, repository, beans.getBeansOfType(Job.class), specs,
-                resolver, ownership, jdbc, PREFIX, properties, null, clock);
+                resolver, ownership, jdbc, PREFIX, properties, APPLICATION, null, calendars(), clock);
         engine.afterSingletonsInstantiated();
     }
 

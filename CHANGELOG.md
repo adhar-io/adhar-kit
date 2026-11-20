@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scheduler and `BatchOperator.start` retry a PostgreSQL serialization conflict between two
   identities of one job created at once (`InstanceCreationRetry`). Usage and the
   full property reference are in `adhar-kit-batch/README.md`.
+- **adhar-kit-batch** — in-service scheduling on Quartz, completed (design 0025 §5.20, KIT-Q.4–Q.7):
+  D5 business calendars (`calendar.BusinessCalendar`, `BusinessCalendarParser`, shared with the
+  runner) registered as `AdharBusinessCalendar` (fixed `serialVersionUID`), re-read every
+  `adhar.batch.quartz.calendars.refresh-interval` and held to their triggers' zone;
+  `BatchTriggers` (`fireNow`, `fireAt`, `cancel`, `list`), idempotent by run name; the 400-slot
+  agreement check of converted Spring cron schedules; a start that finds another application's
+  jobs under its `scheduler-name` fails (FQ4); `SchedulerMetrics` (`adhar.batch.scheduler.*`, both
+  engines), the schedule report ConfigMap (`ScheduleReportWriter`, report v1), `batch.run` and
+  `batch.trigger` in the MDC, and the run name on every `BatchRunEvent`. `RUN_PARAMETER` and
+  `TRIGGER_KEY_PARAMETER` moved to `BatchScheduler`, `dnsLabel` to `SlotIdentity`.
 - **adhar-kit-batch** — remote partitioning (design 0025 §5.10, Phase 2): `RemotePartitioning`
   builds the manager step with Spring Batch Integration in JobRepository-polling mode over the
   `jdbc` partition channel (`batch.INT_CHANNEL_MESSAGE`, migration `V6_0_2`; optional

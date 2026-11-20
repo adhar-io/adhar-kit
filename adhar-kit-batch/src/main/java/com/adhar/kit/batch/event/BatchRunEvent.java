@@ -1,5 +1,7 @@
 package com.adhar.kit.batch.event;
 
+import com.adhar.kit.batch.runtime.AdharBatchRunner;
+import com.adhar.kit.batch.scheduler.BatchScheduler;
 import org.springframework.context.ApplicationEvent;
 
 import java.time.Duration;
@@ -23,8 +25,8 @@ import java.util.Map;
  * }
  * }</pre>
  *
- * <p>Parameters are carried as text with sensitive and credential-like values masked, never the
- * {@code JobExecution} itself. {@link BatchJobFailedEvent} is still published alongside
+ * <p>Each event carries its run's name ({@link #getRunName()}). Parameters are carried as text with
+ * sensitive and credential-like values masked, never the {@code JobExecution} itself. {@link BatchJobFailedEvent} is still published alongside
  * {@link Failed}.</p>
  *
  * @author Adhar Platform Team
@@ -71,6 +73,15 @@ public abstract sealed class BatchRunEvent extends ApplicationEvent {
      */
     public Map<String, String> getParameters() {
         return parameters;
+    }
+
+    /**
+     * @return the run's name: an in-service run's {@code adhar.run} (naming v1), else a Kubernetes
+     *         run's Job ({@code adhar.k8s.job}); {@code null} when it has neither
+     */
+    public String getRunName() {
+        String run = parameters.get(BatchScheduler.RUN_PARAMETER);
+        return run != null ? run : parameters.get(AdharBatchRunner.K8S_JOB);
     }
 
     /** An execution started. */

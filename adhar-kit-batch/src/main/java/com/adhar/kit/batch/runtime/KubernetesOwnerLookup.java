@@ -103,10 +103,27 @@ public class KubernetesOwnerLookup {
      * @return the lookup, {@linkplain #unavailable() unavailable} outside a cluster
      */
     public static KubernetesOwnerLookup inCluster(Function<String, String> env, Path serviceAccount) {
+        return access(env, serviceAccount)
+                .map(api -> new KubernetesOwnerLookup(api.apiServer(), api.token(), api.namespace(), api.client(),
+                        Duration.ofSeconds(10)))
+                .orElseGet(KubernetesOwnerLookup::unavailable);
+    }
+
+    /**
+     * How a process in a pod reaches the Kubernetes API with its own ServiceAccount: shared by this
+     * lookup and the in-service schedule report.
+     *
+     * @param env            the process environment ({@code KUBERNETES_SERVICE_HOST}/{@code _PORT},
+     *                       {@code POD_NAMESPACE})
+     * @param serviceAccount the mounted ServiceAccount directory (token, ca.crt, namespace)
+     * @return the API's address, the token, the pod's namespace and a client trusting the cluster
+     *         CA; empty outside a cluster (no {@code KUBERNETES_SERVICE_HOST}, or no token)
+     */
+    public static Optional<ApiAccess> access(Function<String, String> env, Path serviceAccount) {
         String host = env.apply("KUBERNETES_SERVICE_HOST");
         Path tokenFile = serviceAccount.resolve("token");
         if (host == null || host.isBlank() || !Files.isReadable(tokenFile)) {
-            return unavailable();
+            return Optional.empty();
         }
         String port = Optional.ofNullable(env.apply("KUBERNETES_SERVICE_PORT")).orElse("443");
         String namespace = Optional.ofNullable(env.apply("POD_NAMESPACE")).filter(ns -> !ns.isBlank())
@@ -114,8 +131,7 @@ public class KubernetesOwnerLookup {
         URI uri = URI.create("https://" + (host.contains(":") ? "[" + host + "]" : host) + ":" + port);
         HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5))
                 .sslContext(trusting(serviceAccount.resolve("ca.crt"))).build();
-        return new KubernetesOwnerLookup(uri, () -> read(tokenFile).strip(), namespace, client,
-                Duration.ofSeconds(10));
+        return Optional.of(new ApiAccess(uri, () -> read(tokenFile).strip(), namespace, client));
     }
 
     /**
@@ -247,6 +263,17 @@ public class KubernetesOwnerLookup {
             throw new KubernetesLookupException("Cannot trust the cluster CA " + caCertificate + ": "
                     + ex.getMessage(), ex);
         }
+    }
+
+    /**
+     * The Kubernetes API as a pod's own ServiceAccount reaches it.
+     *
+     * @param apiServer the API server's base URI
+     * @param token     supplies the bearer token (re-read per call: projected tokens rotate)
+     * @param namespace the pod's namespace
+     * @param client    an HTTP client trusting the cluster CA
+     */
+    public record ApiAccess(URI apiServer, Supplier<String> token, String namespace, HttpClient client) {
     }
 
     /**

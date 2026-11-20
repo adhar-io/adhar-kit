@@ -132,4 +132,42 @@ class SpringCronTest {
         assertThatThrownBy(() -> SpringCron.toQuartz(null)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("A cron expression is required");
     }
+
+    // ------------------------------------------------------------------
+    // The 400-slot agreement check (KIT-Q.5, design 0025 §5.20.6, R12)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("a conversion that would fire elsewhere fails, naming the first slot, the zone and both instants")
+    void aDivergentConversionFailsNamingTheSlot() {
+        // Monday in Spring, Sunday in Quartz: both parse, and 2026-01-01 is a Thursday.
+        assertThatThrownBy(() -> SpringCron.verify("0 0 12 * * 1", "0 0 12 * * 1", "0 0 12 ? * 1"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("disagree at slot 1 after 2026-01-01T00:00:00Z in Z")
+                .hasMessageContaining("Spring fires at 2026-01-05T12:00Z, Quartz at 2026-01-04T12:00Z")
+                .hasMessageContaining("adhar.batch.quartz.triggers cron trigger in Quartz syntax");
+    }
+
+    @Test
+    @DisplayName("an expression in the hour a clock change repeats fails the start: Spring and Quartz pick different offsets")
+    void theRepeatedHourOfAClockChangeFails() {
+        assertThatThrownBy(() -> SpringCron.toQuartz("0 30 1 * * *"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("in America/New_York")
+                .hasMessageContaining("Spring fires at 2026-11-01T01:30-04:00, Quartz at 2026-11-01T01:30-05:00");
+        assertThatThrownBy(() -> SpringCron.toQuartz("0 15 1-3 * * *")).as("Sydney's repeated hour in April")
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Australia/Sydney");
+    }
+
+    @Test
+    @DisplayName("the check compares 400 slots in UTC and three daylight-saving zones, and stops at Quartz's last year")
+    void theCheckCoversFourZonesAndQuartzsHorizon() {
+        assertThat(SpringCron.AGREEMENT_SLOTS).isEqualTo(400);
+        assertThat(SpringCron.AGREEMENT_ZONES).extracting(java.time.ZoneId::getId)
+                .containsExactly("Z", "America/New_York", "Europe/London", "Australia/Sydney");
+        // Five fires a second: 400 slots end long before a clock change, so only the conversion is judged.
+        assertThat(SpringCron.toQuartz("*/5 * * * * *")).isEqualTo("*/5 * * * * ?");
+        // A yearly expression's 400 slots run past the hundred years Quartz computes: not a disagreement.
+        assertThat(SpringCron.toQuartz("0 0 6 15 6 *")).isEqualTo("0 0 6 15 6 ?");
+    }
 }

@@ -1,6 +1,8 @@
 package com.adhar.kit.batch.scheduler.quartz;
 
 import com.adhar.kit.batch.config.BatchProperties;
+import com.adhar.kit.batch.event.BatchRunEventPublisher;
+import com.adhar.kit.batch.scheduler.SchedulerMetrics;
 import com.adhar.kit.batch.operator.BatchOperator;
 import com.adhar.kit.batch.params.JobParameterSpecRegistry;
 import com.adhar.kit.batch.params.JobParametersResolver;
@@ -246,7 +248,9 @@ class QuartzConfigurationTest {
             QuartzSchedulerEngine engine = configuration.quartzSchedulerEngine(scheduler, mock(BatchOperator.class),
                     mock(JobRepository.class), beans, none.getBeanProvider(JobParameterSpecRegistry.class),
                     mock(JobParametersResolver.class), ownership, h2, none.getBeanProvider(DataSource.class),
-                    new BatchRepositoryLayout(true, "PostgreSQL", "batch", "batch.BATCH_"), properties, environment);
+                    new BatchRepositoryLayout(true, "PostgreSQL", "batch", "batch.BATCH_"), properties,
+                    none.getBeanProvider(SchedulerMetrics.class), none.getBeanProvider(BatchRunEventPublisher.class),
+                    environment);
             BatchScheduler batchScheduler = configuration.batchScheduler(engine);
 
             assertThat(batchScheduler.engine()).isSameAs(engine);

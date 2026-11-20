@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.scheduler.quartz;
 
+import com.adhar.kit.batch.scheduler.SlotIdentity;
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.config.BatchProperties.Quartz.Misfire;
 import com.adhar.kit.batch.config.BatchProperties.Quartz.TriggerSettings;
@@ -186,12 +187,12 @@ class QuartzSchedulerEngineTest extends QuartzEngineFixture {
     @Test
     @DisplayName("the default schedule name is the bean name as a DNS label of at most 40 characters")
     void beanNamesBecomeDnsLabels() {
-        assertThat(QuartzSchedulerEngine.dnsLabel("importJob")).isEqualTo("import-job");
-        assertThat(QuartzSchedulerEngine.dnsLabel("daily_Report2Job")).isEqualTo("daily-report2-job");
-        assertThat(QuartzSchedulerEngine.dnsLabel("9livesJob")).isEqualTo("lives-job");
-        String longName = QuartzSchedulerEngine.dnsLabel("reconcileEveryLedgerAccountOfTheGroup-Nightly");
+        assertThat(SlotIdentity.dnsLabel("importJob")).isEqualTo("import-job");
+        assertThat(SlotIdentity.dnsLabel("daily_Report2Job")).isEqualTo("daily-report2-job");
+        assertThat(SlotIdentity.dnsLabel("9livesJob")).isEqualTo("lives-job");
+        String longName = SlotIdentity.dnsLabel("reconcileEveryLedgerAccountOfTheGroup-Nightly");
         assertThat(longName).hasSizeLessThanOrEqualTo(40).doesNotEndWith("-").startsWith("reconcile-every-ledger");
-        assertThatThrownBy(() -> QuartzSchedulerEngine.dnsLabel("2026")).isInstanceOf(IllegalStateException.class)
+        assertThatThrownBy(() -> SlotIdentity.dnsLabel("2026")).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("adhar.batch.quartz.jobs.2026.name");
     }
 
@@ -214,6 +215,9 @@ class QuartzSchedulerEngineTest extends QuartzEngineFixture {
     @Test
     @DisplayName("a cron trigger carries its zone, priority, calendar and the misfire instruction of its policy")
     void cronTriggers() {
+        BatchProperties.Quartz.CalendarSettings calendar = new BatchProperties.Quartz.CalendarSettings();
+        calendar.setTimeZone("Asia/Singapore");
+        calendarSettings.put("sg-business-days", calendar);
         newEngine();
         TriggerSettings settings = settings(TriggerSettings.Kind.CRON);
         settings.setExpression("0 30 6 ? * MON-FRI");
@@ -507,7 +511,7 @@ class QuartzSchedulerEngineTest extends QuartzEngineFixture {
     @DisplayName("when the check-in cannot be read the owner is treated as alive: a duplicate skip, never a double run")
     void anUnreadableCheckInMeansAlive() {
         engine = new QuartzSchedulerEngine(scheduler, operator, repository, beans.getBeansOfType(Job.class), specs,
-                resolver, ownership, jdbc, "NO_SUCH_SCHEMA.QRTZ_", properties, null, clock);
+                resolver, ownership, jdbc, "NO_SUCH_SCHEMA.QRTZ_", properties, APPLICATION, null, calendars(), clock);
 
         assertThat(engine.instanceAlive("replica-b")).isTrue();
     }

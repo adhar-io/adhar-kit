@@ -80,6 +80,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>On {@link #stop()} it stops firing, asks every running job to stop at its next chunk
  * boundary and waits up to {@code adhar.batch.shutdown.timeout} for the runs to record STOPPED.</p>
  *
+ * <p>A slot's run name is naming v1 over the same schedule name ({@link #scheduleNameOf}) and
+ * identity as on {@code quartz}, so a service that changes engine keeps its run names. Each fire
+ * counts in {@link SchedulerMetrics} under the trigger {@value #TRIGGER}, and the next fire is its
+ * gauge. The engine writes no schedule report (§5.20.8).</p>
+ *
  * @author Adhar Platform Team
  * @since 0.1.0
  */
@@ -91,6 +96,9 @@ public class SimpleSchedulerEngine implements SchedulerEngine {
 
     /** How often a run started on an asynchronous task executor is polled for its end. */
     static final Duration POLL_INTERVAL = Duration.ofMillis(200);
+
+    /** The {@code trigger} tag of this engine's fires: a job has one schedule. */
+    public static final String TRIGGER = "schedule";
 
     private final JobOperator jobOperator;
     private final JobRepository jobRepository;
@@ -106,6 +114,8 @@ public class SimpleSchedulerEngine implements SchedulerEngine {
     private final Duration shutdownTimeout;
     private final int poolSize;
 
+    private volatile SchedulerMetrics metrics = SchedulerMetrics.none();
+    private volatile BatchProperties.Quartz naming = new BatchProperties.Quartz();
     private final Map<String, ScheduledJob> schedules = new ConcurrentHashMap<>();
     private final Map<String, SlotRun> running = new ConcurrentHashMap<>();
     private final Object lifecycleMonitor = new Object();
@@ -147,6 +157,26 @@ public class SimpleSchedulerEngine implements SchedulerEngine {
     @Override
     public String name() {
         return NAME;
+    }
+
+    /**
+     * Attaches what observes the engine: called once, before it starts.
+     *
+     * @param metrics the scheduler's meters
+     * @param naming  {@code adhar.batch.quartz.*}, whose {@code jobs.<job>.name} names a schedule on
+     *                both engines (naming v1's {@code <batchjob>})
+     */
+    public void observe(SchedulerMetrics metrics, BatchProperties.Quartz naming) {
+        this.metrics = metrics != null ? metrics : SchedulerMetrics.none();
+        this.naming = naming != null ? naming : new BatchProperties.Quartz();
+    }
+
+    /**
+     * @param jobName the name a job was scheduled under
+     * @return its schedule name, as the engine {@code quartz} names it too
+     */
+    String scheduleNameOf(String jobName) {
+        return SlotIdentity.scheduleName(jobName, naming);
     }
 
     /**
@@ -215,6 +245,7 @@ public class SimpleSchedulerEngine implements SchedulerEngine {
             return false;
         }
         scheduled.remove();
+        nextFireGauge(jobName, null);
         log.info("Cancelled the schedule of job [{}]", jobName);
         return true;
     }
@@ -366,17 +397,32 @@ public class SimpleSchedulerEngine implements SchedulerEngine {
             scheduled.nextFire = nominal;
             scheduled.future = executor.schedule(() -> fire(scheduled, nominal), delay, TimeUnit.MILLISECONDS);
         }
+        nextFireGauge(scheduled.name, nominal);
+    }
+
+    private void nextFireGauge(String jobName, Instant next) {
+        try {
+            metrics.nextFire(scheduleNameOf(jobName), TRIGGER, next);
+        } catch (RuntimeException ex) {
+            log.debug("Could not record the next fire of job [{}]: {}", jobName, ex.getMessage());
+        }
     }
 
     private void fire(ScheduledJob scheduled, Instant nominal) {
         if (scheduled.removed || !started) {
             return;
         }
+        SlotOutcome outcome = SlotOutcome.FAILED_TO_START;
         try {
-            runSlot(scheduled.name, scheduled.job, nominal);
+            outcome = runSlot(scheduled.name, scheduled.job, nominal);
         } catch (RuntimeException ex) {
             log.error("Scheduled run of job [{}] for slot {} failed: {}", scheduled.name, nominal, ex.getMessage(), ex);
         } finally {
+            try {
+                metrics.fired(scheduleNameOf(scheduled.name), TRIGGER, outcome);
+            } catch (RuntimeException ex) {
+                log.debug("Could not record the fire of job [{}]: {}", scheduled.name, ex.getMessage());
+            }
             if (!scheduled.removed && started) {
                 armAfter(scheduled, nominal);
             }

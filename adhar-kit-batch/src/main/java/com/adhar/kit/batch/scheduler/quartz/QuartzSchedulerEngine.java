@@ -3,6 +3,7 @@ package com.adhar.kit.batch.scheduler.quartz;
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.config.BatchProperties.Quartz.Misfire;
 import com.adhar.kit.batch.config.BatchProperties.Quartz.TriggerSettings;
+import com.adhar.kit.batch.event.BatchRunEventPublisher;
 import com.adhar.kit.batch.listener.BatchRunObserver;
 import com.adhar.kit.batch.operator.BatchOperator;
 import com.adhar.kit.batch.params.JobParameterSpec;
@@ -11,8 +12,11 @@ import com.adhar.kit.batch.params.JobParametersResolver;
 import com.adhar.kit.batch.params.ParameterValidationException;
 import com.adhar.kit.batch.runtime.ExecutionLease;
 import com.adhar.kit.batch.runtime.Json;
+import com.adhar.kit.batch.scheduler.ScheduleReportWriter;
 import com.adhar.kit.batch.scheduler.SchedulerEngine;
+import com.adhar.kit.batch.scheduler.SchedulerMetrics;
 import com.adhar.kit.batch.scheduler.SlotIdentity;
+import com.adhar.kit.batch.scheduler.SlotOutcome;
 import lombok.extern.slf4j.Slf4j;
 import org.quartz.CronExpression;
 import org.quartz.CronScheduleBuilder;
@@ -37,6 +41,7 @@ import org.springframework.batch.core.job.parameters.JobParameter;
 import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.launch.JobExecutionNotRunningException;
 import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcOperations;
@@ -67,6 +72,9 @@ import java.util.TimeZone;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
@@ -93,14 +101,27 @@ import java.util.regex.Pattern;
  *       Quartz's recovery on another replica, as if this one had died.</li>
  * </ul>
  *
+ * <ul>
+ *   <li><b>One service per scheduler name</b> (FQ4): every JobDetail carries the application's
+ *       name. A start that finds, under its scheduler name, a JobDetail of another application, or
+ *       one naming a job this application does not define and no application at all, fails: two
+ *       services on one {@code scheduler-name} and database would each fire the other's triggers.
+ *       A JobDetail of this application whose job it no longer defines was retired by a newer
+ *       version and is removed, triggers and all (FQ5: the newest start wins).</li>
+ *   <li><b>Calendars</b> ({@link CalendarRegistry}) are registered before the triggers that use
+ *       them, re-read every {@code calendars.refresh-interval}, and must share their triggers' zone.</li>
+ * </ul>
+ *
  * <p>The launch itself is {@link BatchLaunchJob}; which slot a fire stands for is
- * {@link SlotResolver}.</p>
+ * {@link SlotResolver}; runtime triggers are {@link BatchTriggers}. The engine records every fire
+ * in {@link SchedulerMetrics} and asks the {@link ScheduleReportWriter} for a report after fires and
+ * trigger changes.</p>
  *
  * @author Adhar Platform Team
  * @since 0.1.0
  */
 @Slf4j
-public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializingSingleton {
+public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializingSingleton, DisposableBean {
 
     /** The engine's name, as {@code adhar.batch.scheduler.engine} spells it. */
     public static final String NAME = "quartz";
@@ -116,6 +137,9 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
 
     /** JobDetail data: the Spring Batch job's bean name. */
     public static final String JOB = "job";
+
+    /** JobDetail data: the application that defines the job (FQ4). */
+    public static final String APPLICATION = "adhar.app";
 
     /** Trigger data: {@value #KIND_CONFIG}, {@value #KIND_NOW}, {@value #KIND_AT} or {@value #KIND_RESUME}. */
     public static final String KIND = "adhar.kind";
@@ -159,12 +183,6 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
     /** Trigger data of a configured trigger: its definition, compared by the reconcile. */
     static final String DEFINITION = "adhar.definition";
 
-    /** Provenance parameter: the trigger, {@code <group>.<name>}. */
-    public static final String TRIGGER_KEY_PARAMETER = "adhar.trigger.key";
-
-    /** Provenance parameter: the run's name (naming v1). */
-    public static final String RUN_PARAMETER = "adhar.run";
-
     /** Provenance parameter: the application's version, when known. */
     public static final String APP_VERSION_PARAMETER = "adhar.app.version";
 
@@ -176,11 +194,6 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
 
     /** Quartz's tolerance before a replica that missed its check-in is called dead. */
     static final Duration CHECKIN_TOLERANCE = Duration.ofMillis(7500);
-
-    /** The longest schedule name: the {@code <batchjob>} of naming v1. */
-    static final int MAX_SCHEDULE_NAME = 40;
-
-    private static final Pattern DNS_LABEL = Pattern.compile("[a-z]([-a-z0-9]*[a-z0-9])?");
 
     private static final DefaultJobParametersConverter PARAMETER_CONVERTER = new DefaultJobParametersConverter();
 
@@ -194,8 +207,14 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
     private final JdbcOperations jdbc;
     private final String tablePrefix;
     private final BatchProperties properties;
+    private final String application;
     private final String appVersion;
+    private final CalendarRegistry calendars;
     private final Clock clock;
+    private volatile SchedulerMetrics metrics = SchedulerMetrics.none();
+    private volatile ScheduleReportWriter report;
+    private volatile BatchRunEventPublisher events;
+    private volatile ScheduledExecutorService refresher;
 
     private final Map<String, String> scheduleNames = new HashMap<>();
     private final Map<String, String> pendingSchedules = new LinkedHashMap<>();
@@ -217,13 +236,16 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
      * @param jdbc        the job store's database
      * @param tablePrefix Quartz's table prefix, {@code <schema>.QRTZ_}
      * @param properties  {@code adhar.batch.*}
+     * @param application the application's name, stamped on its JobDetails (FQ4)
      * @param appVersion  the application's version for the provenance, {@code null} when unknown
+     * @param calendars   the business calendars
      * @param clock       the time source of the kit's own decisions
      */
     public QuartzSchedulerEngine(Scheduler scheduler, BatchOperator operator, JobRepository repository,
                                  Map<String, Job> jobs, JobParameterSpecRegistry specs, JobParametersResolver resolver,
                                  Ownership ownership, JdbcOperations jdbc, String tablePrefix,
-                                 BatchProperties properties, String appVersion, Clock clock) {
+                                 BatchProperties properties, String application, String appVersion,
+                                 CalendarRegistry calendars, Clock clock) {
         this.scheduler = scheduler;
         this.operator = operator;
         this.repository = repository;
@@ -234,9 +256,11 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
         this.jdbc = jdbc;
         this.tablePrefix = tablePrefix;
         this.properties = properties;
+        this.application = application;
         this.appVersion = appVersion;
+        this.calendars = calendars;
         this.clock = clock;
-        this.jobs.keySet().forEach(bean -> scheduleNames.put(bean, scheduleName(bean, properties.getQuartz())));
+        this.jobs.keySet().forEach(bean -> scheduleNames.put(bean, SlotIdentity.scheduleName(bean, properties.getQuartz())));
         Map<String, String> owners = new HashMap<>();
         scheduleNames.forEach((bean, name) -> {
             String other = owners.putIfAbsent(name, bean);
@@ -250,6 +274,19 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
     @Override
     public String name() {
         return NAME;
+    }
+
+    /**
+     * Attaches what observes the engine: called once, before it starts.
+     *
+     * @param metrics the scheduler's meters
+     * @param report  the schedule report, {@code null} for none
+     * @param events  publishes {@code Skipped} and {@code Recovered} run events, {@code null} for none
+     */
+    public void observe(SchedulerMetrics metrics, ScheduleReportWriter report, BatchRunEventPublisher events) {
+        this.metrics = metrics != null ? metrics : SchedulerMetrics.none();
+        this.report = report;
+        this.events = events;
     }
 
     // ------------------------------------------------------------------
@@ -277,6 +314,8 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
     }
 
     private void reconcile() throws SchedulerException {
+        refuseForeignJobs();
+        calendars.register(scheduler);
         for (Map.Entry<String, Job> entry : new TreeMap<>(jobs).entrySet()) {
             if (entry.getValue().getJobParametersIncrementer() == null) {
                 scheduler.addJob(jobDetail(entry.getKey()), true);
@@ -333,8 +372,46 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                 .storeDurably()
                 .requestRecovery()
                 .usingJobData(JOB, bean)
-                .withDescription("Spring Batch job " + bean)
+                .usingJobData(APPLICATION, application)
+                .withDescription("Spring Batch job " + bean + " of " + application)
                 .build();
+    }
+
+    /**
+     * FQ4 and FQ5: the scheduler name is one service's. A JobDetail in {@value #JOB_GROUP} that
+     * another application stored, or that names a job this application does not define and no
+     * application at all, means two services share this {@code scheduler-name} on this database and
+     * would each fire the other's triggers: the start fails. One this application stored for a job
+     * it no longer defines was retired by a newer version and is removed with its triggers.
+     */
+    private void refuseForeignJobs() throws SchedulerException {
+        Set<String> defined = new TreeSet<>(scheduleNames.values());
+        for (JobKey key : new TreeSet<>(scheduler.getJobKeys(GroupMatcher.jobGroupEquals(JOB_GROUP)))) {
+            if (defined.contains(key.getName())) {
+                JobDetail detail = scheduler.getJobDetail(key);
+                String owner = detail != null ? detail.getJobDataMap().getString(APPLICATION) : null;
+                if (owner != null && !owner.equals(application)) {
+                    throw foreign(key, owner);
+                }
+                continue;
+            }
+            JobDetail detail = scheduler.getJobDetail(key);
+            String owner = detail != null ? detail.getJobDataMap().getString(APPLICATION) : null;
+            if (owner == null || !owner.equals(application)) {
+                throw foreign(key, owner);
+            }
+            scheduler.deleteJob(key);
+            log.info("Removed Quartz job {} and its triggers: application {} no longer defines its Spring Batch job",
+                    key, application);
+        }
+    }
+
+    private IllegalStateException foreign(JobKey key, String owner) throws SchedulerException {
+        return new IllegalStateException("The Quartz scheduler '" + scheduler.getSchedulerName() + "' already holds job "
+                + key + (owner != null ? " of application '" + owner + "'" : ", which this application does not define")
+                + ", but this is application '" + application + "' (jobs " + new TreeSet<>(scheduleNames.values())
+                + "). Two services on one adhar.batch.quartz.scheduler-name and database would each fire the other's "
+                + "triggers (design 0025 FQ4): give each service its own scheduler-name.");
     }
 
     /**
@@ -420,6 +497,9 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
             }
             default -> throw new IllegalStateException(where + ".kind " + settings.getKind() + " is unknown");
         }
+        if (settings.getCalendar() != null) {
+            requireCalendar(where, settings.getCalendar(), zone);
+        }
         data.put(DEFINITION, definition.toString());
         validateIdentity(where, job, settings.getParameters(), now, zone);
         TriggerBuilder<? extends Trigger> builder = TriggerBuilder.newTrigger()
@@ -446,6 +526,22 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
         }
     }
 
+    /**
+     * A trigger's calendar must be configured, and share the trigger's zone: a business day is a
+     * date, and a date depends on the zone (design 0025 §5.20.6).
+     */
+    private void requireCalendar(String where, String calendar, ZoneId zone) {
+        if (!calendars.contains(calendar)) {
+            throw new IllegalStateException(where + ".calendar names '" + calendar + "', which is not configured "
+                    + "(adhar.batch.quartz.calendars.<name>; configured: " + calendars.names() + ")");
+        }
+        ZoneId calendarZone = calendars.zone(calendar);
+        if (!calendarZone.normalized().equals(zone.normalized())) {
+            throw new IllegalStateException(where + " runs in " + zone + ", but its calendar '" + calendar + "' takes "
+                    + "its dates in " + calendarZone + ": a trigger and its calendar must share one time zone");
+        }
+    }
+
     private static Duration requireEvery(String where, Duration every) {
         if (every == null || every.compareTo(Duration.ofSeconds(1)) < 0 || every.toMillis() % 1000 != 0) {
             throw new IllegalStateException(where + ".every must be whole seconds, at least 1s, was " + every);
@@ -456,6 +552,19 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
     private static String definition(Trigger trigger) {
         String definition = trigger.getJobDataMap().getString(DEFINITION);
         return definition != null ? definition : "";
+    }
+
+    /**
+     * @param bean a job's bean name
+     * @return the job, when it can be scheduled
+     * @throws IllegalArgumentException when it does not exist or has an incrementer
+     */
+    Job schedulableJob(String bean) {
+        try {
+            return schedulable(bean);
+        } catch (IllegalStateException ex) {
+            throw new IllegalArgumentException(ex.getMessage(), ex);
+        }
     }
 
     private Job schedulable(String bean) {
@@ -478,7 +587,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
 
     @Override
     public void scheduleJob(String jobName, String cronExpression) {
-        String bean = beanName(jobName);
+        String bean = beanNameOf(jobName);
         TriggerSettings settings = springCronTrigger(cronExpression);
         synchronized (lifecycleMonitor) {
             Trigger trigger;
@@ -501,6 +610,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                 }
             }
         }
+        triggersChanged();
         log.info("Scheduled job [{}] with cron '{}' in {} (Quartz {})", jobName, cronExpression,
                 properties.getScheduler().getTimeZone(), settings.getExpression());
     }
@@ -529,6 +639,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
             }
             if (removed) {
                 log.info("Cancelled the schedule of job [{}]", jobName);
+                triggersChanged();
             }
             return removed;
         }
@@ -593,9 +704,37 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
             }
             stopping = false;
             started = true;
+            Duration every = properties.getQuartz().getCalendars().getRefreshInterval();
+            if (!calendars.names().isEmpty() && every != null && !every.isZero() && !every.isNegative()) {
+                ScheduledExecutorService pool = Executors.newSingleThreadScheduledExecutor(runnable -> {
+                    Thread thread = new Thread(runnable, "adhar-batch-calendar-refresh");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+                pool.scheduleWithFixedDelay(this::refreshCalendars, every.toMillis(), every.toMillis(),
+                        TimeUnit.MILLISECONDS);
+                refresher = pool;
+            }
         }
         log.info("Embedded batch scheduler started on Quartz: scheduler '{}', instance {}, {} job(s)",
                 schedulerName(), instanceId(), jobs.size());
+        triggersChanged();
+    }
+
+    /**
+     * Re-reads the file-backed calendars (FQ7): a changed one is re-registered and the report
+     * rewritten; one that cannot be read keeps its previous version, and the failure is counted.
+     */
+    void refreshCalendars() {
+        try {
+            CalendarRegistry.Refresh refresh = calendars.refresh(scheduler);
+            refresh.failed().forEach(metrics::calendarFailed);
+            if (!refresh.changed().isEmpty()) {
+                triggersChanged();
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Could not refresh the business calendars: {}", ex.getMessage());
+        }
     }
 
     @Override
@@ -606,6 +745,10 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
             }
             started = false;
             stopping = true;
+            if (refresher != null) {
+                refresher.shutdownNow();
+                refresher = null;
+            }
         }
         try {
             scheduler.standby();
@@ -633,6 +776,17 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
     @Override
     public boolean isRunning() {
         return started;
+    }
+
+    /**
+     * Stops the schedule report's writer.
+     */
+    @Override
+    public void destroy() {
+        ScheduleReportWriter writer = report;
+        if (writer != null) {
+            writer.close();
+        }
     }
 
     private void requestStop(LocalRun run, String reason) {
@@ -826,6 +980,107 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
         beyondCatchUp.incrementAndGet();
     }
 
+    Map<String, Job> jobs() {
+        return jobs;
+    }
+
+    BatchRunEventPublisher events() {
+        return events;
+    }
+
+    /**
+     * Records one fire: its meter, its trigger's next fire, and a report.
+     *
+     * @param bean    the job
+     * @param trigger the trigger tag ({@link #triggerTag})
+     * @param outcome what the fire did
+     */
+    void fired(String bean, String trigger, SlotOutcome outcome) {
+        try {
+            metrics.fired(scheduleNameOf(bean), trigger, outcome);
+        } catch (RuntimeException ex) {
+            log.debug("Could not record the fire of {}: {}", trigger, ex.getMessage());
+        }
+        triggersChanged();
+    }
+
+    /**
+     * @param key a trigger's key
+     * @return its {@code trigger} tag: a configured trigger's name within its job, or a runtime
+     *         trigger's kind ({@code now}, {@code at}, {@code resume}); never a run name
+     */
+    static String triggerTag(TriggerKey key, String kind) {
+        if (CONFIG_GROUP.equals(key.getGroup())) {
+            int dot = key.getName().indexOf('.');
+            return dot >= 0 ? key.getName().substring(dot + 1) : key.getName();
+        }
+        return kind != null ? kind : "runtime";
+    }
+
+    /**
+     * After a fire or a trigger change: the next-fire gauges, the instances gauge and a report.
+     * Advisory: nothing here fails a fire.
+     */
+    void triggersChanged() {
+        if (!reconciled) {
+            return;
+        }
+        try {
+            for (Map.Entry<String, Job> entry : jobs.entrySet()) {
+                if (entry.getValue().getJobParametersIncrementer() != null) {
+                    continue;
+                }
+                for (Trigger trigger : scheduler.getTriggersOfJob(jobKey(entry.getKey()))) {
+                    if (CONFIG_GROUP.equals(trigger.getKey().getGroup())) {
+                        metrics.nextFire(scheduleNameOf(entry.getKey()), triggerTag(trigger.getKey(), null),
+                                trigger.getNextFireTime() != null ? trigger.getNextFireTime().toInstant() : null);
+                    }
+                }
+            }
+            Instant now = clock.instant();
+            long alive = checkIns().values().stream().filter(checkin -> fresh(checkin, now)).count();
+            metrics.instances((int) alive);
+        } catch (SchedulerException | RuntimeException ex) {
+            log.debug("Could not update the scheduler gauges: {}", ex.getMessage());
+        }
+        ScheduleReportWriter writer = report;
+        if (writer != null) {
+            writer.request();
+        }
+    }
+
+    /**
+     * @return the schedule report of this scheduler, now
+     */
+    ScheduleReportWriter.Report buildReport() {
+        try {
+            return QuartzScheduleReport.build(this);
+        } catch (SchedulerException ex) {
+            throw new IllegalStateException("Could not read the Quartz store: " + ex.getMessage(), ex);
+        }
+    }
+
+    /**
+     * @return the replicas' last check-ins in {@code QRTZ_SCHEDULER_STATE}, by instance id
+     */
+    Map<String, Instant> checkIns() {
+        Map<String, Instant> checkIns = new TreeMap<>();
+        try {
+            jdbc.query("SELECT INSTANCE_NAME, LAST_CHECKIN_TIME FROM " + tablePrefix + "SCHEDULER_STATE WHERE "
+                    + "SCHED_NAME = ?", rs -> {
+                checkIns.put(rs.getString(1), Instant.ofEpochMilli(rs.getLong(2)));
+            }, schedulerName());
+        } catch (DataAccessException ex) {
+            log.debug("Could not read the check-ins: {}", ex.getMessage());
+        }
+        return checkIns;
+    }
+
+    private boolean fresh(Instant checkin, Instant now) {
+        Duration interval = properties.getQuartz().getClusterCheckinInterval();
+        return !checkin.plus(interval.multipliedBy(2)).plus(CHECKIN_TOLERANCE).isBefore(now);
+    }
+
     String instanceId() {
         try {
             return scheduler.getSchedulerInstanceId();
@@ -871,7 +1126,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
         return clock.millis() <= freshUntil;
     }
 
-    private String beanName(String jobName) {
+    String beanNameOf(String jobName) {
         String bean = beanNameOrNull(jobName);
         if (bean == null) {
             throw new IllegalArgumentException("No job named [" + jobName + "] (the jobs are "
@@ -892,44 +1147,6 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
     // Names and the Spring cron of adhar.batch.scheduler.jobs
     // ------------------------------------------------------------------
 
-    /**
-     * @param bean     a job's bean name
-     * @param settings {@code adhar.batch.quartz.*}
-     * @return its schedule name: {@code jobs.<bean>.name}, else the bean name as a DNS-1035 label
-     */
-    static String scheduleName(String bean, BatchProperties.Quartz settings) {
-        BatchProperties.Quartz.JobSettings job = settings.getJobs().get(bean);
-        if (job != null && job.getName() != null) {
-            String name = job.getName();
-            if (name.length() > MAX_SCHEDULE_NAME || !DNS_LABEL.matcher(name).matches()) {
-                throw new IllegalStateException("adhar.batch.quartz.jobs." + bean + ".name must be a DNS-1035 label of "
-                        + "at most " + MAX_SCHEDULE_NAME + " characters, was '" + name + "'");
-            }
-            return name;
-        }
-        return dnsLabel(bean);
-    }
-
-    /**
-     * @param bean a bean name
-     * @return it as a DNS-1035 label of at most {@value #MAX_SCHEDULE_NAME} characters:
-     *         {@code importJob} becomes {@code import-job}: the default schedule name, and the key of
-     *         the job's JobDetail when {@code adhar.batch.quartz.jobs.<bean>.name} is unset
-     */
-    public static String dnsLabel(String bean) {
-        String kebab = bean.replaceAll("([a-z0-9])([A-Z])", "$1-$2").toLowerCase(Locale.ROOT)
-                .replaceAll("[^a-z0-9-]+", "-").replaceAll("-{2,}", "-").replaceAll("^[-0-9]+", "");
-        if (kebab.length() > MAX_SCHEDULE_NAME) {
-            kebab = kebab.substring(0, MAX_SCHEDULE_NAME);
-        }
-        kebab = kebab.replaceAll("-+$", "");
-        if (kebab.isEmpty()) {
-            throw new IllegalStateException("Job bean [" + bean + "] has no letters to name its schedule with: set "
-                    + "adhar.batch.quartz.jobs." + bean + ".name");
-        }
-        return kebab;
-    }
-
     private static TriggerSettings springCronTrigger(String springCron) {
         TriggerSettings settings = new TriggerSettings();
         settings.setName(SCHEDULE_TRIGGER);
@@ -946,6 +1163,16 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
      * Spring's, and spelled out where renumbering alone would change them: a wrong day still parses.
      */
     static final class SpringCron {
+
+        /** How many fire times the agreement check compares per zone. */
+        static final int AGREEMENT_SLOTS = 400;
+
+        /** Where the agreement check starts. */
+        static final Instant AGREEMENT_FROM = Instant.parse("2026-01-01T00:00:00Z");
+
+        /** UTC, and three zones with daylight saving on both hemispheres. */
+        static final List<ZoneId> AGREEMENT_ZONES = List.of(ZoneOffset.UTC, ZoneId.of("America/New_York"),
+                ZoneId.of("Europe/London"), ZoneId.of("Australia/Sydney"));
 
         private static final Map<String, String> MACROS = Map.of(
                 "@yearly", "0 0 0 1 1 *", "@annually", "0 0 0 1 1 *", "@monthly", "0 0 0 1 * *",
@@ -984,7 +1211,61 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                 throw new IllegalArgumentException("Cron expression '" + spring + "' converts to '" + quartz
                         + "', which Quartz does not accept: write it as an adhar.batch.quartz.triggers cron trigger");
             }
+            verify(spring, expanded, quartz);
             return quartz;
+        }
+
+        /**
+         * The agreement check (design 0025 §5.20.6, R12): both parsers' next {@value #AGREEMENT_SLOTS}
+         * fire times from {@link #AGREEMENT_FROM}, in UTC and in three daylight-saving zones, must be
+         * equal. A wrong conversion still parses; this is what catches it. Spring's and Quartz's
+         * handling of a local time that a clock change makes ambiguous differs too (Spring takes the
+         * earlier offset, Quartz the later), so an expression firing in that hour fails here as
+         * well: a run that switched engine would otherwise move by an hour twice a year, silently.
+         *
+         * @throws IllegalArgumentException naming the first slot where they differ
+         */
+        static void verify(String spring, String expanded, String quartz) {
+            var springCron = org.springframework.scheduling.support.CronExpression.parse(expanded);
+            for (ZoneId zone : AGREEMENT_ZONES) {
+                CronExpression quartzCron;
+                try {
+                    quartzCron = new CronExpression(quartz);
+                } catch (ParseException ex) {
+                    throw new IllegalArgumentException("Cron expression '" + spring + "' converts to '" + quartz
+                            + "', which Quartz does not accept: " + ex.getMessage(), ex);
+                }
+                quartzCron.setTimeZone(TimeZone.getTimeZone(zone));
+                ZonedDateTime springAfter = AGREEMENT_FROM.atZone(zone);
+                Date quartzAfter = Date.from(AGREEMENT_FROM);
+                for (int slot = 1; slot <= AGREEMENT_SLOTS; slot++) {
+                    ZonedDateTime springNext = springCron.next(springAfter);
+                    Date quartzNext = quartzCron.getNextValidTimeAfter(quartzAfter);
+                    Instant expected = springNext == null ? null : springNext.toInstant();
+                    Instant actual = quartzNext == null ? null : quartzNext.toInstant();
+                    if (actual == null && expected != null && springNext.getYear() >= CronExpression.MAX_YEAR) {
+                        // Quartz computes no fire time beyond MAX_YEAR (a hundred years on); a yearly
+                        // expression's slots reach it. That is Quartz's horizon, not a disagreement.
+                        break;
+                    }
+                    if (!java.util.Objects.equals(expected, actual)) {
+                        throw new IllegalArgumentException("Cron expression '" + spring + "' converts to Quartz '"
+                                + quartz + "', but the two disagree at slot " + slot + " after " + AGREEMENT_FROM
+                                + " in " + zone + ": Spring fires at " + local(expected, zone) + ", Quartz at "
+                                + local(actual, zone) + ". Write it as an adhar.batch.quartz.triggers cron trigger in "
+                                + "Quartz syntax, whose fire times are Quartz's own");
+                    }
+                    if (springNext == null) {
+                        break;
+                    }
+                    springAfter = springNext;
+                    quartzAfter = quartzNext;
+                }
+            }
+        }
+
+        private static String local(Instant instant, ZoneId zone) {
+            return instant == null ? "never" : instant.atZone(zone).toOffsetDateTime().toString();
         }
 
         private static boolean isAny(String field) {

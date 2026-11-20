@@ -1,6 +1,7 @@
 package com.adhar.kit.batch.scheduler.quartz;
 
 import com.adhar.kit.batch.config.BatchProperties;
+import com.adhar.kit.batch.event.BatchRunEventPublisher;
 import com.adhar.kit.batch.operator.BatchOperator;
 import com.adhar.kit.batch.params.JobParameterSpecRegistry;
 import com.adhar.kit.batch.params.JobParametersResolver;
@@ -8,7 +9,10 @@ import com.adhar.kit.batch.repository.BatchRepositoryLayout;
 import com.adhar.kit.batch.repository.BatchSchemaMigrator;
 import com.adhar.kit.batch.repository.QuartzSchemaMigrator;
 import com.adhar.kit.batch.runtime.JdbcExecutionLease;
+import com.adhar.kit.batch.runtime.KubernetesOwnerLookup;
 import com.adhar.kit.batch.scheduler.BatchScheduler;
+import com.adhar.kit.batch.scheduler.ScheduleReportWriter;
+import com.adhar.kit.batch.scheduler.SchedulerMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.quartz.Scheduler;
 import org.springframework.batch.core.job.Job;
@@ -37,7 +41,10 @@ import java.time.Clock;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * The engine {@code quartz} of the embedded scheduler (design 0025 §5.20.3, §5.20.4): active with
@@ -292,6 +299,9 @@ public class QuartzConfiguration {
     }
 
     /**
+     * The engine {@code quartz}, with its business calendars ({@code adhar.batch.quartz.calendars.*}),
+     * its meters, its schedule report and the publisher of its {@code Skipped}/{@code Recovered} events.
+     *
      * @return the engine {@code quartz}
      */
     @Bean
@@ -304,12 +314,67 @@ public class QuartzConfiguration {
                                                 DataSource dataSource,
                                                 @BatchDataSource ObjectProvider<DataSource> batchDataSource,
                                                 BatchRepositoryLayout layout, BatchProperties properties,
+                                                ObjectProvider<SchedulerMetrics> metrics,
+                                                ObjectProvider<BatchRunEventPublisher> events,
                                                 Environment environment) {
         Map<String, Job> jobs = beanFactory.getBeansOfType(Job.class);
-        return new QuartzSchedulerEngine(scheduler, operator, repository, jobs, specs.getIfAvailable(), resolver,
-                ownership, new JdbcTemplate(batchDataSource.getIfAvailable(() -> dataSource)),
-                QuartzSchemaMigrator.tablePrefix(layout), properties,
-                environment.getProperty("spring.application.version"), Clock.systemUTC());
+        String schedulerName = schedulerName(properties, environment);
+        String application = environment.getProperty("spring.application.name", schedulerName);
+        CalendarRegistry calendars = new CalendarRegistry(CalendarRegistry.bind(environment),
+                properties.getScheduler().getTimeZone());
+        Clock clock = Clock.systemUTC();
+        QuartzSchedulerEngine engine = new QuartzSchedulerEngine(scheduler, operator, repository, jobs,
+                specs.getIfAvailable(), resolver, ownership,
+                new JdbcTemplate(batchDataSource.getIfAvailable(() -> dataSource)),
+                QuartzSchemaMigrator.tablePrefix(layout), properties, application,
+                environment.getProperty("spring.application.version"), calendars, clock);
+        SchedulerMetrics meters = metrics.getIfAvailable(SchedulerMetrics::none);
+        engine.observe(meters, reportWriter(properties.getQuartz().getReport(), schedulerName, application,
+                engine, meters, clock, KubernetesOwnerLookup.access(System::getenv,
+                        KubernetesOwnerLookup.SERVICE_ACCOUNT)), events.getIfAvailable());
+        return engine;
+    }
+
+    /**
+     * The schedule report (design 0025 §5.20.8): on by default only in Kubernetes, where the pod's
+     * ServiceAccount can write it.
+     *
+     * @return the writer, {@code null} when the report is off or cannot be written from here
+     */
+    static ScheduleReportWriter reportWriter(BatchProperties.Quartz.Report settings, String schedulerName,
+                                             String application, QuartzSchedulerEngine engine,
+                                             SchedulerMetrics metrics, Clock clock,
+                                             Optional<KubernetesOwnerLookup.ApiAccess> api) {
+        boolean enabled = settings.getEnabled() != null ? settings.getEnabled() : api.isPresent();
+        if (!enabled) {
+            return null;
+        }
+        String name = StringUtils.hasText(settings.getName()) ? settings.getName()
+                : schedulerName + ScheduleReportWriter.NAME_SUFFIX;
+        if (api.isEmpty()) {
+            log.info("adhar.batch.quartz.report.enabled=true, but this process runs outside Kubernetes (no "
+                    + "KUBERNETES_SERVICE_HOST or ServiceAccount token): the schedule report {} is not written", name);
+            return null;
+        }
+        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "adhar-batch-schedule-report");
+            thread.setDaemon(true);
+            return thread;
+        });
+        return new ScheduleReportWriter(api.get(), name, application, settings.getMinInterval(), engine::buildReport,
+                metrics, clock, executor);
+    }
+
+    /**
+     * Runtime triggers (design 0025 §5.20.5 rules 5-8): a bean only on the engine {@code quartz}.
+     *
+     * @param engine the engine
+     * @return {@code fireNow}, {@code fireAt}, {@code cancel}, {@code list}
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    BatchTriggers batchTriggers(QuartzSchedulerEngine engine) {
+        return new BatchTriggers(engine);
     }
 
     /**

@@ -1,11 +1,14 @@
 package com.adhar.kit.batch.scheduler.quartz;
 
 import com.adhar.kit.batch.config.BatchProperties.Quartz.Misfire;
+import com.adhar.kit.batch.event.BatchRunEventPublisher;
 import com.adhar.kit.batch.params.ParameterValidationException;
 import com.adhar.kit.batch.runtime.ExecutionLease;
 import com.adhar.kit.batch.scheduler.BatchScheduler;
+import com.adhar.kit.batch.scheduler.SchedulerMetrics;
 import com.adhar.kit.batch.scheduler.SlotIdentity;
 import com.adhar.kit.batch.scheduler.SlotOutcome;
+import com.adhar.kit.batch.telemetry.BatchMdc;
 import lombok.extern.slf4j.Slf4j;
 import org.quartz.Calendar;
 import org.quartz.DisallowConcurrentExecution;
@@ -16,6 +19,7 @@ import org.quartz.SchedulerException;
 import org.quartz.Trigger;
 import org.quartz.TriggerBuilder;
 import org.quartz.TriggerKey;
+import org.slf4j.MDC;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.job.Job;
@@ -62,6 +66,12 @@ import java.util.Optional;
  * skipped and counted. The launch never throws: Quartz would refire or unschedule on a
  * {@code JobExecutionException}, and the JobRepository already records what happened.</p>
  *
+ * <p>Every fire logs one INFO line with the trigger, the nominal slot, the run name and the
+ * outcome; carries {@value BatchMdc#RUN} and {@value BatchMdc#TRIGGER} in the MDC while it decides
+ * and runs; counts {@code adhar.batch.scheduler.fires}; and publishes a {@code Skipped}
+ * ({@code already-complete}, {@code duplicate}, {@code misfire}) or {@code Recovered} run event for
+ * what it decided, beside the {@code Started}/{@code Completed}/... events of the run itself.</p>
+ *
  * @author Adhar Platform Team
  * @since 0.1.0
  */
@@ -91,12 +101,46 @@ public class BatchLaunchJob implements org.quartz.Job {
     }
 
     /**
+     * One fire, observed: the MDC while it runs, then its log line, meter and report.
+     *
      * @param context the fire
      * @return what it did
      */
     SlotOutcome launch(JobExecutionContext context) {
+        Fire fire = new Fire();
+        fire.key = context.isRecovering() ? context.getRecoveringTriggerKey() : context.getTrigger().getKey();
+        fire.kind = context.getMergedJobDataMap().getString(QuartzSchedulerEngine.KIND);
+        String previousRun = MDC.get(BatchMdc.RUN);
+        String previousTrigger = MDC.get(BatchMdc.TRIGGER);
+        MDC.put(BatchMdc.TRIGGER, fire.key.getGroup() + "." + fire.key.getName());
+        SlotOutcome outcome = SlotOutcome.FAILED_TO_START;
+        try {
+            outcome = decide(context, fire);
+            return outcome;
+        } finally {
+            log.info("Fire of trigger {}.{} for slot {}: run {}, {}", fire.key.getGroup(), fire.key.getName(),
+                    fire.nominal != null ? fire.nominal : "none", fire.runName != null ? fire.runName : "-",
+                    SchedulerMetrics.outcomeTag(outcome));
+            restore(BatchMdc.RUN, previousRun);
+            restore(BatchMdc.TRIGGER, previousTrigger);
+            if (fire.bean != null && engine.job(fire.bean) != null) {
+                engine.fired(fire.bean, QuartzSchedulerEngine.triggerTag(fire.key, fire.kind), outcome);
+            }
+        }
+    }
+
+    private static void restore(String key, String value) {
+        if (value == null) {
+            MDC.remove(key);
+        } else {
+            MDC.put(key, value);
+        }
+    }
+
+    private SlotOutcome decide(JobExecutionContext context, Fire fire) {
         JobDataMap data = context.getMergedJobDataMap();
         String bean = context.getJobDetail().getJobDataMap().getString(QuartzSchedulerEngine.JOB);
+        fire.bean = bean;
         Job job = bean != null ? engine.job(bean) : null;
         if (job == null) {
             log.error("Quartz job {} names Spring Batch job [{}], which this application does not define",
@@ -121,6 +165,7 @@ public class BatchLaunchJob implements org.quartz.Job {
             if (QuartzSchedulerEngine.KIND_CONFIG.equals(kind)) {
                 Optional<Instant> slot = slotOf(context);
                 if (slot.isEmpty()) {
+                    publishSkipped(job.getName(), null, null, null, "misfire");
                     return SlotOutcome.BEYOND_CATCH_UP;
                 }
                 nominal = slot.get();
@@ -142,7 +187,10 @@ public class BatchLaunchJob implements org.quartz.Job {
             }
             identity = slot.parameters();
             runName = slot.runName(scheduleName);
+            fire.nominal = nominal;
         }
+        fire.runName = runName;
+        MDC.put(BatchMdc.RUN, runName);
         JobParameters parameters = withProvenance(identity, triggerKey, runName);
         return run(context, bean, job, parameters, runName, zone);
     }
@@ -231,6 +279,8 @@ public class BatchLaunchJob implements org.quartz.Job {
                 if (status == BatchStatus.COMPLETED) {
                     log.info("Skipping run {} of job [{}]: it already completed (execution {})", runName, bean,
                             previous.getId());
+                    publishSkipped(job.getName(), previous.getJobInstance().getInstanceId(), previous.getId(),
+                            parameters, "already-complete");
                     return SlotOutcome.ALREADY_RAN;
                 }
                 if (status == BatchStatus.ABANDONED) {
@@ -245,12 +295,16 @@ public class BatchLaunchJob implements org.quartz.Job {
                     if (!context.isRecovering() && ownerAlive) {
                         log.info("Skipping run {} of job [{}]: execution {} is running on {}", runName, bean,
                                 previous.getId(), ownerInstance != null ? ownerInstance : "a replica");
+                        publishSkipped(job.getName(), previous.getJobInstance().getInstanceId(), previous.getId(),
+                                parameters, "duplicate");
                         return SlotOutcome.DUPLICATE;
                     }
+                    String reason = context.isRecovering() ? "Quartz re-fired the work of a replica that died"
+                            : "its owner " + ownerInstance + " no longer checks in";
                     log.warn("Recovering execution {} of run {} of job [{}]: {}", previous.getId(), runName, bean,
-                            context.isRecovering() ? "Quartz re-fired the work of a replica that died"
-                                    : "its owner " + ownerInstance + " no longer checks in");
+                            reason);
                     recover(previous);
+                    publishRecovered(previous, reason);
                     outcome = SlotOutcome.RECOVERED;
                 } else if (hasRunningStep(engine.repository().getJobExecution(previous.getId()))) {
                     log.warn("Recovering execution {} of run {} of job [{}]: it ended {} with a step still running",
@@ -277,10 +331,12 @@ public class BatchLaunchJob implements org.quartz.Job {
             return outcome;
         } catch (JobInstanceAlreadyCompleteException ex) {
             log.info("Skipping run {} of job [{}]: another replica completed it", runName, bean);
+            publishSkipped(job.getName(), null, null, parameters, "already-complete");
             return SlotOutcome.ALREADY_RAN;
         } catch (JobExecutionAlreadyRunningException | DataIntegrityViolationException
                  | ConcurrencyFailureException ex) {
             log.info("Skipping run {} of job [{}]: another replica runs it", runName, bean);
+            publishSkipped(job.getName(), null, null, parameters, "duplicate");
             return SlotOutcome.DUPLICATE;
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
@@ -334,6 +390,22 @@ public class BatchLaunchJob implements org.quartz.Job {
         }
     }
 
+    private void publishSkipped(String job, Long instanceId, Long executionId, JobParameters parameters,
+                                String reason) {
+        BatchRunEventPublisher events = engine.events();
+        if (events != null) {
+            events.skipped(job, instanceId, executionId, parameters, reason);
+        }
+    }
+
+    private void publishRecovered(JobExecution previous, String reason) {
+        BatchRunEventPublisher events = engine.events();
+        if (events != null) {
+            JobExecution recovered = engine.repository().getJobExecution(previous.getId());
+            events.recovered(recovered != null ? recovered : previous, reason);
+        }
+    }
+
     private void recover(JobExecution previous) {
         engine.operator().recover(previous);
         engine.ownership().release(previous.getId());
@@ -379,14 +451,25 @@ public class BatchLaunchJob implements org.quartz.Job {
 
     private JobParameters withProvenance(JobParameters identity, TriggerKey trigger, String runName) {
         JobParametersBuilder builder = new JobParametersBuilder(identity)
-                .addString(QuartzSchedulerEngine.TRIGGER_KEY_PARAMETER, trigger.getGroup() + "." + trigger.getName(),
+                .addString(BatchScheduler.TRIGGER_KEY_PARAMETER, trigger.getGroup() + "." + trigger.getName(),
                         false)
-                .addString(QuartzSchedulerEngine.RUN_PARAMETER, runName, false)
+                .addString(BatchScheduler.RUN_PARAMETER, runName, false)
                 .addString(QuartzSchedulerEngine.INSTANCE_PARAMETER, engine.instanceId(), false);
         if (engine.appVersion() != null && !engine.appVersion().isBlank()) {
             builder.addString(QuartzSchedulerEngine.APP_VERSION_PARAMETER, engine.appVersion(), false);
         }
         return builder.toJobParameters();
+    }
+
+    /**
+     * What one fire stood for, as far as it got: its log line and meter.
+     */
+    private static final class Fire {
+        private TriggerKey key;
+        private String kind;
+        private String bean;
+        private Instant nominal;
+        private String runName;
     }
 
     private ZoneId zone(JobDataMap data) {

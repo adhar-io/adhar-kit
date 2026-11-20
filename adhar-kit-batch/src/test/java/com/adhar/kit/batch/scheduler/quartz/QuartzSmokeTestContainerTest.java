@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.scheduler.quartz;
 
+import com.adhar.kit.batch.scheduler.BatchScheduler;
 import com.adhar.kit.batch.support.PostgresDatabases;
 import com.adhar.kit.batch.support.QuartzContexts;
 import com.adhar.kit.batch.support.QuartzJobs;
@@ -42,7 +43,7 @@ class QuartzSmokeTestContainerTest {
                     + "where identifying = 'Y'", String.class)).as("a now trigger's identity is the caller's parameters")
                     .containsExactly("run");
             assertThat(jdbc.queryForObject("select parameter_value from batch.batch_job_execution_params "
-                    + "where parameter_name = ?", String.class, QuartzSchedulerEngine.TRIGGER_KEY_PARAMETER))
+                    + "where parameter_name = ?", String.class, BatchScheduler.TRIGGER_KEY_PARAMETER))
                     .isEqualTo(QuartzSchedulerEngine.RUNTIME_GROUP + ".smoke");
         }
     }

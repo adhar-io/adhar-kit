@@ -907,6 +907,18 @@ public class BatchProperties {
          */
         private Map<String, List<TriggerSettings>> triggers = new LinkedHashMap<>();
 
+        /**
+         * Business calendars (design 0025 D5, §5.20.6): {@code calendars.<name>.file}, a mounted
+         * {@code calendar.yaml}, or {@code calendars.<name>.time-zone|weekend-days|holidays|business-days};
+         * and {@code calendars.refresh-interval}.
+         */
+        private Calendars calendars = new Calendars();
+
+        /**
+         * The schedule report the Console and CLI read (design 0025 §5.20.8).
+         */
+        private Report report = new Report();
+
         public String getSchedulerName() {
             return schedulerName;
         }
@@ -953,6 +965,161 @@ public class BatchProperties {
 
         public void setTriggers(Map<String, List<TriggerSettings>> triggers) {
             this.triggers = triggers;
+        }
+
+        public Calendars getCalendars() {
+            return calendars;
+        }
+
+        public void setCalendars(Calendars calendars) {
+            this.calendars = calendars;
+        }
+
+        public Report getReport() {
+            return report;
+        }
+
+        public void setReport(Report report) {
+            this.report = report;
+        }
+
+        /**
+         * {@code adhar.batch.quartz.calendars}: the named calendars sit beside
+         * {@code refresh-interval} under the same prefix, so they are bound by name
+         * ({@code com.adhar.kit.batch.scheduler.quartz.CalendarRegistry}) rather than as a map here,
+         * which would read {@code refresh-interval} as a calendar.
+         */
+        public static class Calendars {
+
+            /**
+             * How often a calendar file is re-read: a mounted ConfigMap changes in place.
+             */
+            private Duration refreshInterval = Duration.ofMinutes(5);
+
+            public Duration getRefreshInterval() {
+                return refreshInterval;
+            }
+
+            public void setRefreshInterval(Duration refreshInterval) {
+                this.refreshInterval = refreshInterval;
+            }
+        }
+
+        /**
+         * One calendar, {@code adhar.batch.quartz.calendars.<name>.*}: a {@code file}, or D5's keys.
+         */
+        public static class CalendarSettings {
+
+            /**
+             * A mounted {@code calendar.yaml} (D5's shape), re-read every {@code refresh-interval}.
+             */
+            private String file;
+
+            /**
+             * The zone its dates are taken in. Unset, {@code adhar.batch.scheduler.time-zone}.
+             */
+            private String timeZone;
+
+            /**
+             * The days of the week that are not business days. Unset, Saturday and Sunday.
+             */
+            private List<String> weekendDays;
+
+            /**
+             * ISO dates that are not business days.
+             */
+            private List<String> holidays = new ArrayList<>();
+
+            /**
+             * ISO dates that are business days, overriding the weekend (a working Saturday).
+             */
+            private List<String> businessDays = new ArrayList<>();
+
+            public String getFile() {
+                return file;
+            }
+
+            public void setFile(String file) {
+                this.file = file;
+            }
+
+            public String getTimeZone() {
+                return timeZone;
+            }
+
+            public void setTimeZone(String timeZone) {
+                this.timeZone = timeZone;
+            }
+
+            public List<String> getWeekendDays() {
+                return weekendDays;
+            }
+
+            public void setWeekendDays(List<String> weekendDays) {
+                this.weekendDays = weekendDays;
+            }
+
+            public List<String> getHolidays() {
+                return holidays;
+            }
+
+            public void setHolidays(List<String> holidays) {
+                this.holidays = holidays;
+            }
+
+            public List<String> getBusinessDays() {
+                return businessDays;
+            }
+
+            public void setBusinessDays(List<String> businessDays) {
+                this.businessDays = businessDays;
+            }
+        }
+
+        /**
+         * The schedule report: {@code ConfigMap <name>} in the service's namespace, version 1.
+         */
+        public static class Report {
+
+            /**
+             * Whether to write it. Unset, only when running in Kubernetes (a mounted
+             * ServiceAccount token and {@code KUBERNETES_SERVICE_HOST}).
+             */
+            private Boolean enabled;
+
+            /**
+             * The ConfigMap's name. Unset, {@code <scheduler-name>-batch-schedules}.
+             */
+            private String name;
+
+            /**
+             * The least time between two writes; a write asked for sooner is deferred.
+             */
+            private Duration minInterval = Duration.ofSeconds(10);
+
+            public Boolean getEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(Boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public String getName() {
+                return name;
+            }
+
+            public void setName(String name) {
+                this.name = name;
+            }
+
+            public Duration getMinInterval() {
+                return minInterval;
+            }
+
+            public void setMinInterval(Duration minInterval) {
+                this.minInterval = minInterval;
+            }
         }
 
         /**

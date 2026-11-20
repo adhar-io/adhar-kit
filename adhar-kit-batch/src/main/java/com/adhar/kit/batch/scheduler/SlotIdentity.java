@@ -1,6 +1,7 @@
 package com.adhar.kit.batch.scheduler;
 
 import com.adhar.kit.batch.annotation.ParamSource;
+import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.params.JobParameterSpec;
 import com.adhar.kit.batch.params.JobParametersResolver;
 import com.adhar.kit.batch.params.JobParametersResolver.ResolvedParameters;
@@ -16,8 +17,10 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * The identity of one fire of an in-service schedule, the ONE function both engines of
@@ -44,6 +47,11 @@ import java.util.Optional;
  * @since 0.1.0
  */
 public record SlotIdentity(JobParameters parameters, Map<String, String> identifying) {
+
+    /** The longest schedule name: the {@code <batchjob>} of naming v1. */
+    public static final int MAX_SCHEDULE_NAME = 40;
+
+    private static final Pattern DNS_LABEL = Pattern.compile("[a-z]([-a-z0-9]*[a-z0-9])?");
 
     /** The resolution of a job that declares no parameters. */
     public static final ResolvedParameters UNDECLARED = new ResolvedParameters(new JobParameters(), Map.of(),
@@ -110,6 +118,49 @@ public record SlotIdentity(JobParameters parameters, Map<String, String> identif
         // a minute. Truncated to the minute both would share one JobInstance and the second would
         // be skipped as already run. A minute-resolution schedule gets the same identity either way.
         return DateTimeFormatter.ISO_INSTANT.format(nominal.truncatedTo(ChronoUnit.SECONDS));
+    }
+
+    /**
+     * A job's schedule name, the {@code <batchjob>} of naming v1 for its in-service runs on either
+     * engine, so a service that changes engine keeps its run names (design 0025 §5.20.5).
+     *
+     * @param bean     a job's bean name (or the name it was scheduled under)
+     * @param settings {@code adhar.batch.quartz.*}
+     * @return {@code jobs.<bean>.name}, else the bean name as a DNS-1035 label
+     * @throws IllegalStateException when the configured name is not a DNS-1035 label of at most
+     *                               {@value #MAX_SCHEDULE_NAME} characters
+     */
+    public static String scheduleName(String bean, BatchProperties.Quartz settings) {
+        BatchProperties.Quartz.JobSettings job = settings.getJobs().get(bean);
+        if (job != null && job.getName() != null) {
+            String name = job.getName();
+            if (name.length() > MAX_SCHEDULE_NAME || !DNS_LABEL.matcher(name).matches()) {
+                throw new IllegalStateException("adhar.batch.quartz.jobs." + bean + ".name must be a DNS-1035 label of "
+                        + "at most " + MAX_SCHEDULE_NAME + " characters, was '" + name + "'");
+            }
+            return name;
+        }
+        return dnsLabel(bean);
+    }
+
+    /**
+     * @param bean a bean name
+     * @return it as a DNS-1035 label of at most {@value #MAX_SCHEDULE_NAME} characters:
+     *         {@code importJob} becomes {@code import-job}: the default schedule name, and the key of
+     *         the job's Quartz JobDetail when {@code adhar.batch.quartz.jobs.<bean>.name} is unset
+     */
+    public static String dnsLabel(String bean) {
+        String kebab = bean.replaceAll("([a-z0-9])([A-Z])", "$1-$2").toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9-]+", "-").replaceAll("-{2,}", "-").replaceAll("^[-0-9]+", "");
+        if (kebab.length() > MAX_SCHEDULE_NAME) {
+            kebab = kebab.substring(0, MAX_SCHEDULE_NAME);
+        }
+        kebab = kebab.replaceAll("-+$", "");
+        if (kebab.isEmpty()) {
+            throw new IllegalStateException("Job bean [" + bean + "] has no letters to name its schedule with: set "
+                    + "adhar.batch.quartz.jobs." + bean + ".name");
+        }
+        return kebab;
     }
 
     /**

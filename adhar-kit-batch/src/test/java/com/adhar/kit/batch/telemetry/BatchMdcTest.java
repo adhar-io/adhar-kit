@@ -3,6 +3,7 @@ package com.adhar.kit.batch.telemetry;
 import com.adhar.kit.batch.partition.LocalPartitioning;
 import com.adhar.kit.batch.partitioner.AdharRangePartitioner;
 import com.adhar.kit.batch.runtime.AdharBatchRunner;
+import com.adhar.kit.batch.scheduler.BatchScheduler;
 import com.adhar.kit.batch.step.AdharSteps;
 import com.adhar.kit.batch.support.BatchTestApplication;
 import com.adhar.kit.batch.support.TestJobs;
@@ -43,6 +44,23 @@ class BatchMdcTest {
                 Map.entry(BatchMdc.JOB, "importJob"), Map.entry(BatchMdc.INSTANCE, "42"),
                 Map.entry(BatchMdc.EXECUTION, "97"), Map.entry(BatchMdc.BUSINESS_DATE, "2026-11-03"),
                 Map.entry(BatchMdc.K8S_JOB, "importer-29123"));
+    }
+
+    @Test
+    @DisplayName("an in-service run adds its name and trigger; a run with no trigger key names what started it")
+    void inServiceRunKeys() {
+        JobExecution quartz = new JobExecution(5L, new JobInstance(4L, "importJob"), new JobParametersBuilder()
+                .addString(BatchScheduler.RUN_PARAMETER, "import-job-09932cb3", false)
+                .addString(BatchScheduler.TRIGGER_KEY_PARAMETER, "adhar-batch-config.import-job.nightly", false)
+                .addString(BatchScheduler.TRIGGER_PARAMETER, BatchScheduler.EMBEDDED_TRIGGER, false)
+                .toJobParameters());
+        JobExecution simple = new JobExecution(6L, new JobInstance(4L, "importJob"), new JobParametersBuilder()
+                .addString(BatchScheduler.TRIGGER_PARAMETER, BatchScheduler.EMBEDDED_TRIGGER, false).toJobParameters());
+
+        assertThat(BatchMdc.jobContext(quartz)).containsEntry(BatchMdc.RUN, "import-job-09932cb3")
+                .containsEntry(BatchMdc.TRIGGER, "adhar-batch-config.import-job.nightly");
+        assertThat(BatchMdc.jobContext(simple)).doesNotContainKey(BatchMdc.RUN)
+                .containsEntry(BatchMdc.TRIGGER, BatchScheduler.EMBEDDED_TRIGGER);
     }
 
     @Test
