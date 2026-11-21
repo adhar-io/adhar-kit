@@ -197,7 +197,10 @@ class OpsCommandsTest extends RunnerFixture {
         RunOutcome missing = ops(RunnerJobs.REPORT_JOB, "abandon", 987654);
         assertThat(missing.exitCode()).isEqualTo(ExitCodes.INVALID_REQUEST);
         assertThat(missing.reason()).isEqualTo(BatchCommandRunner.UNKNOWN_EXECUTION);
-        assertThat(summaryJson().get("executionId").asLong()).isEqualTo(987654);
+        JsonNode unknownSummary = summaryJson();
+        assertThat(unknownSummary.has("executionId")).as("D13: absent when no execution exists").isFalse();
+        assertThat(unknownSummary.has("status")).isFalse();
+        assertThat(unknownSummary.get("exitDescription").asText()).contains("987654");
 
         RunOutcome other = ops(RunnerJobs.SLOW_CHUNK_JOB, "abandon", report.getId());
         assertThat(other.exitCode()).isEqualTo(ExitCodes.INVALID_REQUEST);
@@ -378,6 +381,86 @@ class OpsCommandsTest extends RunnerFixture {
         assertThat(after.getStatus()).as("Spring Batch records a stop at once").isEqualTo(BatchStatus.STOPPED);
         assertThat(lease.find(running.getId())).as("the owner has not let it go").isPresent();
         assertThat(sleeps).hasSize((int) (properties.getShutdown().getTimeout().toSeconds() / 30));
+    }
+
+    /**
+     * An ops stop whose owner is still on its way to the next chunk boundary: Spring Batch 6 has
+     * already recorded the execution and its steps STOPPED, so only the lease says it is owned.
+     */
+    private JobExecution stopRequested(String date, String ownerPod) {
+        JobExecution running = startedReport(date, ownerPod);
+        pod(ownerPod, "Running", false);
+        MutableClock time = new MutableClock();
+        clock = time;
+        onSleep = () -> time.advance(Duration.ofSeconds(30));
+        assertThat(ops(RunnerJobs.REPORT_JOB, "stop", running.getId()).reason()).isEqualTo("stop-requested");
+        onSleep = () -> { };
+        clock = Clock.systemUTC();
+        JobExecution after = jobRepository.getJobExecution(running.getId());
+        assertThat(after.getStatus()).isEqualTo(BatchStatus.STOPPED);
+        assertThat(after.getStepExecutions()).noneSatisfy(step -> assertThat(step.getStatus().isRunning()).isTrue());
+        assertThat(lease.find(running.getId())).isPresent();
+        return after;
+    }
+
+    @Test
+    @DisplayName("§5.9: abandon and recover of a stop-requested execution whose owner still holds the lease are refused (owner-alive)")
+    void aStopRequestedExecutionIsStillOwned() {
+        JobExecution stopped = stopRequested("2026-11-21", "reporter-stopping");
+
+        RunOutcome abandon = ops(RunnerJobs.REPORT_JOB, "abandon", stopped.getId());
+        assertThat(abandon.exitCode()).isEqualTo(ExitCodes.INVALID_REQUEST);
+        assertThat(abandon.reason()).isEqualTo(BatchCommandRunner.OWNER_ALIVE);
+        assertThat(status(stopped)).isEqualTo(BatchStatus.STOPPED);
+        assertThat(ops(RunnerJobs.REPORT_JOB, "recover", stopped.getId()).reason())
+                .isEqualTo(BatchCommandRunner.OWNER_ALIVE);
+        assertThat(lease.find(stopped.getId())).isPresent();
+
+        // The owner is gone without letting go: recover takes the lease over and leaves the execution
+        // STOPPED, which restarts; abandon then needs nothing more.
+        podGone("reporter-stopping");
+        RunOutcome recover = ops(RunnerJobs.REPORT_JOB, "recover", stopped.getId());
+        assertThat(recover.exitCode()).isZero();
+        assertThat(recover.reason()).isEqualTo("recovered");
+        assertThat(status(stopped)).isEqualTo(BatchStatus.STOPPED);
+        assertThat(lease.find(stopped.getId())).isEmpty();
+        assertThat(ops(RunnerJobs.REPORT_JOB, "recover", stopped.getId()).reason()).isEqualTo("nothing-to-recover");
+    }
+
+    @Test
+    @DisplayName("§5.9: abandon of a stop-requested execution whose owner is gone takes the lease and abandons it")
+    void abandonAStopRequestedExecutionOfAGoneOwner() {
+        JobExecution stopped = stopRequested("2026-11-22", "reporter-stopping");
+        podGone("reporter-stopping");
+
+        RunOutcome abandon = ops(RunnerJobs.REPORT_JOB, "abandon", stopped.getId());
+
+        assertThat(abandon.reason()).isEqualTo("abandoned");
+        assertThat(status(stopped)).isEqualTo(BatchStatus.ABANDONED);
+        assertThat(lease.find(stopped.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("§5.9: a run of the identity of a stop-requested execution whose owner is alive is a duplicate, not a second execution")
+    void noRestartUnderAStopRequestedOwner() {
+        JobExecution stopped = stopRequested("2026-11-23", "reporter-stopping");
+        long executions = jdbc.queryForObject("SELECT COUNT(*) FROM BATCH_JOB_EXECUTION", Long.class);
+
+        business(RunnerJobs.REPORT_JOB, "{\"businessDate\":\"2026-11-23\"}");
+        RunOutcome duplicate = run();
+
+        assertThat(duplicate.exitCode()).isZero();
+        assertThat(duplicate.kind()).isEqualTo(RunOutcome.Kind.SKIPPED);
+        assertThat(duplicate.reason()).isEqualTo(RunOutcome.DUPLICATE);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM BATCH_JOB_EXECUTION", Long.class)).isEqualTo(executions);
+
+        podGone("reporter-stopping");
+        RunOutcome restarted = run();
+        assertThat(restarted.kind()).isEqualTo(RunOutcome.Kind.COMPLETED);
+        assertThat(restarted.execution().getJobInstance().getInstanceId()).isEqualTo(instance(stopped));
+        assertThat(lease.find(stopped.getId())).as("the gone owner's lease is released").isEmpty();
+        assertThat(events(com.adhar.kit.batch.event.BatchRunEvent.Recovered.class))
+                .as("nothing in the repository was recovered: it had ended").isEmpty();
     }
 
     @Test
@@ -686,6 +769,34 @@ class OpsCommandsTest extends RunnerFixture {
         assertThat(refused.exitCode()).isEqualTo(ExitCodes.INVALID_REQUEST);
         assertThat(refused.reason()).isEqualTo(BatchCommandRunner.RUNNING);
         assertThat(pending(a.execution().getId())).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("§5.9: dlq-replay of an ended execution whose owner still holds the lease is refused until the owner is gone")
+    void replayWaitsForTheOwnerToLetGo() {
+        OpsJobs.REJECT_PROCESS.add(3L);
+        RunOutcome a = ledger("a");
+        OpsJobs.reset();
+        long id = a.execution().getId();
+        // As an ops stop leaves it: STOPPED in the repository, the owner still writing to its next chunk.
+        JobExecution stopped = jobRepository.getJobExecution(id);
+        stopped.setStatus(BatchStatus.STOPPED);
+        jobRepository.update(stopped);
+        lease.acquire(id, new ExecutionLease.Owner("ledger-live", "uid-ledger-live", "worker-9"));
+        pod("ledger-live", "Running", false);
+
+        RunOutcome refused = ops(OpsJobs.LEDGER_JOB, "dlq-replay", id);
+
+        assertThat(refused.exitCode()).isEqualTo(ExitCodes.INVALID_REQUEST);
+        assertThat(refused.reason()).isEqualTo(BatchCommandRunner.OWNER_ALIVE);
+        assertThat(pending(id)).isEqualTo(1);
+        assertThat(ledgerIds("a")).doesNotContain(3L);
+
+        podGone("ledger-live");
+        RunOutcome replayed = ops(OpsJobs.LEDGER_JOB, "dlq-replay", id);
+        assertThat(replayed.reason()).isEqualTo("replayed");
+        assertThat(ledgerIds("a")).contains(3L);
+        assertThat(lease.find(id)).isEmpty();
     }
 
     @Test

@@ -150,11 +150,12 @@ public class BatchCommandRunner {
             return housekeeping(job);
         }
         if (command == BatchCommand.DLQ_REPLAY) {
-            return replay(job, id);
+            return replay(job, id, context);
         }
         JobExecution execution = id != null ? execution(id) : latest(job.getName());
         if (execution == null) {
-            return invalid(new Command(command.label(), null, id, null, Map.of()), UNKNOWN_EXECUTION, id == null
+            // D13: no execution exists, so the summary names none; the message carries the id asked for.
+            return invalid(Command.on(command.label(), null), UNKNOWN_EXECUTION, id == null
                     ? "job [" + job.getName() + "] has no execution" : "the JobRepository has no execution " + id);
         }
         if (!execution.getJobInstance().getJobName().equals(job.getName())) {
@@ -229,6 +230,11 @@ public class BatchCommandRunner {
         if (owned.refusal != null) {
             return owned.refusal;
         }
+        if (owned.released) {
+            return done(Command.on(verb, owned.execution), "recovered", "execution " + execution.getId() + " is "
+                    + owned.execution.getStatus() + " and the lease its gone owner left is released: its identity can "
+                    + "run or be restarted again");
+        }
         if (!owned.orphaned) {
             return done(Command.on(verb, owned.execution), "nothing-to-recover", "execution " + execution.getId()
                     + " is " + owned.execution.getStatus() + " with no step running: it needs no recovery");
@@ -242,26 +248,36 @@ public class BatchCommandRunner {
     /**
      * Whether anyone may still own the execution, decided as the runner decides it for a run of
      * the same identity; waits while its owner terminates.
+     *
+     * <p>An execution that has ended in the repository is still owned while its lease exists:
+     * Spring Batch 6 records an ops {@code stop} as STOPPED, steps included, at once, while the
+     * owner pod is still on its way to the next chunk boundary (design 0025 §5.9). Only the
+     * {@link RecoveryPolicy} may then say the owner is gone, and its lease is released here.</p>
      */
     private Owned ownership(JobExecution execution, RunContext context, String verb) {
         Instant waitingSince = null;
         JobExecution current = execution;
         while (true) {
-            if (!current.getStatus().isRunning() && runningSteps(current) == 0) {
-                return new Owned(current, false, null);
+            boolean ended = !current.getStatus().isRunning() && runningSteps(current) == 0;
+            if (ended && lease.find(current.getId()).isEmpty()) {
+                return new Owned(current, false, false, null);
             }
             Verdict verdict = recovery.decide(current, context);
             log.info("Execution {} is {}: {} ({})", current.getId(), current.getStatus(), verdict.decision(),
                     verdict.reason());
             switch (verdict.decision()) {
                 case RECOVER -> {
-                    return new Owned(current, true, null);
+                    if (ended) {
+                        // Nothing in the repository says running: only the gone owner's lease is left.
+                        lease.release(current.getId());
+                    }
+                    return new Owned(current, !ended, ended, null);
                 }
                 case WAIT -> {
                     waitingSince = waitingSince == null ? clock.instant() : waitingSince;
                     Duration waited = Duration.between(waitingSince, clock.instant());
                     if (stopping.getAsBoolean() || waited.compareTo(properties.getRecovery().getMaxWait()) >= 0) {
-                        return new Owned(current, false, RunOutcome.command(Kind.FAILED, OWNER_ALIVE,
+                        return new Owned(current, false, false, RunOutcome.command(Kind.FAILED, OWNER_ALIVE,
                                 ExitCodes.FAILED_RETRYABLE, Command.on(verb, current), "execution " + current.getId()
                                         + " is still owned by a terminating pod after " + waited));
                     }
@@ -270,7 +286,7 @@ public class BatchCommandRunner {
                     current = reread != null ? reread : current;
                 }
                 default -> {
-                    return new Owned(current, false, invalid(Command.on(verb, current), OWNER_ALIVE,
+                    return new Owned(current, false, false, invalid(Command.on(verb, current), OWNER_ALIVE,
                             "execution " + current.getId() + " may still be running: " + verdict.reason()
                                     + ". Stop its run first"));
                 }
@@ -343,7 +359,7 @@ public class BatchCommandRunner {
         }
     }
 
-    private RunOutcome replay(Job job, long executionId) {
+    private RunOutcome replay(Job job, long executionId, RunContext context) {
         String verb = BatchCommand.DLQ_REPLAY.label();
         JobExecution execution = execution(executionId);
         Command target = execution != null ? Command.on(verb, execution)
@@ -366,8 +382,16 @@ public class BatchCommandRunner {
             }
         }
         if (execution == null && replayer.jobsOf(executionId).isEmpty()) {
-            return invalid(target, UNKNOWN_EXECUTION, "the JobRepository has no execution " + executionId
-                    + " and it has no dead letters");
+            return invalid(Command.on(verb, null), UNKNOWN_EXECUTION, "the JobRepository has no execution "
+                    + executionId + " and it has no dead letters");
+        }
+        if (execution != null) {
+            // Ended in the repository is not ended for its owner: an ops stop is recorded STOPPED
+            // while the owner still writes, and dead-letters, up to its next chunk boundary.
+            Owned owned = ownership(execution, context, verb);
+            if (owned.refusal != null) {
+                return owned.refusal;
+            }
         }
         if (replayer.pending(executionId) == 0) {
             return done(target.counting(counts("replayed", 0, "rejected", 0)), "nothing-to-replay",
@@ -421,8 +445,9 @@ public class BatchCommandRunner {
     /**
      * @param execution the execution as last read
      * @param orphaned  whether it, or a step of it, still says running with nobody owning it
+     * @param released  whether it had ended and only the lease of its gone owner was left, now released
      * @param refusal   the outcome when the command must not touch it
      */
-    private record Owned(JobExecution execution, boolean orphaned, RunOutcome refusal) {
+    private record Owned(JobExecution execution, boolean orphaned, boolean released, RunOutcome refusal) {
     }
 }

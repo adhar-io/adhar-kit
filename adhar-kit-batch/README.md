@@ -19,7 +19,7 @@ Design: `adhar/docs/design/0025-batch-platform.md` (§5). The platform runs a ba
 | Remote partitioning (a manager and workers) | `RemotePartitioning`, `@ConditionalOnBatchRole`, `PartitionWorker`, `JdbcPartitionTransport`, `StaleRequestGuard`, `WorkerStopHandler`, `PartitionPlanSplitter`, `WorkerLivenessWatch` |
 | Telemetry | `BatchProgressMetrics`, `BatchMdc`, `ItemObservationTracingFilter` |
 | Events | `BatchRunEvent` (`Started`, `Completed`, `Failed`, `Stopped`, `Skipped`, `Recovered`) |
-| Operations | `BatchOperator` (`start`, `restart`, `stop`, `abandon`, `recover`, `findExecutions`) |
+| Operations | `BatchOperator` (`start`, `restart`, `stop`, `abandon`, `recover`, `findExecutions`); the ops commands of a run pod (`ADHAR_BATCH_COMMAND`: `abandon`, `recover`, `stop`, `status`, `housekeeping`, `dlq-replay`) |
 | Embedded mode | `BatchScheduler` + `SchedulerLock` (a service that also runs a small job; not the platform path) |
 
 Everything is active only when the application defines at least one `Job` bean: a web service
@@ -135,6 +135,46 @@ On exit the runner writes a summary (`{"v":1,"job":…,"status":…,"exitCode":�
 `/dev/termination-log` and stdout, which the Console and the CLI show. A run that finds its
 instance still STARTED checks the owner pod and the execution lease: it recovers a dead owner's
 execution, waits for a terminating one, and skips (exit 0) while the owner is alive.
+
+After a COMPLETED run the runner also does the JobRepository's housekeeping (design 0025 D4) when
+`adhar.batch.retention.days` is set (the platform passes `ADHAR_BATCH_RETENTION_DAYS` and
+`_KEEP_LAST`): it deletes the job's instances whose last activity is older than `days`, keeping
+the newest `keep-last`, always the newest FAILED or STOPPED one of a restartable job (the next
+restart resumes it), and any instance still running. Dead letters stay. A housekeeping that fails
+is logged and counted (`adhar.batch.housekeeping{result=failed}`) and never changes the run's exit
+code.
+
+### Ops commands
+
+With `ADHAR_BATCH_COMMAND` set the runner carries out THAT on `ADHAR_BATCH_EXECUTION_ID` instead
+of the job, resolving no parameters: this is how `adhar batch abandon|recover|dlq --replay` and the
+Console act on the job's own repository with the job's own credentials. Only the single or manager
+pod acts; a worker exits 0 (`skipped`, reason `worker`).
+
+| Command | Does | Exit and reason |
+|---|---|---|
+| `abandon` | an ended execution (or one a dead owner left running, recovered first) becomes ABANDONED; its identity then exits 6 | 0 `abandoned` \| `already-abandoned` |
+| `recover` | an execution a dead owner left STARTED becomes FAILED, so its identity can run or restart | 0 `recovered` \| `nothing-to-recover` |
+| `stop` | asks a running execution to stop at its next chunk boundary; waits `shutdown.timeout` for its owner to let go | 0 `stopped` \| `stop-requested` \| `not-running` |
+| `status` | reports the execution (default: the job's latest), changing nothing | 0, the status in lower case |
+| `housekeeping` | the retention above, on demand | 0 `housekept`; 5 `housekeeping` when it fails |
+| `dlq-replay` | sends ONLY that execution's unreplayed dead letters through their step's processor and writer again, each in its own transaction that marks it `REPLAYED_AT` | 0 `replayed` \| `nothing-to-replay`; **3 `rejected`** while any remain |
+
+An execution whose owner pod may still hold it is refused (exit 2 `owner-alive`; a terminating
+owner is waited for, as a run waits). That includes an execution the repository already says is
+STOPPED while its lease is held: Spring Batch 6 records a `stop` at once, steps included, while
+the owner is still on its way to the next chunk boundary, so the lease, not the status, says when
+it has let go. A run of that identity is a duplicate (exit 0) until then, never a second writer;
+once the owner is gone, `recover` releases the lease it left (`recovered`, the execution stays
+STOPPED and restarts). Other refusals exit 2 with `unknown-command`,
+`execution-id`, `unknown-execution`, `other-job`, `completed`, `running` or `retention`. A
+dlq-replay that leaves items rejected exits 3 because a succeeded ops Job is reused by its name and
+never runs again. Items stay rejected when they fail again, were skipped in `read` (no item), or
+belong to a step whose writer is an `ItemStream`, was set through `customize(...)`, or whose name
+two steps share. Step-scoped processors and writers see the original execution's parameters. Every
+ops run's summary carries `command`, the execution's `executionId` and `status` (absent, as D13
+says, when no such execution exists), a `reason`, and what it counted (`replayed`/`rejected`,
+`deleted`/`kept`, `runningSteps`), never item counts.
 
 ## Partitioning inside one pod
 
@@ -287,7 +327,8 @@ build when the `BatchJob` manifest's parameters differ from `@AdharBatchJob`, it
 | `adhar.batch.exit.already-complete` | `success` | `success` (exit 0) \| `fail` (exit 3) |
 | `adhar.batch.chunk.size` / `adhar.batch.page.size` | `100` / `500` | Builder defaults |
 | `adhar.batch.retry.max-attempts` / `.initial-backoff` / `.max-backoff` | `3` / `1s` / `30s` | Retry presets |
-| `adhar.batch.dead-letter.enabled` | `true` | JDBC dead-letter table |
+| `adhar.batch.dead-letter.enabled` | `true` | JDBC dead-letter table (and the `dlq-replay` ops command) |
+| `adhar.batch.retention.days` / `.keep-last` | env `ADHAR_BATCH_RETENTION_DAYS` (none: no housekeeping) / `_KEEP_LAST` (30) | D4 housekeeping after every COMPLETED run and on the ops command `housekeeping` |
 | `adhar.batch.telemetry.trace-items` | `false` | Per-item spans |
 | `adhar.batch.partition.transport` | env `ADHAR_BATCH_PARTITION_TRANSPORT` (`jdbc`) | `jdbc`; `kafka` and `amqp` are reserved |
 | `adhar.batch.partition.grid-size` | env `ADHAR_BATCH_PARTITION_GRIDSIZE` (4) | Partitions per run; the platform passes 4 × workers |

@@ -98,6 +98,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `adhar:openapi-diff` fails on a change that breaks a major's clients, compared with a git
   revision or a released jar (openapi-diff), and `adhar:catalog` declares a `kind: API` entity
   per major and the Component's `providesApis` in `catalog-info.yaml`.
+- **adhar-kit-batch** — the ops commands and housekeeping (design 0025 Phase 3, KIT-3.x, D4, D13,
+  A3.5, A3.6). A run pod with `ADHAR_BATCH_COMMAND` (`abandon`, `recover`, `stop`, `status`,
+  `housekeeping`, `dlq-replay`) and `ADHAR_BATCH_EXECUTION_ID` carries out the command
+  (`ops.BatchCommandRunner`) instead of the business job, as `adhar batch abandon|recover|dlq
+  --replay` start it: an execution a live owner may hold is refused (exit 2 `owner-alive`) by the
+  runner's own `RecoveryPolicy`, a worker exits 0 `skipped worker`, and the summary carries
+  `command`, the execution acted on and an outcome with a reason. `ops.RepositoryHousekeeping`
+  deletes the job's metadata older than `adhar.batch.retention.days` (`ADHAR_BATCH_RETENTION_DAYS`),
+  keeping the newest `keep-last`, the newest restartable FAILED/STOPPED instance and any running
+  one, after every COMPLETED run (a failure is logged and counted as
+  `adhar.batch.housekeeping{result=failed}` and never changes the exit code) and on demand.
+  `ops.DeadLetterReplayer` re-processes only one execution's unreplayed dead letters through the
+  step's own processor and writer (`fault.DeadLetterReplayRegistry`, fed by `AdharSteps`), under
+  the original step scope, and the command exits 3 while any stay rejected. `RunOutcome` gains a
+  `Command`; `AdharSteps` and `AdharBatchRunner.Collaborators` take the new collaborators.
+  Because Spring Batch 6 records a `stop` as STOPPED at once while the owner still works to its
+  next chunk boundary, an ended execution whose lease is held counts as owned: `abandon`,
+  `recover` and `dlq-replay` refuse it (`owner-alive`) and a run of its identity is a duplicate
+  instead of a second writer, until the `RecoveryPolicy` finds the owner gone and releases the
+  lease.
 - **adhar-kit-parent** — manages `adhar-kit-maven-plugin` with `openapi-lint` (validate) and
   `openapi` (generate-sources) executions: a service declares the plugin and nothing else.
   JaCoCo no longer counts generated models (`**/api/v*/model/**`, `**/client/v*/model/**`).
@@ -147,6 +167,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **adhar-kit-batch** — an item a fault-tolerant step skipped in `write` lost its dead letter:
+  Spring Batch 6 finds the failing item by writing the chunk again item by item and marks that
+  item's transaction rollback-only, which rolled the dead letter back with it.
+  `DeadLetterSkipListener` (which now takes the steps' transaction manager) writes write-phase
+  dead letters in a transaction of their own.
 - **adhar-kit-batch** — a configured Quartz trigger's `parameters`
   (`adhar.batch.quartz.triggers.<job>[n].parameters.*`) no longer fail the start with
   "`<name>` is not a parameter of this job; it accepts []". The engine validates its triggers in

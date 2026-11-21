@@ -277,8 +277,11 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
             JobInstance instance = with().jobRepository().getJobInstance(job.getName(), parameters);
             JobExecution last = instance == null ? null : with().jobRepository().getLastJobExecution(instance);
             BatchStatus status = last == null ? null : last.getStatus();
-            if (status == null || ((status == BatchStatus.FAILED || status == BatchStatus.STOPPED)
-                    && runningSteps(last) == 0)) {
+            boolean ended = (status == BatchStatus.FAILED || status == BatchStatus.STOPPED) && runningSteps(last) == 0;
+            // Ended in the repository is not ended for its owner while it holds the lease: an ops stop
+            // is recorded STOPPED, steps included, at once, while the owner still works up to its next
+            // chunk boundary (design 0025 §5.9). A restart then would be a second writer.
+            if (status == null || (ended && with().lease().find(last.getId()).isEmpty())) {
                 return start(job, parameters);
             }
             switch (status) {
@@ -301,10 +304,16 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
                     // finish or a recovery's to take over.
                     Verdict verdict = with().recovery().decide(last, context);
                     log.info("Execution {} of this identity is {}{}: {} ({})", last.getId(), status,
-                            status.isRunning() ? "" : " with " + runningSteps(last) + " step(s) still running",
+                            status.isRunning() ? "" : ended ? " with its owner's lease still held"
+                                    : " with " + runningSteps(last) + " step(s) still running",
                             verdict.decision(), verdict.reason());
                     switch (verdict.decision()) {
                         case RECOVER -> {
+                            if (ended) {
+                                // Only the gone owner's lease was left: the execution restarts as it is.
+                                with().lease().release(last.getId());
+                                return start(job, parameters);
+                            }
                             JobExecution recovered = with().jobOperator().recover(last);
                             with().lease().release(last.getId());
                             with().events().recovered(recovered, verdict.reason());
