@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.runtime;
 
+import com.adhar.kit.batch.fault.ControlTotalsException;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.JobExecution;
 
@@ -14,9 +15,11 @@ import java.util.Map;
  *
  * @param kind      the outcome
  * @param reason    why, for {@link Kind#SKIPPED} ({@value #ALREADY_COMPLETE}, {@value #DUPLICATE},
- *                  {@code calendar}) and {@link Kind#INVALID} ({@code parameters},
+ *                  {@value #CALENDAR}) and {@link Kind#INVALID} ({@code parameters},
  *                  {@value #UNKNOWN_JOB}, {@value #INCREMENTER}, {@value #RESOURCELESS_REPOSITORY},
- *                  {@value #UNSUPPORTED}, {@code migration}, {@code business-date}); {@code null} otherwise
+ *                  {@value #UNSUPPORTED}, {@code migration}, {@code business-date}, {@value #CALENDAR_FILE},
+ *                  {@value #DEFINITION_CHANGED}); for {@link Kind#FAILED}, {@value #CONTROL_TOTALS} when a
+ *                  step's control totals did not balance; {@code null} otherwise
  * @param exitCode  the process exit code
  * @param execution the execution the run started or found, {@code null} when there is none
  * @param instanceId the JobInstance, when known without an execution of this run
@@ -35,6 +38,21 @@ public record RunOutcome(Kind kind, String reason, int exitCode, JobExecution ex
 
     /** Skipped: another pod is running the identity. */
     public static final String DUPLICATE = "duplicate";
+
+    /** Skipped: the business date is not a business day of the run's calendar (D5). */
+    public static final String CALENDAR = "calendar";
+
+    /** Invalid: the calendar the run names ({@code ADHAR_BATCH_CALENDAR}) is missing or invalid (D5). */
+    public static final String CALENDAR_FILE = "calendar-file";
+
+    /**
+     * Invalid: a restart would resume a job that no longer has a step the identity's executions
+     * ran, a step renamed or removed by a new image (the version-safe restart guard).
+     */
+    public static final String DEFINITION_CHANGED = "definition-changed";
+
+    /** Failed (exit 3): a step's control totals did not balance ({@link ControlTotalsException}). */
+    public static final String CONTROL_TOTALS = "control-totals";
 
     /** Invalid: no job of that name. */
     public static final String UNKNOWN_JOB = "unknown-job";
@@ -149,7 +167,8 @@ public record RunOutcome(Kind kind, String reason, int exitCode, JobExecution ex
 
     /**
      * @param execution a finished execution
-     * @return its outcome and {@link ExitCodes#of(JobExecution) exit code}
+     * @return its outcome and {@link ExitCodes#of(JobExecution) exit code}; a failure caused by
+     *         control totals carries the reason {@value #CONTROL_TOTALS}
      */
     public static RunOutcome of(JobExecution execution) {
         BatchStatus status = execution.getStatus();
@@ -160,7 +179,9 @@ public record RunOutcome(Kind kind, String reason, int exitCode, JobExecution ex
             case ABANDONED -> Kind.ABANDONED;
             default -> Kind.UNKNOWN;
         };
-        return new RunOutcome(kind, null, ExitCodes.of(execution), execution, null,
+        String reason = status == BatchStatus.FAILED && ControlTotalsException.isCause(execution)
+                ? CONTROL_TOTALS : null;
+        return new RunOutcome(kind, reason, ExitCodes.of(execution), execution, null,
                 execution.getExitStatus().getExitDescription());
     }
 

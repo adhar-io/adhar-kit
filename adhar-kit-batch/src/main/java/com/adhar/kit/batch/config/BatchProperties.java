@@ -38,6 +38,10 @@ import java.util.regex.Pattern;
  *       timeout: 90s                # graceful stop of running jobs on shutdown
  *     exit:
  *       already-complete: success   # success (exit 0) | fail (exit 3)
+ *     calendar:                     # D5: the business calendar file a scheduled, dependency or backfill run
+ *                                   # is skipped by (ADHAR_BATCH_CALENDAR, set by the platform)
+ *     restart:
+ *       definition-check: refuse    # refuse (exit 2) | warn: a restart whose job no longer has a step it ran
  *     chunk:
  *       size: 100                   # AdharSteps.chunk(name)
  *     page:
@@ -135,6 +139,16 @@ public class BatchProperties {
 
     private final Exit exit = new Exit();
 
+    /**
+     * Kubernetes mode: the business calendar (design 0025 D5), a {@code calendar.yaml} the
+     * platform mounts and names through {@code ADHAR_BATCH_CALENDAR}. A run triggered by the
+     * schedule, a dependency or a backfill whose business date is not a business day exits 0,
+     * skipped; a calendar that is missing or invalid exits 2. Unset, every day is a business day.
+     */
+    private String calendar;
+
+    private final Restart restart = new Restart();
+
     private final DeadLetter deadLetter = new DeadLetter();
 
     private final Retention retention = new Retention();
@@ -205,6 +219,18 @@ public class BatchProperties {
 
     public Exit getExit() {
         return exit;
+    }
+
+    public String getCalendar() {
+        return calendar;
+    }
+
+    public void setCalendar(String calendar) {
+        this.calendar = calendar;
+    }
+
+    public Restart getRestart() {
+        return restart;
     }
 
     public DeadLetter getDeadLetter() {
@@ -474,6 +500,39 @@ public class BatchProperties {
             SUCCESS,
             /** Exit 3: a second run of a completed identity is a mistake worth a failed Job. */
             FAIL
+        }
+    }
+
+    /**
+     * Kubernetes mode: how a restart of a FAILED or STOPPED execution is checked against the job
+     * it would resume.
+     */
+    public static class Restart {
+
+        /**
+         * What a restart does when the job no longer has a step the identity's executions ran (a
+         * step renamed or removed by a new image): {@code refuse} exits 2 without starting, so the
+         * work of the old step is neither redone under the new name nor skipped; {@code warn} logs
+         * and restarts, which is Spring Batch's own behaviour.
+         */
+        private DefinitionCheck definitionCheck = DefinitionCheck.REFUSE;
+
+        public DefinitionCheck getDefinitionCheck() {
+            return definitionCheck;
+        }
+
+        public void setDefinitionCheck(DefinitionCheck definitionCheck) {
+            this.definitionCheck = definitionCheck;
+        }
+
+        /**
+         * The restart guard's verdict on a changed job.
+         */
+        public enum DefinitionCheck {
+            /** Exit 2 ({@code definition-changed}): a person decides. */
+            REFUSE,
+            /** Log a warning and restart as Spring Batch would. */
+            WARN
         }
     }
 

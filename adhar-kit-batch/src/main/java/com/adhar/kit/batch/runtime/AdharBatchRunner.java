@@ -1,5 +1,8 @@
 package com.adhar.kit.batch.runtime;
 
+import com.adhar.kit.batch.calendar.BusinessCalendar;
+import com.adhar.kit.batch.calendar.BusinessCalendarParser;
+import com.adhar.kit.batch.calendar.BusinessCalendarParser.InvalidCalendarException;
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.event.BatchRunEventPublisher;
 import com.adhar.kit.batch.listener.BatchRunObserver;
@@ -36,6 +39,8 @@ import org.springframework.core.Ordered;
 import org.springframework.util.function.SingletonSupplier;
 
 import java.math.BigDecimal;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -45,6 +50,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -64,9 +70,12 @@ import java.util.function.Supplier;
  *         job (a worker exits 0 skipped worker); no parameters are resolved
  *         a reserved distribution or transport, or a worker without remote partitioning: exit 2 (unsupported)
  * params  ADHAR_BATCH_PARAMS &gt; schedule &gt; defaults, validated  else exit 2 (parameters, business-date)
+ * calendar adhar.batch.calendar (ADHAR_BATCH_CALENDAR) on a schedule, dependency or backfill run: a business
+ *         date that is not a business day exits 0 skipped calendar; a missing or invalid file exit 2 calendar-file
  * worker  role worker (or indexed above 0): serve the identity's partitions (PartitionConsumer), start nothing
  * last execution of the identity:
  *   none, FAILED, STOPPED  start (a restart when the instance exists); with a step still running, as STARTED
+ *                          a restart whose job lost a step the identity ran: exit 2 definition-changed (RestartGuard)
  *   COMPLETED              exit 0 skipped already-complete (or 3: adhar.batch.exit.already-complete=fail)
  *   ABANDONED              exit 6
  *   STARTING/STARTED/STOPPING  RecoveryPolicy: recover then start | wait for a terminating owner | exit 0 skipped duplicate
@@ -101,6 +110,10 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
     public static final String EXECUTION_ID = "ADHAR_BATCH_EXECUTION_ID";
     /** Skipped: an ops command on a worker, which leaves it to the manager. */
     public static final String WORKER = "worker";
+
+    /** The triggers a business calendar applies to (D5): a person's run, a restart or a smoke run is never skipped. */
+    static final Set<RunTrigger> CALENDAR_TRIGGERS = Set.of(RunTrigger.SCHEDULE, RunTrigger.DEPENDENCY,
+            RunTrigger.BACKFILL);
 
     /** How often a run waiting for a terminating owner looks again. */
     static final Duration WAIT_POLL = Duration.ofSeconds(5);
@@ -216,6 +229,12 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
                 context.scheduledTime(), context.zone());
         attempt.businessDate = resolved.businessDate().or(context::businessDate);
         JobParameters parameters = withProvenance(resolved.parameters(), context);
+        RunOutcome holiday = calendar(job, context, attempt.businessDate, parameters);
+        if (holiday != null) {
+            // Before the worker branch: a worker would otherwise wait for partitions the skipped
+            // manager never hands out.
+            return holiday;
+        }
         if (context.role() == BatchRole.WORKER) {
             // A worker starts nothing: it serves the partitions the manager of the same identity
             // hands out, and the manager's execution decides the run (design 0025 §5.10).
@@ -245,6 +264,60 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
             log.warn("Housekeeping of job [{}] failed; the run's outcome stands: {}: {}", job.getName(),
                     ex.getClass().getName(), ex.getMessage());
         }
+    }
+
+    /**
+     * D5: a run the calendar applies to whose business date is not a business day has nothing to
+     * do. The business date is judged as it is, a date: the calendar's {@code timeZone} serves the
+     * engines that turn instants into dates (Quartz), and the runner's date already is one.
+     *
+     * @return the skip, or the refusal of an unusable calendar; {@code null} to run
+     */
+    private RunOutcome calendar(Job job, RunContext context, Optional<LocalDate> businessDate,
+                                JobParameters parameters) {
+        String file = properties.getCalendar();
+        if (file == null || file.isBlank() || !CALENDAR_TRIGGERS.contains(context.trigger())) {
+            return null;
+        }
+        BusinessCalendar calendar;
+        try {
+            calendar = BusinessCalendarParser.parse(Path.of(file.strip()));
+        } catch (InvalidCalendarException | InvalidPathException ex) {
+            return RunOutcome.invalid(RunOutcome.CALENDAR_FILE, ex.getMessage()
+                    + ": the platform mounts the BatchJob's schedule.calendar at ADHAR_BATCH_CALENDAR");
+        }
+        if (businessDate.isEmpty()) {
+            return RunOutcome.invalid(ParameterValidationException.BUSINESS_DATE, "Job [" + job.getName()
+                    + "] runs on calendar [" + calendar.name() + "] but this " + context.trigger().label()
+                    + " run has no business date to judge: declare a DATE parameter with source SCHEDULE, or pass "
+                    + "businessDate");
+        }
+        LocalDate date = businessDate.get();
+        if (calendar.isBusinessDay(date)) {
+            return null;
+        }
+        return skipped(RunOutcome.CALENDAR, ExitCodes.COMPLETED, null, null, parameters, date + " ("
+                + date.getDayOfWeek() + ") is not a business day of calendar [" + calendar.name() + "]");
+    }
+
+    /**
+     * The version-safe restart guard: a restart must not resume a job that lost a step the
+     * identity ran.
+     *
+     * @return the refusal, exit 2 {@code definition-changed}; {@code null} to restart
+     */
+    private RunOutcome changedDefinition(Job job, JobInstance instance, RunContext context) {
+        Optional<RestartGuard.Change> change = new RestartGuard(with().jobRepository())
+                .check(job, instance, context.imageDigest());
+        if (change.isEmpty()) {
+            return null;
+        }
+        if (properties.getRestart().getDefinitionCheck() == BatchProperties.Restart.DefinitionCheck.WARN) {
+            log.warn("{}. Restarting anyway (adhar.batch.restart.definition-check=warn)", change.get().message());
+            return null;
+        }
+        return new RunOutcome(RunOutcome.Kind.INVALID, RunOutcome.DEFINITION_CHANGED, ExitCodes.INVALID_REQUEST,
+                null, instance.getInstanceId(), change.get().message());
     }
 
     /**
@@ -281,8 +354,11 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
             // Ended in the repository is not ended for its owner while it holds the lease: an ops stop
             // is recorded STOPPED, steps included, at once, while the owner still works up to its next
             // chunk boundary (design 0025 §5.9). A restart then would be a second writer.
-            if (status == null || (ended && with().lease().find(last.getId()).isEmpty())) {
+            if (status == null) {
                 return start(job, parameters);
+            }
+            if (ended && with().lease().find(last.getId()).isEmpty()) {
+                return restart(job, parameters, instance, context, () -> { });
             }
             switch (status) {
                 case COMPLETED -> {
@@ -311,13 +387,14 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
                         case RECOVER -> {
                             if (ended) {
                                 // Only the gone owner's lease was left: the execution restarts as it is.
-                                with().lease().release(last.getId());
-                                return start(job, parameters);
+                                return restart(job, parameters, instance, context,
+                                        () -> with().lease().release(last.getId()));
                             }
-                            JobExecution recovered = with().jobOperator().recover(last);
-                            with().lease().release(last.getId());
-                            with().events().recovered(recovered, verdict.reason());
-                            return start(job, parameters);
+                            return restart(job, parameters, instance, context, () -> {
+                                JobExecution recovered = with().jobOperator().recover(last);
+                                with().lease().release(last.getId());
+                                with().events().recovered(recovered, verdict.reason());
+                            });
                         }
                         case WAIT -> {
                             waitingSince = waitingSince == null ? clock.instant() : waitingSince;
@@ -341,6 +418,20 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
                 }
             }
         }
+    }
+
+    /**
+     * A restart of the instance: refused before anything changes when the job lost a step the
+     * identity ran, otherwise {@code prepare} (recovery, the lease) and the start.
+     */
+    private RunOutcome restart(Job job, JobParameters parameters, JobInstance instance, RunContext context,
+                               Runnable prepare) {
+        RunOutcome refused = changedDefinition(job, instance, context);
+        if (refused != null) {
+            return refused;
+        }
+        prepare.run();
+        return start(job, parameters);
     }
 
     private static long runningSteps(JobExecution execution) {

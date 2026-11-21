@@ -48,6 +48,7 @@ public final class AdharChunkStepBuilder<I, O> {
     private final DeadLetterSkipListener deadLetters;
     private final DeadLetterReplayRegistry replays;
     private FaultTolerance faultTolerance = FaultTolerance.none();
+    private ControlTotals controlTotals;
     private ItemProcessor<? super I, ? extends O> processor;
     private ItemWriter<? super O> writer;
 
@@ -129,6 +130,21 @@ public final class AdharChunkStepBuilder<I, O> {
     }
 
     /**
+     * Checks the step's counts when it ends (design 0025 §5.4): every item read accounted for, and
+     * the counts the job expects. A mismatch fails the step with a
+     * {@link com.adhar.kit.batch.fault.ControlTotalsException}, which the Kubernetes runner exits 3
+     * for, with the summary reason {@code control-totals}.
+     *
+     * @param controlTotals what to check, for example {@code ControlTotals.balanced()}
+     * @return this builder
+     */
+    public AdharChunkStepBuilder<I, O> controlTotals(ControlTotals controlTotals) {
+        Assert.notNull(controlTotals, "controlTotals must not be null");
+        this.controlTotals = controlTotals;
+        return this;
+    }
+
+    /**
      * Processes the items of a chunk concurrently (a multi-threaded step). Restart then cannot
      * resume inside a chunk from a reader's saved position unless the reader is thread-safe and
      * its state is not saved; prefer local partitioning for restartable parallelism.
@@ -184,9 +200,10 @@ public final class AdharChunkStepBuilder<I, O> {
     }
 
     /**
-     * @return the step, with the fault tolerance applied, the kit's listeners attached and, when
-     *         the fault tolerance asks for it, skipped items dead-lettered and its processor and
-     *         writer registered for the {@code dlq-replay} ops command
+     * @return the step, with the fault tolerance applied, the kit's listeners attached, its
+     *         control totals checked when it ends and, when the fault tolerance asks for it,
+     *         skipped items dead-lettered and its processor and writer registered for the
+     *         {@code dlq-replay} ops command
      * @throws IllegalStateException when the step asks for dead letters and there is no sink (no
      *                               DataSource) although {@code adhar.batch.dead-letter.enabled}
      */
@@ -195,6 +212,13 @@ public final class AdharChunkStepBuilder<I, O> {
         faultTolerance.applyTo(delegate, retryDefaults);
         ChunkOrientedStep<I, O> step = delegate.build();
         listeners.attach(step);
+        if (controlTotals != null && controlTotals.checksAnything()) {
+            // Registered last, so its afterStep runs first (Spring Batch calls them in reverse) and
+            // the kit's own listeners already see the step FAILED when its totals do not balance.
+            ControlTotalsListener totals = new ControlTotalsListener(controlTotals);
+            step.registerItemStream(totals);
+            step.registerStepExecutionListener(totals);
+        }
         if (faultTolerance.isDeadLetter()) {
             if (deadLetters != null) {
                 step.registerSkipListener((SkipListener) deadLetters);
