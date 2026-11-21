@@ -7,6 +7,7 @@ import com.adhar.kit.batch.annotation.ParamType;
 import com.adhar.kit.batch.fault.NonRetryableBatchException;
 import com.adhar.kit.batch.listener.BatchRunObserver;
 import com.adhar.kit.batch.step.AdharSteps;
+import com.adhar.kit.batch.step.ControlTotals;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.builder.JobBuilder;
@@ -33,6 +34,8 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li>{@value #SLOW_CHUNK_JOB}: 50 items in chunks of 5, each chunk taking {@link #CHUNK_MILLIS}:
  *       long enough to be stopped at a chunk boundary.</li>
  *   <li>{@value #INCREMENTED_JOB}: carries an incrementer it is not allowed.</li>
+ *   <li>{@value #TOTALS_JOB}: reads 20 items and checks its control totals: balanced, and read
+ *       equal to its non-identifying {@code expected} parameter.</li>
  * </ul>
  */
 @Configuration(proxyBeanMethods = false)
@@ -41,6 +44,7 @@ public class RunnerJobs {
     public static final String REPORT_JOB = "reportJob";
     public static final String SLOW_CHUNK_JOB = "slowChunkJob";
     public static final String INCREMENTED_JOB = "incrementedJob";
+    public static final String TOTALS_JOB = "totalsJob";
 
     /** {@code ""}, {@code retryable} or {@code fatal}. */
     public static final AtomicReference<String> FAILURE = new AtomicReference<>("");
@@ -81,6 +85,19 @@ public class RunnerJobs {
     Job incrementedJob(JobRepository jobRepository, AdharSteps steps) {
         return new JobBuilder(INCREMENTED_JOB, jobRepository).incrementer(new RunIdIncrementer())
                 .start(steps.tasklet("noop", (contribution, context) -> RepeatStatus.FINISHED)).build();
+    }
+
+    @Bean
+    @AdharBatchJob(parameters = {@JobParam(name = "run", required = true),
+            @JobParam(name = "expected", type = ParamType.LONG, identifying = false, required = true)})
+    Job totalsJob(JobRepository jobRepository, AdharSteps steps) {
+        var step = steps.<Long, Long>chunk("totalsStep", 5)
+                .reader(new CountingReader(20))
+                .writer(chunk -> { })
+                .controlTotals(ControlTotals.balanced()
+                        .expectRead(execution -> execution.getJobParameters().getLong("expected")))
+                .build();
+        return new JobBuilder(TOTALS_JOB, jobRepository).start(step).build();
     }
 
     @Bean

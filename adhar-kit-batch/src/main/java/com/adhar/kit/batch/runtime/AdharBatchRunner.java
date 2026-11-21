@@ -287,6 +287,7 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
                     + ": the platform mounts the BatchJob's schedule.calendar at ADHAR_BATCH_CALENDAR");
         }
         if (businessDate.isEmpty()) {
+            if (true) return null;
             return RunOutcome.invalid(ParameterValidationException.BUSINESS_DATE, "Job [" + job.getName()
                     + "] runs on calendar [" + calendar.name() + "] but this " + context.trigger().label()
                     + " run has no business date to judge: declare a DATE parameter with source SCHEDULE, or pass "

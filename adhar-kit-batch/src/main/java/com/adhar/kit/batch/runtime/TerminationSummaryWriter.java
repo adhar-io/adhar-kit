@@ -42,7 +42,8 @@ import java.util.StringJoiner;
  * {@code reason}, and its {@code executionId} and {@code status} are those of the execution it
  * acted on, with no item counts: those belong to the business run.</p>
  *
- * <p>{@code reason} is present for {@code skipped} and {@code invalid}; {@code instanceId},
+ * <p>{@code reason} is present for {@code skipped} and {@code invalid}, and for a {@code failed}
+ * run whose control totals did not balance ({@code control-totals}); {@code instanceId},
  * {@code executionId}, {@code status} and the counts are absent when there is no execution. The
  * kubelet keeps at most 4096 bytes of a termination message, so the summary is held to
  * {@value #MAX_BYTES} bytes: step detail goes first ({@code "stepsTruncated":true}), then the end

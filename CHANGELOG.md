@@ -118,6 +118,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `recover` and `dlq-replay` refuse it (`owner-alive`) and a run of its identity is a duplicate
   instead of a second writer, until the `RecoveryPolicy` finds the owner gone and releases the
   lease.
+- **adhar-kit-batch** — the runner's Phase 3 guards (design 0025 §15, D5, D13, F16). Business
+  calendars: with `ADHAR_BATCH_CALENDAR` (`adhar.batch.calendar`) a `schedule`, `dependency` or
+  `backfill` run whose business date is not a business day exits 0 `skipped` `calendar`, a missing
+  or invalid calendar exits 2 `calendar-file`, through the one D5 parser the Quartz engine uses.
+  Control totals: `AdharChunkStepBuilder.controlTotals(ControlTotals)` checks, when the step ends,
+  that every item read was written, filtered or skipped and that the counts equal what the job
+  expects, on the totals of the whole identity (carried in the step's ExecutionContext with each
+  commit); a mismatch is `ControlTotalsException`, exit 3, reason `control-totals`. The
+  version-safe restart guard (`runtime.RestartGuard`): a restart, or a recovery, of an identity
+  whose executions ran a step the job no longer has exits 2 `definition-changed` and changes
+  nothing (`adhar.batch.restart.definition-check=warn` restarts anyway).
 - **adhar-kit-parent** — manages `adhar-kit-maven-plugin` with `openapi-lint` (validate) and
   `openapi` (generate-sources) executions: a service declares the plugin and nothing else.
   JaCoCo no longer counts generated models (`**/api/v*/model/**`, `**/client/v*/model/**`).

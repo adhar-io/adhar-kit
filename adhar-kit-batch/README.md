@@ -13,7 +13,7 @@ Design: `adhar/docs/design/0025-batch-platform.md` (§5). The platform runs a ba
 | Declaring a job | `@AdharBatchJob`, `@JobParam`, `ParamType`, `ParamSource`; `JobParameterSpec`(`Registry`) |
 | The Kubernetes runner | `AdharBatchApplication`, `AdharBatchRunner`, `RunContext`, exit codes, termination summary |
 | Restart safety | JDBC JobRepository in schema `batch` (Flyway), `ExecutionLease`, `RecoveryPolicy`, `GracefulStopLifecycle` |
-| Steps | `AdharSteps` → `AdharChunkStepBuilder`; `FaultTolerance` (retry and skip presets, `deadLetter()`) |
+| Steps | `AdharSteps` → `AdharChunkStepBuilder`; `FaultTolerance` (retry and skip presets, `deadLetter()`); `ControlTotals` |
 | I/O | `KeysetPagingItemReaderBuilder`, `PostgresUpsertItemWriterBuilder`, `JsonLines{Reader,Writer}Builder`, `S3ItemReaderBuilder`, `S3ItemWriterBuilder`, plus the CSV/JSON/JDBC/JPA builders |
 | Partitioning (one pod) | `LocalPartitioning`, `SqlKeyRangePartitioner`, `ObjectPrefixPartitioner` |
 | Remote partitioning (a manager and workers) | `RemotePartitioning`, `@ConditionalOnBatchRole`, `PartitionWorker`, `JdbcPartitionTransport`, `StaleRequestGuard`, `WorkerStopHandler`, `PartitionPlanSplitter`, `WorkerLivenessWatch` |
@@ -76,6 +76,8 @@ class ImportJobConfiguration {
             .faultTolerance(FaultTolerance.transientInfrastructure()
                 .skip(ValidationException.class, 100)
                 .deadLetter())                                       // batch.ADHAR_BATCH_DEAD_LETTER
+            .controlTotals(ControlTotals.balanced()                  // every record read is accounted for
+                .expectRead(step -> step.getExecutionContext().getLong("trailer.records")))
             .build();
     }
 
@@ -120,10 +122,10 @@ timeout, starts the named job once and exits.
 
 | Exit | Meaning |
 |---|---|
-| 0 | Completed, or skipped: already complete, a duplicate run still alive |
+| 0 | Completed, or skipped: already complete, a duplicate run still alive, not a business day (`calendar`) |
 | 1 | The JVM or context failed before the run (retried) |
-| 2 | Invalid request: parameters, unknown job, incrementer, in-memory repository, migration, business date, unsupported, a role, distribution or partition setting that does not bind (not retried) |
-| 3 | Failed, not retryable: `NonRetryableBatchException`, skip limit exceeded (not retried) |
+| 2 | Invalid request: parameters, unknown job, incrementer, in-memory repository, migration, business date, unsupported, a role, distribution or partition setting that does not bind, a missing or invalid calendar (`calendar-file`), a restart of a job that lost a step (`definition-changed`) (not retried) |
+| 3 | Failed, not retryable: `NonRetryableBatchException`, skip limit exceeded, control totals (`control-totals`) (not retried) |
 | 4 | Stopped on request |
 | 5 | Failed, retryable |
 | 6 | Abandoned: a new identity is needed |
@@ -143,6 +145,39 @@ the newest `keep-last`, always the newest FAILED or STOPPED one of a restartable
 restart resumes it), and any instance still running. Dead letters stay. A housekeeping that fails
 is logged and counted (`adhar.batch.housekeeping{result=failed}`) and never changes the run's exit
 code.
+
+### Calendars, control totals and the restart guard
+
+**Business calendar (D5).** With a calendar the platform mounts it and sets
+`ADHAR_BATCH_CALENDAR` (`adhar.batch.calendar`) to its path, a `calendar.yaml` read by the same
+`BusinessCalendarParser` the Quartz engine uses. A run triggered by the `schedule`, a `dependency`
+or a `backfill` whose business date is not a business day starts nothing and exits 0, `skipped`
+with reason `calendar`; a person's run (`manual`, `restart`, `smoke`, ...) is never skipped and
+does not read the file. A calendar that is missing or invalid exits 2 `calendar-file`, and a
+calendar run with no business date at all exits 2 `business-date` rather than judge today. The
+business date is judged as the date it is: the calendar's `timeZone` matters to the Quartz engine,
+which turns instants into dates.
+
+**Control totals.** `AdharChunkStepBuilder.controlTotals(ControlTotals)` checks the counts the
+summary reports when the step ends: `balanced()` (every item read is written, filtered or skipped
+in processing or writing) and `expect(Count, step -> n)` / `expectRead` / `expectWritten` for counts
+the job knows, such as a trailer's record count. The totals are the whole identity's: what each
+chunk commit counted is carried in the step's ExecutionContext, so a restart is checked on
+everything its instance did, and a rolled-back chunk is never counted. A mismatch fails the step
+with `ControlTotalsException`: exit 3, outcome `failed`, reason `control-totals`, the mismatch in
+`exitDescription`. It also catches what Spring Batch 6 alone does not: a non-skippable write
+failure during a chunk's item-by-item scan leaves the reader's saved position past the whole
+chunk, so the restart never reads the chunk's remaining items and completes without them.
+
+**Version-safe restart.** Before a FAILED or STOPPED execution is restarted (or a dead owner's is
+recovered), every step the identity's executions ran must still be a step of the job, nested flows
+included; partition executions (`<step>:<partition>`) are left out. A new image that renamed or
+removed one would otherwise resume into the wrong steps: Spring Batch restarts by step name, so the
+renamed step starts from scratch and the removed one is never finished. The runner then exits 2
+`definition-changed`, naming the missing steps and both image digests, and changes nothing.
+Restart on the image that ran it, abandon the execution and run a new identity, or set
+`adhar.batch.restart.definition-check=warn` to log and restart anyway. A job whose steps cannot all
+be listed (a custom `Job`) is not checked.
 
 ### Ops commands
 
@@ -325,6 +360,8 @@ build when the `BatchJob` manifest's parameters differ from `@AdharBatchJob`, it
 | `adhar.batch.recovery.heartbeat-interval` / `.stale-after` / `.max-wait` | `30s` / `2m` / `10m` | Execution lease |
 | `adhar.batch.shutdown.timeout` | `90s` | Graceful stop; must be below the pod's grace period |
 | `adhar.batch.exit.already-complete` | `success` | `success` (exit 0) \| `fail` (exit 3) |
+| `adhar.batch.calendar` | env `ADHAR_BATCH_CALENDAR` (none: every day is a business day) | D5: the calendar a `schedule`, `dependency` or `backfill` run is skipped by |
+| `adhar.batch.restart.definition-check` | `refuse` | `refuse` (exit 2 `definition-changed`) \| `warn`: a restart of a job that no longer has a step its identity ran |
 | `adhar.batch.chunk.size` / `adhar.batch.page.size` | `100` / `500` | Builder defaults |
 | `adhar.batch.retry.max-attempts` / `.initial-backoff` / `.max-backoff` | `3` / `1s` / `30s` | Retry presets |
 | `adhar.batch.dead-letter.enabled` | `true` | JDBC dead-letter table (and the `dlq-replay` ops command) |

@@ -6,6 +6,7 @@ import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.job.JobInstance;
 import org.springframework.batch.core.job.flow.Flow;
 import org.springframework.batch.core.job.flow.FlowHolder;
+import org.springframework.batch.core.job.flow.FlowJob;
 import org.springframework.batch.core.job.flow.FlowStep;
 import org.springframework.batch.core.job.flow.State;
 import org.springframework.batch.core.repository.JobRepository;
@@ -14,6 +15,7 @@ import org.springframework.batch.core.step.Step;
 import org.springframework.batch.core.step.StepExecution;
 import org.springframework.batch.core.step.StepHolder;
 import org.springframework.beans.DirectFieldAccessor;
+import org.springframework.beans.factory.InitializingBean;
 
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -98,6 +100,11 @@ public final class RestartGuard {
         }
         Set<String> names = new LinkedHashSet<>();
         try {
+            // FlowJob lists the steps of its nested flows only when they were initialised before
+            // its first listing, and caches what it found: its flow is walked here as well.
+            if (job instanceof FlowJob && !(field(job, "flow") instanceof Flow flow && flow(flow, names))) {
+                return Optional.empty();
+            }
             for (String name : locator.getStepNames()) {
                 names.add(name);
                 if (!nested(locator.getStep(name), names)) {
@@ -122,16 +129,35 @@ public final class RestartGuard {
             }
         }
         if (step instanceof FlowStep) {
-            // FlowStep lists nothing and has no getter: its flow is its one field of that type.
-            Object flow = new DirectFieldAccessor(step).getPropertyValue("flow");
-            return flow instanceof Flow nestedFlow && flow(nestedFlow, names);
+            // FlowStep lists nothing and has no getter for its flow.
+            return field(step, "flow") instanceof Flow nestedFlow && flow(nestedFlow, names);
         }
         return true;
     }
 
+    private static Object field(Object owner, String name) {
+        return new DirectFieldAccessor(owner).getPropertyValue(name);
+    }
+
     private static boolean flow(Flow flow, Set<String> names) {
+        if (flow instanceof InitializingBean lazy && flow.getStates().isEmpty()) {
+            // A SimpleFlow builds its states on first use; a flow built inside a job bean is no
+            // bean itself, so nothing has asked yet. Building them is what its first start does.
+            try {
+                lazy.afterPropertiesSet();
+            } catch (Exception ex) {
+                throw new IllegalStateException("flow [" + flow.getName() + "] cannot be initialised", ex);
+            }
+        }
         for (State state : flow.getStates()) {
-            if (state instanceof StepHolder holder) {
+            if (state instanceof ListableStepLocator locator) {
+                for (String name : locator.getStepNames()) {
+                    names.add(name);
+                    if (!nested(locator.getStep(name), names)) {
+                        return false;
+                    }
+                }
+            } else if (state instanceof StepHolder holder) {
                 names.add(holder.getStep().getName());
                 if (!nested(holder.getStep(), names)) {
                     return false;
