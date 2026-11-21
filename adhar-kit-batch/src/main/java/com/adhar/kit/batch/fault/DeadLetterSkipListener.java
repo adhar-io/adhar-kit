@@ -10,6 +10,9 @@ import org.springframework.batch.core.scope.context.StepContext;
 import org.springframework.batch.core.scope.context.StepSynchronizationManager;
 import org.springframework.batch.core.step.StepExecution;
 
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.ClassUtils;
 
 import java.time.LocalDate;
@@ -20,6 +23,13 @@ import java.util.function.Function;
  * Sets every item a step skips aside in a {@link DeadLetterSink}: the item as JSON, the
  * exception's class and message, the step, the execution and the business date. Registered on a
  * step that declares {@link FaultTolerance#deadLetter()}.
+ *
+ * <p>A dead letter commits with the chunk that skipped it, except one skipped in {@code write}:
+ * Spring Batch 6 finds a failing item by writing the chunk again item by item, each in a
+ * transaction it then marks rollback-only, so a dead letter written there would be rolled back
+ * with the item it keeps. With a transaction manager, write-phase dead letters therefore commit in
+ * a transaction of their own (2026-11-21, found by the dlq-replay tests: the item was skipped and
+ * the dead letter was gone).</p>
  *
  * <p>It also counts the step's dead letters, in the step's execution context
  * ({@value #COUNT_KEY}, read by the termination summary) and in the
@@ -41,17 +51,28 @@ public class DeadLetterSkipListener implements SkipListener<Object, Object> {
     private final DeadLetterSink sink;
     private final Function<Object, String> serializer;
     private final BatchProgressMetrics metrics;
+    private final TransactionTemplate ownTransaction;
 
     /**
-     * @param sink       where the items go
-     * @param serializer the item as JSON; may return {@code null} or throw, the item is then kept
-     *                   by type only
-     * @param metrics    the kit's meters, may be {@code null}
+     * @param sink               where the items go
+     * @param serializer         the item as JSON; may return {@code null} or throw, the item is
+     *                           then kept by type only
+     * @param metrics            the kit's meters, may be {@code null}
+     * @param transactionManager the steps' transaction manager, in which a write-phase dead letter
+     *                           commits on its own; {@code null} writes it in the chunk's
+     *                           transaction (where Spring Batch's scan rolls it back)
      */
-    public DeadLetterSkipListener(DeadLetterSink sink, Function<Object, String> serializer, BatchProgressMetrics metrics) {
+    public DeadLetterSkipListener(DeadLetterSink sink, Function<Object, String> serializer, BatchProgressMetrics metrics,
+                                  PlatformTransactionManager transactionManager) {
         this.sink = sink;
         this.serializer = serializer;
         this.metrics = metrics;
+        if (transactionManager == null) {
+            this.ownTransaction = null;
+        } else {
+            this.ownTransaction = new TransactionTemplate(transactionManager);
+            this.ownTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        }
     }
 
     @Override
@@ -76,10 +97,15 @@ public class DeadLetterSkipListener implements SkipListener<Object, Object> {
         }
         StepExecution step = context.getStepExecution();
         String jobName = step.getJobExecution().getJobInstance().getJobName();
-        sink.write(new DeadLetterSink.Entry(step.getJobExecutionId(), jobName, step.getStepName(),
+        DeadLetterSink.Entry entry = new DeadLetterSink.Entry(step.getJobExecutionId(), jobName, step.getStepName(),
                 businessDate(step.getJobExecution().getJobParameters()), phase.label(),
                 item == null ? null : item.getClass().getName(), json(item),
-                error == null ? "unknown" : error.getClass().getName(), error == null ? null : error.getMessage()));
+                error == null ? "unknown" : error.getClass().getName(), error == null ? null : error.getMessage());
+        if (phase == SkipPhase.WRITE && ownTransaction != null) {
+            ownTransaction.executeWithoutResult(status -> sink.write(entry));
+        } else {
+            sink.write(entry);
+        }
         step.getExecutionContext().putLong(COUNT_KEY, step.getExecutionContext().getLong(COUNT_KEY, 0) + 1);
         if (metrics != null) {
             metrics.recordDeadLettered(jobName, step.getStepName(), 1);

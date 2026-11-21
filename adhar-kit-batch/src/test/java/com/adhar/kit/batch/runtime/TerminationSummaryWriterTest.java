@@ -23,6 +23,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 
@@ -77,6 +79,27 @@ class TerminationSummaryWriterTest {
     private static String render(RunOutcome outcome, RunContext context) {
         return TerminationSummaryWriter.render(outcome, context, context == null ? Optional.empty()
                 : context.businessDate(), START, END);
+    }
+
+    @Test
+    @DisplayName("an ops run names its command, the execution it acted on and its counts, with a reason and no items")
+    void opsCommand() {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        counts.put("replayed", 3L);
+        counts.put("rejected", 1L);
+        RunOutcome.Command command = RunOutcome.Command.on("dlq-replay", execution(BatchStatus.COMPLETED, 1))
+                .counting(counts);
+        String summary = render(RunOutcome.command(RunOutcome.Kind.FAILED, "rejected", 3, command,
+                "1 item(s) of execution 97 are still rejected"), context(RunTrigger.OPS));
+
+        assertThat(summary).isEqualTo("{\"v\":1,\"job\":\"importJob\",\"batchJob\":\"importer\",\"instanceId\":42,"
+                + "\"executionId\":97,\"status\":\"COMPLETED\",\"exitCode\":3,\"exitDescription\":\"1 item(s) of "
+                + "execution 97 are still rejected\",\"outcome\":\"failed\",\"reason\":\"rejected\",\"trigger\":\"ops\","
+                + "\"command\":\"dlq-replay\",\"replayed\":3,\"rejected\":1,\"businessDate\":\"2026-11-03\","
+                + "\"start\":\"2026-11-03T17:30:04Z\",\"end\":\"2026-11-03T17:43:36Z\",\"image\":\"" + DIGEST + "\"}");
+        String none = render(RunOutcome.command(RunOutcome.Kind.INVALID, "unknown-command", 2,
+                new RunOutcome.Command("explode", null, null, null, null), "not a command"), context(RunTrigger.OPS));
+        assertThat(none).doesNotContain("executionId", "instanceId", "\"status\"").contains("\"command\":\"explode\"");
     }
 
     @Test

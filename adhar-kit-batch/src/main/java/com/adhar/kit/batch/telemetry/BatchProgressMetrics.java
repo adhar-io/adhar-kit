@@ -30,7 +30,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@value #LAST_COMMIT} - gauge, epoch seconds of a step's last committed chunk, tagged
  *       {@code job} and {@code step}: a stuck step is a gauge that stops moving;</li>
  *   <li>{@value #DEAD_LETTERED} - counter of items a step dead-lettered, tagged {@code job} and
- *       {@code step}.</li>
+ *       {@code step};</li>
+ *   <li>{@value #HOUSEKEEPING} - counter of JobRepository housekeeping passes (design 0025 D4),
+ *       tagged {@code job} and {@code result} ({@code succeeded} or {@code failed}): a failing
+ *       housekeeping never fails its run, so this is where it shows;</li>
+ *   <li>{@value #HOUSEKEEPING_DELETED} - counter of the job instances housekeeping deleted, tagged
+ *       {@code job}.</li>
  * </ul>
  * <p>No business date or execution id is a tag: their cardinality is unbounded.</p>
  *
@@ -47,6 +52,12 @@ public class BatchProgressMetrics implements BatchRunObserver {
 
     /** Items dead-lettered by a step. */
     public static final String DEAD_LETTERED = "adhar.batch.items.dead.lettered";
+
+    /** JobRepository housekeeping passes. */
+    public static final String HOUSEKEEPING = "adhar.batch.housekeeping";
+
+    /** Job instances deleted by housekeeping. */
+    public static final String HOUSEKEEPING_DELETED = "adhar.batch.housekeeping.deleted";
 
     /** Job parameter naming what started a run (design 0025 §5.6). */
     static final String TRIGGER_PARAMETER = "adhar.trigger";
@@ -115,6 +126,26 @@ public class BatchProgressMetrics implements BatchRunObserver {
                 .tags("job", jobName, "step", stepName)
                 .register(registry)
                 .increment(items);
+    }
+
+    /**
+     * Counts one housekeeping pass of a job's JobRepository metadata.
+     *
+     * @param jobName   the job
+     * @param succeeded whether it ended without an error
+     * @param deleted   how many job instances it deleted
+     */
+    public void recordHousekeeping(String jobName, boolean succeeded, long deleted) {
+        Counter.builder(HOUSEKEEPING)
+                .description("JobRepository housekeeping passes")
+                .tags("job", jobName, "result", succeeded ? "succeeded" : "failed")
+                .register(registry)
+                .increment();
+        Counter.builder(HOUSEKEEPING_DELETED)
+                .description("Job instances deleted by JobRepository housekeeping")
+                .tags("job", jobName)
+                .register(registry)
+                .increment(deleted);
     }
 
     /**

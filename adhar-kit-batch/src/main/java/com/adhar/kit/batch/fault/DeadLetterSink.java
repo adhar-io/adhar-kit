@@ -8,7 +8,10 @@ import java.time.LocalDate;
  *
  * <p>The sink is called on the step's thread, inside the chunk's transaction: a JDBC sink on the
  * JobRepository's database commits a dead letter with the chunk that skipped it, and rolls it back
- * with a chunk that fails.</p>
+ * with a chunk that fails. An item skipped in {@code write} is the exception: Spring Batch rolls
+ * the transaction of the item it skips back, so {@link DeadLetterSkipListener} calls the sink in a
+ * transaction of its own for it. The {@code dlq-replay} ops command reads the rows back
+ * ({@code com.adhar.kit.batch.ops.DeadLetterReplayer}).</p>
  *
  * @author Adhar Platform Team
  * @since 0.1.0

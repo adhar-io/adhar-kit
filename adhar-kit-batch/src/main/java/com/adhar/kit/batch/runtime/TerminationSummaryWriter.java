@@ -37,6 +37,11 @@ import java.util.StringJoiner;
  *  "steps":[{"name":"importStep","status":"COMPLETED","read":120000,"written":119990,"skipped":10}]}
  * }</pre>
  *
+ * <p>An ops run ({@code ADHAR_BATCH_COMMAND}) adds {@code command} and what the command counted
+ * ({@code replayed}, {@code rejected}, {@code deleted}, {@code kept}), always carries a
+ * {@code reason}, and its {@code executionId} and {@code status} are those of the execution it
+ * acted on, with no item counts: those belong to the business run.</p>
+ *
  * <p>{@code reason} is present for {@code skipped} and {@code invalid}; {@code instanceId},
  * {@code executionId}, {@code status} and the counts are absent when there is no execution. The
  * kubelet keeps at most 4096 bytes of a termination message, so the summary is held to
@@ -141,10 +146,18 @@ public class TerminationSummaryWriter {
         if (instanceId != null) {
             json.number("instanceId", instanceId);
         }
+        RunOutcome.Command command = outcome.command();
         boolean counted = execution != null && outcome.kind() != RunOutcome.Kind.SKIPPED;
         if (counted) {
             json.number("executionId", execution.getId());
             json.text("status", execution.getStatus().name());
+        } else if (command != null && command.executionId() != null) {
+            // An ops run names the execution it acted on and that execution's status now; its
+            // items are the business run's, never counted again here.
+            json.number("executionId", command.executionId());
+            if (command.status() != null) {
+                json.text("status", command.status());
+            }
         }
         json.number("exitCode", outcome.exitCode());
         json.text("exitDescription", description);
@@ -153,6 +166,10 @@ public class TerminationSummaryWriter {
             json.text("reason", outcome.reason());
         }
         json.text("trigger", context != null ? context.trigger().label() : "");
+        if (command != null) {
+            json.text("command", command.verb());
+            command.counts().forEach(json::number);
+        }
         businessDate.ifPresent(date -> json.text("businessDate", date.toString()));
         List<StepExecution> steps = counted ? steps(execution) : List.of();
         if (counted) {

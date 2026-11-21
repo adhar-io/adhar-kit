@@ -80,7 +80,7 @@ class DeadLetterSinkTest {
     void noSink() {
         BatchProperties properties = new BatchProperties();
         AdharSteps steps = new AdharSteps(new ResourcelessJobRepository(), new ResourcelessTransactionManager(),
-                mock(BatchListenerAttacher.class), properties, null, null);
+                mock(BatchListenerAttacher.class), properties, null, null, null);
         FaultTolerance faultTolerance = FaultTolerance.none().skip(IllegalArgumentException.class, 1).deadLetter();
 
         assertThatThrownBy(() -> steps.<String, String>chunk("s").reader(new ListItemReader<>(List.of("a")))

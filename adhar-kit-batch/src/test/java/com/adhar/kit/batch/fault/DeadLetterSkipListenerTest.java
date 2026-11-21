@@ -140,6 +140,32 @@ class DeadLetterSkipListenerTest {
     }
 
     @Test
+    @DisplayName("an item skipped in write keeps its dead letter, although Spring Batch rolls the item's scan back")
+    void writeSkipKeepsItsDeadLetter() throws Exception {
+        List<String> written = new java.util.concurrent.CopyOnWriteArrayList<>();
+        var step = steps.<String, String>chunk("dlqWriteStep", 3).reader(new ListItemReader<>(List.of("a", "bad", "c")))
+                .writer(chunk -> {
+                    for (String item : chunk) {
+                        if (item.equals("bad")) {
+                            throw new IllegalArgumentException("refused " + item);
+                        }
+                    }
+                    written.addAll(chunk.getItems());
+                })
+                .faultTolerance(FaultTolerance.none().skip(IllegalArgumentException.class, 5).deadLetter()).build();
+        JobExecution execution = jobOperator.start(new JobBuilder("dlqWriteJob", jobRepository).start(step).build(),
+                new JobParametersBuilder().addString("run", UUID.randomUUID().toString()).toJobParameters());
+
+        assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(written).containsExactly("a", "c");
+        assertThat(jdbc.queryForList("SELECT PHASE, ITEM FROM ADHAR_BATCH_DEAD_LETTER WHERE JOB_EXECUTION_ID = ?",
+                execution.getId())).singleElement().satisfies(row -> {
+                    assertThat(row.get("PHASE")).isEqualTo("write");
+                    assertThat(row.get("ITEM")).isEqualTo("\"bad\"");
+                });
+    }
+
+    @Test
     @DisplayName("going over the skip limit fails the run with exit code 3: retrying the same data cannot help")
     void skipLimitIsNotRetryable() throws Exception {
         JobExecution execution = run("dlqLimitJob", new ListItemReader<>(List.of("a", "x", "y", "z")),

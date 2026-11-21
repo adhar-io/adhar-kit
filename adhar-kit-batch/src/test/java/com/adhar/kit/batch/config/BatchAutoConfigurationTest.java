@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.config;
 
+import com.adhar.kit.batch.fault.DeadLetterReplayRegistry;
 import com.adhar.kit.batch.listener.AdharChunkListener;
 import com.adhar.kit.batch.listener.AdharJobExecutionListener;
 import com.adhar.kit.batch.listener.AdharSkipListener;
@@ -10,6 +11,9 @@ import com.adhar.kit.batch.telemetry.BatchProgressMetrics;
 import com.adhar.kit.batch.telemetry.BatchTelemetryAutoConfiguration;
 import com.adhar.kit.batch.telemetry.ItemObservationTracingFilter;
 import com.adhar.kit.batch.operator.BatchOperator;
+import com.adhar.kit.batch.ops.DeadLetterReplayer;
+import com.adhar.kit.batch.ops.RepositoryHousekeeping;
+import com.adhar.kit.batch.runtime.AdharBatchRunner;
 import com.adhar.kit.batch.params.JobParameterSpecRegistry;
 import com.adhar.kit.batch.scheduler.BatchScheduler;
 import com.adhar.kit.batch.step.AdharSteps;
@@ -69,6 +73,37 @@ class BatchAutoConfigurationTest {
             assertThat(context).hasSingleBean(BatchMdc.class);
             assertThat(context).hasSingleBean(ItemObservationTracingFilter.class);
         });
+    }
+
+    @Test
+    @DisplayName("Kubernetes mode has the runner with its ops commands: housekeeping, the dead-letter replay and its routes")
+    void kubernetesModeHasTheOpsCommands() {
+        withJob.withPropertyValues("adhar.batch.mode=kubernetes", "adhar.batch.retention.days=90",
+                "adhar.batch.retention.keep-last=7").run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context).hasSingleBean(AdharBatchRunner.class);
+            assertThat(context).hasSingleBean(RepositoryHousekeeping.class);
+            assertThat(context).hasSingleBean(DeadLetterReplayer.class);
+            assertThat(context).hasSingleBean(DeadLetterReplayRegistry.class);
+            assertThat(context.getBean(AdharSteps.class)).extracting("replays")
+                    .isSameAs(context.getBean(DeadLetterReplayRegistry.class));
+            BatchProperties.Retention retention = context.getBean(BatchProperties.class).getRetention();
+            assertThat(retention.getDays()).isEqualTo(90);
+            assertThat(retention.getKeepLast()).isEqualTo(7);
+        });
+        withJob.withPropertyValues("adhar.batch.mode=kubernetes", "adhar.batch.dead-letter.enabled=false")
+                .run(context -> assertThat(context).hasNotFailed().doesNotHaveBean(DeadLetterReplayer.class)
+                        .hasSingleBean(AdharBatchRunner.class));
+        withJob.run(context -> assertThat(context).doesNotHaveBean(RepositoryHousekeeping.class));
+    }
+
+    @Test
+    @DisplayName("a retention of less than a day, or a negative keep-last, fails the startup naming the property")
+    void invalidRetentionFailsTheStartup() {
+        withJob.withPropertyValues("adhar.batch.retention.days=0").run(context -> assertThat(context).getFailure()
+                .hasStackTraceContaining("adhar.batch.retention.days must be at least 1"));
+        withJob.withPropertyValues("adhar.batch.retention.keep-last=-1").run(context -> assertThat(context)
+                .getFailure().hasStackTraceContaining("adhar.batch.retention.keep-last must not be negative"));
     }
 
     @Test

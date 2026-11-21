@@ -3,6 +3,7 @@ package com.adhar.kit.batch.config;
 import com.adhar.adharkit.logging.batch.BatchJobLogger;
 import com.adhar.kit.batch.BatchFacadeRegistrar;
 import com.adhar.kit.batch.event.BatchRunEventPublisher;
+import com.adhar.kit.batch.fault.DeadLetterReplayRegistry;
 import com.adhar.kit.batch.fault.DeadLetterSink;
 import com.adhar.kit.batch.fault.DeadLetterSkipListener;
 import com.adhar.kit.batch.fault.JdbcDeadLetterSink;
@@ -17,6 +18,9 @@ import com.adhar.kit.batch.lock.JdbcSchedulerLock;
 import com.adhar.kit.batch.lock.SchedulerLock;
 import com.adhar.kit.batch.telemetry.BatchProgressMetrics;
 import com.adhar.kit.batch.operator.BatchOperator;
+import com.adhar.kit.batch.ops.BatchCommandRunner;
+import com.adhar.kit.batch.ops.DeadLetterReplayer;
+import com.adhar.kit.batch.ops.RepositoryHousekeeping;
 import com.adhar.kit.batch.partition.WorkerStopHandler;
 import com.adhar.kit.batch.operator.JobResolver;
 import com.adhar.kit.batch.params.JobParameterSpecRegistry;
@@ -261,6 +265,16 @@ public class BatchAutoConfiguration {
     }
 
     /**
+     * @return the processors and writers of the steps that dead-letter, for the {@code dlq-replay}
+     *         ops command
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public DeadLetterReplayRegistry deadLetterReplayRegistry() {
+        return new DeadLetterReplayRegistry();
+    }
+
+    /**
      * @param jobRepository           the JobRepository
      * @param batchTransactionManager Spring Boot's dedicated batch transaction manager, if any
      * @param transactionManager      the application's transaction manager
@@ -268,6 +282,7 @@ public class BatchAutoConfiguration {
      * @param properties              {@code adhar.batch.*}
      * @param observationRegistry     the application's observation registry, if any
      * @param deadLetters             keeps skipped items, when there is a dead-letter table
+     * @param replays                 where dead-lettering steps register for replay
      * @return the step builder entry point
      */
     @Bean
@@ -278,13 +293,14 @@ public class BatchAutoConfiguration {
                                  ObjectProvider<PlatformTransactionManager> transactionManager,
                                  BatchListenerAttacher listeners, BatchProperties properties,
                                  ObjectProvider<ObservationRegistry> observationRegistry,
-                                 ObjectProvider<DeadLetterSkipListener> deadLetters) {
+                                 ObjectProvider<DeadLetterSkipListener> deadLetters,
+                                 ObjectProvider<DeadLetterReplayRegistry> replays) {
         // The JobRepository's transaction manager, chosen as Spring Boot chooses it, so business
         // writes and step progress commit together (INV-4).
         PlatformTransactionManager manager = batchTransactionManager.getIfAvailable(
                 () -> transactionManager.getIfAvailable(ResourcelessTransactionManager::new));
         return new AdharSteps(jobRepository, manager, listeners, properties, observationRegistry.getIfAvailable(),
-                deadLetters.getIfAvailable());
+                deadLetters.getIfAvailable(), replays.getIfAvailable());
     }
 
     /**
@@ -343,8 +359,13 @@ public class BatchAutoConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        DeadLetterSkipListener deadLetterSkipListener(DeadLetterSink sink, ObjectProvider<BatchProgressMetrics> metrics) {
-            return new DeadLetterSkipListener(sink, DeadLetterSkipListener.defaultSerializer(), metrics.getIfAvailable());
+        DeadLetterSkipListener deadLetterSkipListener(DeadLetterSink sink, ObjectProvider<BatchProgressMetrics> metrics,
+                                                      @BatchTransactionManager ObjectProvider<PlatformTransactionManager> batchTransactionManager,
+                                                      ObjectProvider<PlatformTransactionManager> transactionManager) {
+            // The steps' transaction manager (as adharSteps chooses it): a write-phase dead letter
+            // commits in a transaction of its own on it.
+            return new DeadLetterSkipListener(sink, DeadLetterSkipListener.defaultSerializer(), metrics.getIfAvailable(),
+                    batchTransactionManager.getIfAvailable(transactionManager::getIfAvailable));
         }
     }
 
@@ -416,16 +437,55 @@ public class BatchAutoConfiguration {
                                           ObjectProvider<BatchExitCodeGenerator> exitCodes,
                                           ObjectProvider<BatchRunEventPublisher> events,
                                           ObjectProvider<PartitionConsumer> partitions,
+                                          ObjectProvider<RepositoryHousekeeping> housekeeping,
+                                          ObjectProvider<DeadLetterReplayer> replayer,
                                           BatchProperties properties, Environment environment) {
+            AdharBatchRunner.Sleeper sleeper = AdharBatchRunner.Sleeper.threadSleep();
             return new AdharBatchRunner(() -> {
                 ExecutionLease leases = lease.getIfAvailable(ExecutionLease::none);
+                RecoveryPolicy recovery = new RecoveryPolicy(leases, lookup.getObject(),
+                        properties.getRecovery().getStaleAfter(), Clock.systemUTC());
+                GracefulStopLifecycle lifecycle = stop.getObject();
+                RepositoryHousekeeping retention = housekeeping.getObject();
+                BatchCommandRunner commands = new BatchCommandRunner(jobRepository.getObject(), jobOperator.getObject(),
+                        recovery, leases, retention, replayer.getIfAvailable(), properties, Clock.systemUTC(), sleeper,
+                        lifecycle::isStopping);
                 return new AdharBatchRunner.Collaborators(jobRepository.getObject(), jobOperator.getObject(),
                         jobResolver.getObject(), specs.getObject(), parametersResolver.getObject(),
-                        contextResolver.getObject(), new RecoveryPolicy(leases, lookup.getObject(),
-                        properties.getRecovery().getStaleAfter(), Clock.systemUTC()), leases, stop.getObject(),
+                        contextResolver.getObject(), recovery, leases, lifecycle,
                         summary.getObject(), exitCodes.getObject(), events.getObject(),
-                        AdharBatchRunner.Collaborators.heartbeatThread(), partitions.getIfAvailable());
-            }, properties, environment::getProperty, Clock.systemUTC(), AdharBatchRunner.Sleeper.threadSleep());
+                        AdharBatchRunner.Collaborators.heartbeatThread(), partitions.getIfAvailable(), commands,
+                        retention);
+            }, properties, environment::getProperty, Clock.systemUTC(), sleeper);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        RepositoryHousekeeping repositoryHousekeeping(ObjectProvider<JobRepository> jobRepository,
+                                                      ObjectProvider<ExecutionLease> lease,
+                                                      ObjectProvider<BatchProgressMetrics> metrics) {
+            BatchProgressMetrics meters = metrics.getIfAvailable();
+            return new RepositoryHousekeeping(jobRepository.getObject(), lease.getIfAvailable(ExecutionLease::none),
+                    meters == null ? RepositoryHousekeeping.Recorder.none() : meters::recordHousekeeping,
+                    Clock.systemUTC());
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        @ConditionalOnBean(DataSource.class)
+        @ConditionalOnBooleanProperty(name = "adhar.batch.dead-letter.enabled", matchIfMissing = true)
+        DeadLetterReplayer deadLetterReplayer(DataSource dataSource,
+                                              @BatchDataSource ObjectProvider<DataSource> batchDataSource,
+                                              ObjectProvider<BatchRepositoryLayout> layout,
+                                              ObjectProvider<DeadLetterReplayRegistry> routes,
+                                              ObjectProvider<AdharSteps> steps,
+                                              ObjectProvider<JobRepository> jobRepository) {
+            BatchRepositoryLayout resolved = layout.getIfAvailable();
+            String table = resolved != null ? resolved.kitTable(BatchRepositoryLayout.DEAD_LETTER_TABLE)
+                    : BatchRepositoryLayout.DEAD_LETTER_TABLE;
+            return new DeadLetterReplayer(new JdbcTemplate(batchDataSource.getIfAvailable(() -> dataSource)), table,
+                    routes.getObject(), steps.getObject().getTransactionManager(), jobRepository.getObject(),
+                    DeadLetterReplayer.Deserializer.standard(), Clock.systemUTC());
         }
     }
 

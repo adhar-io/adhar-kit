@@ -1,6 +1,7 @@
 package com.adhar.kit.batch.step;
 
 import com.adhar.kit.batch.config.BatchProperties;
+import com.adhar.kit.batch.fault.DeadLetterReplayRegistry;
 import com.adhar.kit.batch.fault.DeadLetterSkipListener;
 import com.adhar.kit.batch.listener.BatchListenerAttacher;
 import io.micrometer.observation.ObservationRegistry;
@@ -43,6 +44,7 @@ public class AdharSteps {
     private final BatchProperties properties;
     private final ObservationRegistry observationRegistry;
     private final DeadLetterSkipListener deadLetters;
+    private final DeadLetterReplayRegistry replays;
 
     /**
      * @param jobRepository       the JobRepository
@@ -51,16 +53,20 @@ public class AdharSteps {
      * @param properties          {@code adhar.batch.*}
      * @param observationRegistry the application's observation registry, may be {@code null}
      * @param deadLetters         keeps skipped items of steps that ask for it, may be {@code null}
+     * @param replays             where those steps' processors and writers are registered for the
+     *                            {@code dlq-replay} ops command, may be {@code null}
      */
     public AdharSteps(JobRepository jobRepository, PlatformTransactionManager transactionManager,
                       BatchListenerAttacher listeners, BatchProperties properties,
-                      ObservationRegistry observationRegistry, DeadLetterSkipListener deadLetters) {
+                      ObservationRegistry observationRegistry, DeadLetterSkipListener deadLetters,
+                      DeadLetterReplayRegistry replays) {
         this.jobRepository = jobRepository;
         this.transactionManager = transactionManager;
         this.listeners = listeners;
         this.properties = properties;
         this.observationRegistry = observationRegistry;
         this.deadLetters = deadLetters;
+        this.replays = replays;
     }
 
     /**
@@ -92,7 +98,7 @@ public class AdharSteps {
         if (observationRegistry != null) {
             builder.observationRegistry(observationRegistry);
         }
-        return new AdharChunkStepBuilder<>(builder, properties, listeners, deadLetters);
+        return new AdharChunkStepBuilder<>(builder, properties, listeners, deadLetters, replays);
     }
 
     /**

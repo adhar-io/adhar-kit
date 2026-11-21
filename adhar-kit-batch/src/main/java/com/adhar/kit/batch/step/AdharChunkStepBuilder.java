@@ -1,6 +1,7 @@
 package com.adhar.kit.batch.step;
 
 import com.adhar.kit.batch.config.BatchProperties;
+import com.adhar.kit.batch.fault.DeadLetterReplayRegistry;
 import com.adhar.kit.batch.fault.DeadLetterSkipListener;
 import com.adhar.kit.batch.fault.FaultTolerance;
 import com.adhar.kit.batch.listener.BatchListenerAttacher;
@@ -45,15 +46,20 @@ public final class AdharChunkStepBuilder<I, O> {
     private final BatchListenerAttacher listeners;
     private final BatchProperties.DeadLetter deadLetterSettings;
     private final DeadLetterSkipListener deadLetters;
+    private final DeadLetterReplayRegistry replays;
     private FaultTolerance faultTolerance = FaultTolerance.none();
+    private ItemProcessor<? super I, ? extends O> processor;
+    private ItemWriter<? super O> writer;
 
     AdharChunkStepBuilder(ChunkOrientedStepBuilder<I, O> delegate, BatchProperties properties,
-                          BatchListenerAttacher listeners, DeadLetterSkipListener deadLetters) {
+                          BatchListenerAttacher listeners, DeadLetterSkipListener deadLetters,
+                          DeadLetterReplayRegistry replays) {
         this.delegate = delegate;
         this.retryDefaults = properties.getRetry();
         this.deadLetterSettings = properties.getDeadLetter();
         this.listeners = listeners;
         this.deadLetters = deadLetters;
+        this.replays = replays;
     }
 
     /**
@@ -71,6 +77,7 @@ public final class AdharChunkStepBuilder<I, O> {
      */
     public AdharChunkStepBuilder<I, O> processor(ItemProcessor<? super I, ? extends O> processor) {
         delegate.processor(processor);
+        this.processor = processor;
         return this;
     }
 
@@ -80,6 +87,7 @@ public final class AdharChunkStepBuilder<I, O> {
      */
     public AdharChunkStepBuilder<I, O> writer(ItemWriter<? super O> writer) {
         delegate.writer(writer);
+        this.writer = writer;
         return this;
     }
 
@@ -163,7 +171,9 @@ public final class AdharChunkStepBuilder<I, O> {
     /**
      * Configures the underlying Spring Batch builder directly, for what this builder does not
      * offer. Fault tolerance set here is replaced by {@link #faultTolerance(FaultTolerance)} when
-     * that declares any.
+     * that declares any. Set the processor and the writer through this builder, not here: the
+     * {@code dlq-replay} ops command replays a dead-lettering step's items through the ones this
+     * builder was given.
      *
      * @param customizer receives Spring Batch's builder
      * @return this builder
@@ -175,7 +185,8 @@ public final class AdharChunkStepBuilder<I, O> {
 
     /**
      * @return the step, with the fault tolerance applied, the kit's listeners attached and, when
-     *         the fault tolerance asks for it, skipped items dead-lettered
+     *         the fault tolerance asks for it, skipped items dead-lettered and its processor and
+     *         writer registered for the {@code dlq-replay} ops command
      * @throws IllegalStateException when the step asks for dead letters and there is no sink (no
      *                               DataSource) although {@code adhar.batch.dead-letter.enabled}
      */
@@ -187,6 +198,9 @@ public final class AdharChunkStepBuilder<I, O> {
         if (faultTolerance.isDeadLetter()) {
             if (deadLetters != null) {
                 step.registerSkipListener((SkipListener) deadLetters);
+                if (replays != null) {
+                    replays.register(step.getName(), processor, writer);
+                }
             } else if (deadLetterSettings.isEnabled()) {
                 throw new IllegalStateException("Step [" + step.getName() + "] dead-letters skipped items, but there "
                         + "is no dead-letter table: the kit writes it on the JobRepository's DataSource");

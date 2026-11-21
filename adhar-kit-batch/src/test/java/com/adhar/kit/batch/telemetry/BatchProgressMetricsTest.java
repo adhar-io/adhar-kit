@@ -47,6 +47,21 @@ class BatchMetricsTest {
         return meterRegistry.get(BatchProgressMetrics.RUN).tag("job", "importJob").tag("trigger", trigger).gauge().value();
     }
 
+    @Test
+    @DisplayName("adhar.batch.housekeeping counts passes by result, and .deleted the instances they deleted (D4)")
+    void housekeeping() {
+        batchMetrics.recordHousekeeping("importJob", true, 3);
+        batchMetrics.recordHousekeeping("importJob", true, 2);
+        batchMetrics.recordHousekeeping("importJob", false, 0);
+
+        assertThat(meterRegistry.get(BatchProgressMetrics.HOUSEKEEPING).tag("job", "importJob")
+                .tag("result", "succeeded").counter().count()).isEqualTo(2.0);
+        assertThat(meterRegistry.get(BatchProgressMetrics.HOUSEKEEPING).tag("job", "importJob")
+                .tag("result", "failed").counter().count()).isEqualTo(1.0);
+        assertThat(meterRegistry.get(BatchProgressMetrics.HOUSEKEEPING_DELETED).tag("job", "importJob").counter()
+                .count()).isEqualTo(5.0);
+    }
+
     // ----------------------------------------------------------------
     // adhar.batch.run
     // ----------------------------------------------------------------

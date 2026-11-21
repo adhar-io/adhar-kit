@@ -3,10 +3,15 @@ package com.adhar.kit.batch.runtime;
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.event.BatchRunEvent;
 import com.adhar.kit.batch.event.BatchRunEventPublisher;
+import com.adhar.kit.batch.fault.DeadLetterReplayRegistry;
+import com.adhar.kit.batch.ops.BatchCommandRunner;
+import com.adhar.kit.batch.ops.DeadLetterReplayer;
+import com.adhar.kit.batch.ops.RepositoryHousekeeping;
 import com.adhar.kit.batch.operator.JobResolver;
 import com.adhar.kit.batch.params.JobParameterSpecRegistry;
 import com.adhar.kit.batch.params.JobParametersResolver;
 import com.adhar.kit.batch.support.BatchTestApplication;
+import com.adhar.kit.batch.support.OpsJobs;
 import com.adhar.kit.batch.support.RunnerJobs;
 import com.adhar.kit.batch.support.TestJobs;
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -22,6 +27,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -42,7 +48,7 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options
  * A runner as Kubernetes mode builds it, on the real H2 JobRepository of a test context, with
  * WireMock standing in for the API server and the pod's environment in a map.
  */
-@SpringBootTest(classes = {BatchTestApplication.class, TestJobs.class, RunnerJobs.class})
+@SpringBootTest(classes = {BatchTestApplication.class, TestJobs.class, RunnerJobs.class, OpsJobs.class})
 abstract class RunnerFixture {
 
     static final WireMockServer API = new WireMockServer(options().dynamicPort());
@@ -68,12 +74,18 @@ abstract class RunnerFixture {
     ObjectProvider<JobOperator> jobOperatorProvider;
     @Autowired
     ObjectProvider<JobParameterSpecRegistry> specsProvider;
+    @Autowired
+    DeadLetterReplayRegistry replays;
+    @Autowired
+    PlatformTransactionManager transactionManager;
 
     final Map<String, String> env = new HashMap<>();
     final BatchProperties properties = new BatchProperties();
     final List<BatchRunEvent> events = new CopyOnWriteArrayList<>();
     final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
     final List<Duration> sleeps = new CopyOnWriteArrayList<>();
+    final List<String> housekept = new CopyOnWriteArrayList<>();
+    Clock clock = Clock.systemUTC();
     Runnable onSleep = () -> { };
     Path terminationLog;
     JdbcExecutionLease lease;
@@ -96,6 +108,7 @@ abstract class RunnerFixture {
         API.resetAll();
         RunnerJobs.FAILURE.set("");
         RunnerJobs.CHUNK_MILLIS.set(100);
+        OpsJobs.reset();
         for (String table : RunnerJobs.tables()) {
             jdbc.update("DELETE FROM " + table);
         }
@@ -111,6 +124,8 @@ abstract class RunnerFixture {
         events.clear();
         stdout.reset();
         sleeps.clear();
+        housekept.clear();
+        clock = Clock.systemUTC();
     }
 
     @AfterEach
@@ -129,16 +144,25 @@ abstract class RunnerFixture {
         BatchRunEventPublisher publisher = new BatchRunEventPublisher(event -> events.add((BatchRunEvent) event),
                 specsProvider);
         relay.delegate = null;
+        RecoveryPolicy recovery = new RecoveryPolicy(lease, lookup, properties.getRecovery().getStaleAfter(),
+                Clock.systemUTC());
+        AdharBatchRunner.Sleeper sleeper = duration -> {
+            sleeps.add(duration);
+            onSleep.run();
+        };
+        RepositoryHousekeeping housekeeping = new RepositoryHousekeeping(jobRepository, lease,
+                (job, succeeded, deleted) -> housekept.add(job + ":" + (succeeded ? "succeeded" : "failed") + ":" + deleted),
+                clock);
+        DeadLetterReplayer replayer = new DeadLetterReplayer(jdbc, "ADHAR_BATCH_DEAD_LETTER", replays,
+                transactionManager, jobRepository, DeadLetterReplayer.Deserializer.standard(), clock);
+        BatchCommandRunner commands = new BatchCommandRunner(jobRepository, jobOperator, recovery, lease, housekeeping,
+                replayer, properties, clock, sleeper, stop::isStopping);
         AdharBatchRunner.Collaborators with = new AdharBatchRunner.Collaborators(jobRepository, jobOperator,
                 jobResolver, specs, new JobParametersResolver(), new RunContextResolver(env::get, lookup, properties),
-                new RecoveryPolicy(lease, lookup, properties.getRecovery().getStaleAfter(), Clock.systemUTC()), lease,
+                recovery, lease,
                 stop, new TerminationSummaryWriter(terminationLog, new PrintStream(stdout, true, StandardCharsets.UTF_8)),
-                exitCodes, publisher, heartbeats, null);
-        AdharBatchRunner runner = new AdharBatchRunner(() -> with, properties, env::get, Clock.systemUTC(),
-                duration -> {
-                    sleeps.add(duration);
-                    onSleep.run();
-                });
+                exitCodes, publisher, heartbeats, null, commands, housekeeping);
+        AdharBatchRunner runner = new AdharBatchRunner(() -> with, properties, env::get, Clock.systemUTC(), sleeper);
         relay.delegate = new com.adhar.kit.batch.listener.BatchRunObserver() {
             @Override
             public void jobStarted(org.springframework.batch.core.job.JobExecution execution) {

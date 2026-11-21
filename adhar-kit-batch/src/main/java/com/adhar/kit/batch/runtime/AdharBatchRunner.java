@@ -3,6 +3,8 @@ package com.adhar.kit.batch.runtime;
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.event.BatchRunEventPublisher;
 import com.adhar.kit.batch.listener.BatchRunObserver;
+import com.adhar.kit.batch.ops.BatchCommandRunner;
+import com.adhar.kit.batch.ops.RepositoryHousekeeping;
 import com.adhar.kit.batch.operator.JobResolver;
 import com.adhar.kit.batch.params.JobParameterSpec;
 import com.adhar.kit.batch.params.JobParameterSpecRegistry;
@@ -58,6 +60,8 @@ import java.util.function.Supplier;
  * guard   the JobRepository is JDBC                          else exit 2 (resourceless-repository)
  * context RunContextResolver: env, downward API, owner Job, pod
  * job     the job named by ADHAR_BATCH_JOB                   else exit 2 (unknown-job, incrementer)
+ * ops     ADHAR_BATCH_COMMAND set: BatchCommandRunner runs THAT on ADHAR_BATCH_EXECUTION_ID instead of the
+ *         job (a worker exits 0 skipped worker); no parameters are resolved
  *         a reserved distribution or transport, or a worker without remote partitioning: exit 2 (unsupported)
  * params  ADHAR_BATCH_PARAMS &gt; schedule &gt; defaults, validated  else exit 2 (parameters, business-date)
  * worker  role worker (or indexed above 0): serve the identity's partitions (PartitionConsumer), start nothing
@@ -67,7 +71,8 @@ import java.util.function.Supplier;
  *   ABANDONED              exit 6
  *   STARTING/STARTED/STOPPING  RecoveryPolicy: recover then start | wait for a terminating owner | exit 0 skipped duplicate
  * during  the execution's lease is renewed; a SIGTERM stops it at a chunk boundary (GracefulStopLifecycle)
- * after   ExitCodes.of(execution); TerminationSummaryWriter; BatchExitCodeGenerator
+ * after   COMPLETED: D4 housekeeping (adhar.batch.retention.*), whose failure is logged and counted only;
+ *         ExitCodes.of(execution); TerminationSummaryWriter; BatchExitCodeGenerator
  * </pre>
  *
  * <p>Provenance travels as non-identifying parameters: {@value #TRIGGER}, {@value #ACTOR},
@@ -89,6 +94,13 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
     public static final String APP_VERSION = "adhar.app.version";
     /** Non-identifying parameter: the Job's pod attempt. */
     public static final String ATTEMPT = "adhar.attempt";
+
+    /** The ops command a run carries out instead of its job (design 0025 §6.5). */
+    public static final String COMMAND = "ADHAR_BATCH_COMMAND";
+    /** The execution an ops command acts on. */
+    public static final String EXECUTION_ID = "ADHAR_BATCH_EXECUTION_ID";
+    /** Skipped: an ops command on a worker, which leaves it to the manager. */
+    public static final String WORKER = "worker";
 
     /** How often a run waiting for a terminating owner looks again. */
     static final Duration WAIT_POLL = Duration.ofSeconds(5);
@@ -180,6 +192,15 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
             return RunOutcome.invalid(RunOutcome.UNKNOWN_JOB, ex.getMessage());
         }
         currentJob = job.getName();
+        String command = env.apply(COMMAND);
+        if (command != null && !command.isBlank()) {
+            if (context.role() == BatchRole.WORKER) {
+                return RunOutcome.command(RunOutcome.Kind.SKIPPED, WORKER, ExitCodes.COMPLETED,
+                        new RunOutcome.Command(command.strip(), null, null, null, Map.of()),
+                        "an ops command is carried out by the manager; this worker has nothing to do");
+            }
+            return with().commands().run(command, env.apply(EXECUTION_ID), job, context);
+        }
         RunOutcome unsupported = unsupported(context);
         if (unsupported != null) {
             return unsupported;
@@ -200,7 +221,30 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
             // hands out, and the manager's execution decides the run (design 0025 §5.10).
             return with().partitions().consume(job, parameters, context, with().stop()::isStopping);
         }
-        return runIdentity(job, parameters, context);
+        RunOutcome outcome = runIdentity(job, parameters, context);
+        if (outcome.kind() == RunOutcome.Kind.COMPLETED && outcome.execution() != null && !with().stop().isStopping()) {
+            housekeeping(job);
+        }
+        return outcome;
+    }
+
+    /**
+     * D4: after a COMPLETED run, the job's metadata the retention no longer keeps goes. A failure
+     * is logged and counted ({@code adhar.batch.housekeeping{result=failed}}) and never changes the
+     * run's outcome: the run did its work.
+     */
+    private void housekeeping(Job job) {
+        BatchProperties.Retention retention = properties.getRetention();
+        if (retention.getDays() == null || with().housekeeping() == null) {
+            return;
+        }
+        try {
+            with().housekeeping().clean(job.getName(), job.isRestartable(), retention.getDays(),
+                    retention.getKeepLast());
+        } catch (RuntimeException ex) {
+            log.warn("Housekeeping of job [{}] failed; the run's outcome stands: {}: {}", job.getName(),
+                    ex.getClass().getName(), ex.getMessage());
+        }
     }
 
     /**
@@ -428,13 +472,16 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
     /**
      * What the runner works with(). {@code partitions} serves a worker's partitions; it is
      * {@code null} when the application has no remote partitioning on its classpath.
+     * {@code commands} carries out an ops run; {@code housekeeping} is the D4 retention after a
+     * COMPLETED run, {@code null} for none.
      */
     public record Collaborators(JobRepository jobRepository, JobOperator jobOperator, JobResolver jobResolver,
                                 JobParameterSpecRegistry specs, JobParametersResolver parametersResolver,
                                 RunContextResolver contextResolver, RecoveryPolicy recovery, ExecutionLease lease,
                                 GracefulStopLifecycle stop, TerminationSummaryWriter summary,
                                 BatchExitCodeGenerator exitCodes, BatchRunEventPublisher events,
-                                ScheduledExecutorService heartbeats, PartitionConsumer partitions) {
+                                ScheduledExecutorService heartbeats, PartitionConsumer partitions,
+                                BatchCommandRunner commands, RepositoryHousekeeping housekeeping) {
 
         /**
          * @return a single daemon thread for lease heartbeats

@@ -48,6 +48,9 @@ import java.util.regex.Pattern;
  *       max-backoff: 30s
  *     dead-letter:
  *       enabled: true               # FaultTolerance.deadLetter() writes skipped items to the JDBC table
+ *     retention:                    # D4 housekeeping after every COMPLETED run and on the ops verb housekeeping
+ *       days:                       # unset: no housekeeping (ADHAR_BATCH_RETENTION_DAYS, the platform passes 90)
+ *       keep-last: 30               # the newest instances always kept (ADHAR_BATCH_RETENTION_KEEP_LAST)
  *     telemetry:
  *       trace-items: false          # per-item spans (off: a million items would be a million spans)
  *     partition:                    # remote partitioning (roles manager, worker, indexed)
@@ -134,6 +137,8 @@ public class BatchProperties {
 
     private final DeadLetter deadLetter = new DeadLetter();
 
+    private final Retention retention = new Retention();
+
     private final Telemetry telemetry = new Telemetry();
 
     private final Shutdown shutdown = new Shutdown();
@@ -204,6 +209,10 @@ public class BatchProperties {
 
     public DeadLetter getDeadLetter() {
         return deadLetter;
+    }
+
+    public Retention getRetention() {
+        return retention;
     }
 
     public Telemetry getTelemetry() {
@@ -296,6 +305,10 @@ public class BatchProperties {
         require(partition.gridSize == null || partition.gridSize >= 1,
                 "adhar.batch.partition.grid-size must be at least 1, was " + partition.gridSize);
         require(isPositive(partition.pollInterval), "adhar.batch.partition.poll-interval must be positive");
+        require(retention.days == null || retention.days >= 1,
+                "adhar.batch.retention.days must be at least 1 when set, was " + retention.days);
+        require(retention.keepLast >= 0, "adhar.batch.retention.keep-last must not be negative, was "
+                + retention.keepLast);
         require(partition.timeout == null || isPositive(partition.timeout),
                 "adhar.batch.partition.timeout must be positive when set, was " + partition.timeout);
     }
@@ -481,6 +494,43 @@ public class BatchProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+    }
+
+    /**
+     * Housekeeping of the JobRepository (design 0025 D4): after every COMPLETED run, and on the
+     * ops command {@code housekeeping}, the runner deletes the job's instances whose last
+     * activity is older than {@code days}. It keeps the newest {@code keep-last} instances, always
+     * the newest restartable FAILED or STOPPED one, and any instance still running.
+     */
+    public static class Retention {
+
+        /**
+         * Delete metadata older than this many days. Unset, there is no housekeeping: the
+         * platform passes the BatchJob's {@code retention.days} as ADHAR_BATCH_RETENTION_DAYS.
+         */
+        private Integer days;
+
+        /**
+         * The newest job instances that are always kept, whatever their age
+         * (ADHAR_BATCH_RETENTION_KEEP_LAST).
+         */
+        private int keepLast = 30;
+
+        public Integer getDays() {
+            return days;
+        }
+
+        public void setDays(Integer days) {
+            this.days = days;
+        }
+
+        public int getKeepLast() {
+            return keepLast;
+        }
+
+        public void setKeepLast(int keepLast) {
+            this.keepLast = keepLast;
         }
     }
 

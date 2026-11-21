@@ -148,6 +148,6 @@ public class RunnerJobs {
      * @return the runner tests' extra tables
      */
     public static List<String> tables() {
-        return List.of("SLOT_RUNS", "ADHAR_BATCH_EXECUTION_LEASE", "ADHAR_BATCH_DEAD_LETTER");
+        return List.of("SLOT_RUNS", "ADHAR_BATCH_EXECUTION_LEASE", "ADHAR_BATCH_DEAD_LETTER", "OPS_LEDGER");
     }
 }

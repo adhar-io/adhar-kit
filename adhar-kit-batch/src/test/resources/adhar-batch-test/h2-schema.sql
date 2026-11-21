@@ -37,3 +37,5 @@ CREATE TABLE IF NOT EXISTS SOURCE_ITEMS (ID BIGINT NOT NULL PRIMARY KEY);
 -- No key on purpose: a duplicate write must be countable, not rejected.
 CREATE TABLE IF NOT EXISTS TARGET_ITEMS (ID BIGINT NOT NULL);
 CREATE TABLE IF NOT EXISTS SLOT_RUNS (RUNNER VARCHAR(100) NOT NULL, SCHEDULED_TIME VARCHAR(40) NOT NULL);
+-- The ops tests' ledger (OpsJobs): what a dead-lettering step wrote, and under which run parameter.
+CREATE TABLE IF NOT EXISTS OPS_LEDGER (ID BIGINT NOT NULL, RUN VARCHAR(40));
