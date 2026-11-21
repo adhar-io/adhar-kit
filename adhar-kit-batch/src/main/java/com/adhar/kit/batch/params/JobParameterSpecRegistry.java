@@ -13,7 +13,8 @@ import java.util.Optional;
 /**
  * The declared parameters of every job in the application: {@link AdharBatchJob} on the job's
  * bean method or class, and {@link JobParameterSpec} beans for jobs whose parameters are computed.
- * Collected once every singleton exists, so a broken declaration fails the startup.
+ * Collected once every singleton exists, or at the first lookup if that comes first, so a broken
+ * declaration fails the startup.
  *
  * <p>A spec is found by the job's name or its bean name. A job with no declaration accepts no
  * parameters ({@link JobParameterSpec#none(String)}).</p>
@@ -25,6 +26,7 @@ public class JobParameterSpecRegistry implements SmartInitializingSingleton {
 
     private final ListableBeanFactory beanFactory;
     private final Map<String, JobParameterSpec> specs = new LinkedHashMap<>();
+    private boolean collected;
 
     /**
      * @param beanFactory the application's beans
@@ -45,6 +47,21 @@ public class JobParameterSpecRegistry implements SmartInitializingSingleton {
 
     @Override
     public void afterSingletonsInstantiated() {
+        collect();
+    }
+
+    /**
+     * Collects the declarations once: when every singleton exists, or at the first lookup if that
+     * comes first. Another {@link SmartInitializingSingleton} can run before this one, since the
+     * callbacks follow the beans' registration order: the Quartz engine, imported ahead of this
+     * registry, validates its configured triggers' parameters in its own callback, and found every
+     * job accepting none (a trigger's {@code parameters} failed the start).
+     */
+    private synchronized void collect() {
+        if (collected || beanFactory == null) {
+            return;
+        }
+        collected = true;
         for (Map.Entry<String, JobParameterSpec> bean : beanFactory.getBeansOfType(JobParameterSpec.class).entrySet()) {
             register(bean.getValue().jobName(), bean.getValue(), "bean " + bean.getKey());
         }
@@ -78,6 +95,7 @@ public class JobParameterSpecRegistry implements SmartInitializingSingleton {
      * @return its declaration, empty when it has none
      */
     public Optional<JobParameterSpec> find(String jobName) {
+        collect();
         return Optional.ofNullable(specs.get(jobName));
     }
 
@@ -93,6 +111,7 @@ public class JobParameterSpecRegistry implements SmartInitializingSingleton {
      * @return every declaration by job name (and by bean name where it differs)
      */
     public Map<String, JobParameterSpec> all() {
+        collect();
         return Map.copyOf(specs);
     }
 }

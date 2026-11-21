@@ -147,6 +147,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **adhar-kit-batch** — a configured Quartz trigger's `parameters`
+  (`adhar.batch.quartz.triggers.<job>[n].parameters.*`) no longer fail the start with
+  "`<name>` is not a parameter of this job; it accepts []". The engine validates its triggers in
+  its own `afterSingletonsInstantiated`, which ran before `JobParameterSpecRegistry`'s (the
+  callbacks follow bean registration order, and `QuartzConfiguration` is imported ahead of the
+  registry), so every job looked undeclared. The registry now collects its declarations at the
+  first lookup when that comes first. Found scaffolding `springboot-web-service` with in-service
+  batch jobs, whose triggers name the sample job's `cycle`.
 - **adhar-kit-commons** — Spring MVC's own exceptions no longer turn into a 500 behind
   `SpringGlobalExceptionHandler`'s catch-all: a path nothing maps is a 404 (the templates
   documented "answers 404, which adhar-kit reports as a 500"), a wrong method a 405 with

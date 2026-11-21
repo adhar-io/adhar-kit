@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -89,6 +90,39 @@ class JobParameterSpecRegistryTest {
             assertThat(registry.spec("undeclared").parameters()).isEmpty();
             assertThat(registry.all()).containsKeys("importJob", "housekeeping", "housekeepingBean", "computed");
         });
+    }
+
+    /** A consumer registered ahead of the registry, as the imported Quartz engine is. */
+    static class EarlyReader implements SmartInitializingSingleton {
+
+        private final JobParameterSpecRegistry registry;
+        private JobParameterSpec seen;
+
+        EarlyReader(JobParameterSpecRegistry registry) {
+            this.registry = registry;
+        }
+
+        @Override
+        public void afterSingletonsInstantiated() {
+            seen = registry.spec("importJob");
+        }
+    }
+
+    @Test
+    @DisplayName("a SmartInitializingSingleton whose callback runs before the registry's still sees every declaration")
+    void readBeforeTheRegistrysOwnCallback() {
+        new ApplicationContextRunner()
+                .withBean(EarlyReader.class)
+                .withBean(JobParameterSpecRegistry.class)
+                .withUserConfiguration(Jobs.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(EarlyReader.class).seen.parameters()).extracting(JobParameterSpec.Param::name)
+                            .containsExactly("businessDate", "source", "dryRun");
+                    assertThat(context.getBean(JobParameterSpecRegistry.class).all())
+                            .as("collected once: the registry's own callback adds nothing twice")
+                            .containsKeys("importJob", "housekeeping", "computed");
+                });
     }
 
     @AdharBatchJob(description = "on the class")
