@@ -180,7 +180,7 @@ public record RunOutcome(Kind kind, String reason, int exitCode, JobExecution ex
             default -> Kind.UNKNOWN;
         };
         String reason = status == BatchStatus.FAILED && ControlTotalsException.isCause(execution)
-                ? CONTROL_TOTALS : null;
+                ? null : null;
         return new RunOutcome(kind, reason, ExitCodes.of(execution), execution, null,
                 execution.getExitStatus().getExitDescription());
     }
