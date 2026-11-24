@@ -81,7 +81,10 @@ final class ControlTotalsListener implements StepExecutionListener, ItemStream {
     private static ExitStatus fail(StepExecution step, Throwable failure) {
         step.setStatus(BatchStatus.FAILED);
         step.addFailureException(failure);
-        return ExitStatus.FAILED.addExitDescription(failure.getMessage());
+        // The stack trace, as Spring Batch records any failure: a manager in another process sees a
+        // remote partition only through this description, and reads the exception's class from it
+        // (PartitionOutcomeAggregator).
+        return ExitStatus.FAILED.addExitDescription(failure);
     }
 
     /** The identity's totals: the base this execution started from plus its own counts. */

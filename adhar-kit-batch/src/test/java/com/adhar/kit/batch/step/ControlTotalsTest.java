@@ -2,6 +2,8 @@ package com.adhar.kit.batch.step;
 
 import com.adhar.kit.batch.fault.ControlTotalsException;
 import com.adhar.kit.batch.fault.FaultTolerance;
+import com.adhar.kit.batch.fault.NonRetryableBatchException;
+import com.adhar.kit.batch.partition.PartitionOutcomeAggregator;
 import com.adhar.kit.batch.runtime.ExitCodes;
 import com.adhar.kit.batch.runtime.RunOutcome;
 import com.adhar.kit.batch.support.BatchTestApplication;
@@ -13,6 +15,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.job.JobInstance;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.job.parameters.JobParametersBuilder;
@@ -32,6 +35,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 /**
  * Control totals (design 0025 §5.4, §5.7, §5.13) on a real JobRepository: what a chunk step
@@ -139,6 +143,35 @@ class ControlTotalsTest {
         assertThat(outcome.message()).contains("read 10 but 12 expected");
         assertThat(jobRepository.getStepExecution(execution.getId(), onlyStep(execution).getId()).getStatus())
                 .as("persisted FAILED, not only in memory").isEqualTo(BatchStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("a remote partition's mismatch reaches its manager as exit 3 control-totals, through what the repository recorded")
+    void remotePartitionMismatch() throws Exception {
+        var builder = step(10).controlTotals(ControlTotals.expected().expectRead(step -> 12));
+        JobExecution worker = jobOperator.start(job(builder), identity());
+        // What a manager in another pod sees of the partition: its record, without the exception.
+        StepExecution recorded = jobRepository.getStepExecution(worker.getId(), onlyStep(worker).getId());
+        assertThat(recorded.getStatus()).isEqualTo(BatchStatus.FAILED);
+        assertThat(recorded.getFailureExceptions()).isEmpty();
+
+        JobExecution run = new JobExecution(worker.getId() + 1000, new JobInstance(worker.getId() + 1000, "manager"),
+                new JobParameters());
+        StepExecution manager = new StepExecution(recorded.getId() + 1000, "load", run);
+        Throwable failure = catchThrowable(() -> new PartitionOutcomeAggregator(jobRepository)
+                .aggregate(manager, List.of(recorded)));
+
+        assertThat(failure).isInstanceOf(NonRetryableBatchException.class)
+                .hasMessageContaining(ControlTotalsException.class.getName())
+                .rootCause().isInstanceOfSatisfying(ControlTotalsException.class, cause -> {
+                    assertThat(cause.getStepName()).isEqualTo("totalsStep");
+                    assertThat(cause.getMismatches()).containsExactly("read 10 but 12 expected");
+                });
+        run.setStatus(BatchStatus.FAILED);
+        run.addFailureException(failure);
+        RunOutcome outcome = RunOutcome.of(run);
+        assertThat(outcome.exitCode()).isEqualTo(ExitCodes.FAILED_NOT_RETRYABLE);
+        assertThat(outcome.reason()).isEqualTo(RunOutcome.CONTROL_TOTALS);
     }
 
     @Test

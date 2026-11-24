@@ -187,6 +187,57 @@ class RunnerGuardsTest extends RunnerFixture {
     }
 
     @Test
+    @DisplayName("D5: a calendar with no zone judges the date the job's own zone makes of the scheduled time")
+    void calendarWithoutAZone() throws Exception {
+        calendar("name: weekdays\n");
+        // Friday 17:00 UTC is Saturday 01:00 in Singapore.
+        env.put("ADHAR_BATCH_TIME_ZONE", "Asia/Singapore");
+        scheduled("2026-11-27T17:00:00Z");
+        assertThat(run().reason()).isEqualTo(RunOutcome.CALENDAR);
+        assertThat(summaryJson().get("businessDate").asText()).isEqualTo("2026-11-28");
+
+        env.put("ADHAR_BATCH_TIME_ZONE", "UTC");
+        scheduled("2026-11-27T17:00:00Z");
+        assertThat(run().kind()).isEqualTo(RunOutcome.Kind.COMPLETED);
+        assertThat(executionsOfReport("2026-11-27")).isEqualTo(1);
+        assertThat(executionsOfReport("2026-11-28")).isZero();
+    }
+
+    @Test
+    @DisplayName("D5: a holiday skips the schedule and a backfill of it, never a person's run of the same date")
+    void holidayForTheScheduleNotForAPerson() throws Exception {
+        calendar(SG_CALENDAR);
+        scheduled("2026-11-05T01:00:00Z");
+        assertThat(run().reason()).isEqualTo(RunOutcome.CALENDAR);
+
+        triggered("manual", RunnerJobs.REPORT_JOB, "{\"businessDate\":\"2026-11-05\"}");
+        assertThat(run().kind()).isEqualTo(RunOutcome.Kind.COMPLETED);
+        assertThat(executionsOfReport("2026-11-05")).isEqualTo(1);
+
+        // The calendar is judged before the identity: the date stays a holiday, not an already-complete run.
+        triggered("backfill", RunnerJobs.REPORT_JOB, "{\"businessDate\":\"2026-11-05\"}");
+        RunOutcome backfill = run();
+        assertThat(backfill.reason()).isEqualTo(RunOutcome.CALENDAR);
+        assertThat(backfill.exitCode()).isZero();
+    }
+
+    @Test
+    @DisplayName("D5: an empty calendar file or one naming no real zone is exit 2 calendar-file")
+    void calendarFilesThatAreNotCalendars() throws Exception {
+        scheduled("2026-11-25T01:00:00Z");
+        calendar("");
+        RunOutcome empty = run();
+        assertThat(empty.exitCode()).isEqualTo(ExitCodes.INVALID_REQUEST);
+        assertThat(empty.reason()).isEqualTo(RunOutcome.CALENDAR_FILE);
+
+        calendar("name: mars\ntimeZone: Mars/Olympus\n");
+        RunOutcome zone = run();
+        assertThat(zone.reason()).isEqualTo(RunOutcome.CALENDAR_FILE);
+        assertThat(zone.message()).contains("Mars/Olympus");
+        assertThat(executionsOfReport("2026-11-25")).isZero();
+    }
+
+    @Test
     @DisplayName("D5: without a calendar every day is a business day")
     void noCalendar() {
         scheduled("2026-11-21T01:00:00Z");

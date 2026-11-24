@@ -9,6 +9,9 @@ import org.springframework.batch.core.job.flow.FlowHolder;
 import org.springframework.batch.core.job.flow.FlowJob;
 import org.springframework.batch.core.job.flow.FlowStep;
 import org.springframework.batch.core.job.flow.State;
+import org.springframework.batch.core.partition.PartitionStep;
+import org.springframework.batch.core.partition.StepExecutionSplitter;
+import org.springframework.batch.core.partition.support.TaskExecutorPartitionHandler;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.ListableStepLocator;
 import org.springframework.batch.core.step.Step;
@@ -36,9 +39,12 @@ import java.util.TreeSet;
  * had failed is simply never finished. Kargo promoting a new image while a run of the old one is
  * FAILED is exactly that (F16). Adding a step is safe, and so is any change that keeps the names.</p>
  *
- * <p>Partition executions ({@code <step>:<partition>}) are not steps of the job and are left
- * out; their manager step is checked. A job whose steps cannot all be listed (a custom
- * {@link Job}, or a flow step whose flow cannot be read) is not checked, and that is logged.</p>
+ * <p>A partitioned step's worker is one of the job's steps: partition executions are named
+ * {@code <worker>:<partition>}, and a restart finds each partition by that name, so a renamed worker
+ * would start every partition again, the completed ones included. A partition execution is therefore
+ * judged by its worker's name, the part before a {@code :} that names a step of the job. A job whose
+ * steps cannot all be listed (a custom {@link Job}, a flow step whose flow cannot be read, or a
+ * partitioned step whose splitter names no worker) is not checked, and that is logged.</p>
  *
  * @author Adhar Platform Team
  * @since 0.1.0
@@ -76,7 +82,7 @@ public final class RestartGuard {
         for (JobExecution execution : executions) {
             for (StepExecution step : execution.getStepExecutions()) {
                 String name = step.getStepName();
-                if (!name.contains(PARTITION_SEPARATOR) && !steps.get().contains(name)) {
+                if (!isStepOf(name, steps.get())) {
                     missing.add(name);
                 }
             }
@@ -91,8 +97,27 @@ public final class RestartGuard {
     }
 
     /**
+     * @param name  a step execution's name
+     * @param steps the job's steps, workers included
+     * @return whether it is one of them, or a partition ({@code <worker>:<partition>}) of one
+     */
+    static boolean isStepOf(String name, Set<String> steps) {
+        if (steps.contains(name)) {
+            return true;
+        }
+        // A worker's own name may hold the separator: every prefix ending before one is tried.
+        for (int at = name.indexOf(PARTITION_SEPARATOR); at > 0; at = name.indexOf(PARTITION_SEPARATOR, at + 1)) {
+            if (steps.contains(name.substring(0, at))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * @param job a job
-     * @return every step name it can run, nested flows included; empty when they cannot be listed
+     * @return every step name it can run, nested flows and partition workers included; empty when
+     *         they cannot be listed
      */
     static Optional<Set<String>> stepNames(Job job) {
         if (!(job instanceof ListableStepLocator locator)) {
@@ -131,6 +156,17 @@ public final class RestartGuard {
         if (step instanceof FlowStep) {
             // FlowStep lists nothing and has no getter for its flow.
             return field(step, "flow") instanceof Flow nestedFlow && flow(nestedFlow, names);
+        }
+        if (step instanceof PartitionStep) {
+            // Nor does PartitionStep for its splitter, whose step name is the partitions' prefix.
+            if (!(field(step, "stepExecutionSplitter") instanceof StepExecutionSplitter splitter)
+                    || splitter.getStepName() == null || splitter.getStepName().isBlank()) {
+                return false;
+            }
+            names.add(splitter.getStepName());
+            // A worker run in this process may itself be a flow: what it runs is listed too.
+            return !(field(step, "partitionHandler") instanceof TaskExecutorPartitionHandler local)
+                    || local.getStep() == null || nested(local.getStep(), names);
         }
         return true;
     }

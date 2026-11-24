@@ -86,6 +86,20 @@ class MicrometerSchedulerMetricsTest {
     }
 
     @Test
+    @DisplayName("a converted cron that moves at a clock change counts once per zone, per job")
+    void cronDstDifferences() {
+        metrics.cronDstDifference("import-job");
+        metrics.cronDstDifference("import-job");
+        metrics.cronDstDifference("export-job");
+
+        assertThat(registry.get(SchedulerMetrics.CRON_DST_DIFFERENCES).tags("job", "import-job").counter().count())
+                .isEqualTo(2.0);
+        assertThat(registry.get(SchedulerMetrics.CRON_DST_DIFFERENCES).tags("job", "export-job").counter().count())
+                .isEqualTo(1.0);
+        assertThat(SchedulerMetrics.CRON_DST_DIFFERENCES).startsWith("adhar.batch.scheduler.");
+    }
+
+    @Test
     @DisplayName("without a registry the engines record into metrics that do nothing")
     void none() {
         SchedulerMetrics none = SchedulerMetrics.none();
@@ -96,6 +110,7 @@ class MicrometerSchedulerMetricsTest {
             none.instances(1);
             none.reportFailed();
             none.calendarFailed("c");
+            none.cronDstDifference("d");
         }).doesNotThrowAnyException();
         assertThat(SchedulerMetrics.none()).isSameAs(none);
     }

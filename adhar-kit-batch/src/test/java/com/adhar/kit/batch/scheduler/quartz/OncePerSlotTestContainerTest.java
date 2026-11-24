@@ -115,7 +115,18 @@ class OncePerSlotTestContainerTest {
                 recorded.put(rs.getString(1), rs.getString(3));
             }
         }, TestJobs.SLOW_JOB);
-        assertThat(scheduled.values()).containsExactlyInAnyOrderElementsOf(runsPerSlot.keySet());
+        // Every COMPLETED run is a recorded slot, and every recorded slot completed — except, at most, the
+        // LAST one: a slot still running when the replicas were closed has written its slot_runs row but its
+        // execution never reached COMPLETED (the same in-flight run the instance count above allows for). On
+        // a loaded CI runner that window is wide enough to be hit (GitHub Actions, 2026-11-22).
+        assertThat(runsPerSlot.keySet()).containsAll(scheduled.values());
+        java.util.TreeSet<String> unfinished = new java.util.TreeSet<>(runsPerSlot.keySet());
+        scheduled.values().forEach(unfinished::remove);
+        assertThat(unfinished).as("slots recorded but not completed").hasSizeLessThanOrEqualTo(1);
+        if (!unfinished.isEmpty()) {
+            assertThat(unfinished.first()).as("only the slot in flight at shutdown may be unfinished")
+                    .isEqualTo(((TreeMap<String, Integer>) runsPerSlot).lastKey());
+        }
         if ("quartz".equals(engine)) {
             assertThat(recorded).hasSameSizeAs(scheduled).allSatisfy((execution, run) -> assertThat(run)
                     .isEqualTo(RunIdentity.runName("slow-job",

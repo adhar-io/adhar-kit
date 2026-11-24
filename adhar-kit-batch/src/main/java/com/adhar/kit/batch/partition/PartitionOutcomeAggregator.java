@@ -1,5 +1,6 @@
 package com.adhar.kit.batch.partition;
 
+import com.adhar.kit.batch.fault.ControlTotalsException;
 import com.adhar.kit.batch.fault.NonRetryableBatchException;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.JobExecution;
@@ -31,7 +32,9 @@ import java.util.regex.Pattern;
  *       3): the worker's exception never reaches the manager's JVM, only its exit description does,
  *       so the classes named in it are checked for {@link NonRetryableBatchException} and
  *       {@link SkipLimitExceededException}. Best effort: the description is the stack trace cut to
- *       the repository's column, so a cause past the cut is not seen and the run stays retryable.</li>
+ *       the repository's column, so a cause past the cut is not seen and the run stays retryable.
+ *       A control-totals mismatch is rebuilt from that description as the failure's cause, so the
+ *       run's summary still says {@code control-totals}.</li>
  * </ul>
  *
  * @author Adhar Platform Team
@@ -63,8 +66,13 @@ public class PartitionOutcomeAggregator implements StepExecutionAggregator {
             if (partition.getStatus() == BatchStatus.FAILED) {
                 Optional<String> cause = notRetryable(partition.getExitStatus().getExitDescription());
                 if (cause.isPresent()) {
-                    throw new NonRetryableBatchException("Partition " + partition.getStepName() + " failed with "
-                            + cause.get() + ", which a restart cannot fix");
+                    String message = "Partition " + partition.getStepName() + " failed with " + cause.get()
+                            + ", which a restart cannot fix";
+                    // A mismatch of control totals is rebuilt as the cause: the run's summary reason
+                    // (control-totals) is read from the failure's cause chain.
+                    throw ControlTotalsException.recorded(partition.getExitStatus().getExitDescription())
+                            .map(totals -> new NonRetryableBatchException(message, totals))
+                            .orElseGet(() -> new NonRetryableBatchException(message));
                 }
             }
         }

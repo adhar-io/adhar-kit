@@ -165,19 +165,23 @@ the job knows, such as a trailer's record count. The totals are the whole identi
 chunk commit counted is carried in the step's ExecutionContext, so a restart is checked on
 everything its instance did, and a rolled-back chunk is never counted. A mismatch fails the step
 with `ControlTotalsException`: exit 3, outcome `failed`, reason `control-totals`, the mismatch in
-`exitDescription`. It also catches what Spring Batch 6 alone does not: a non-skippable write
+`exitDescription`. On a partitioned step each partition is checked on its own totals, and a
+remote partition's mismatch reaches its manager through the partition's recorded exit description,
+so the run still exits 3 `control-totals`. It also catches what Spring Batch 6 alone does not: a non-skippable write
 failure during a chunk's item-by-item scan leaves the reader's saved position past the whole
 chunk, so the restart never reads the chunk's remaining items and completes without them.
 
 **Version-safe restart.** Before a FAILED or STOPPED execution is restarted (or a dead owner's is
 recovered), every step the identity's executions ran must still be a step of the job, nested flows
-included; partition executions (`<step>:<partition>`) are left out. A new image that renamed or
+and partition workers included: a partition execution (`<worker>:<partition>`) is judged by its
+worker step, because a restart finds each partition by that name and a renamed worker would run
+every partition again, the completed ones too. A new image that renamed or
 removed one would otherwise resume into the wrong steps: Spring Batch restarts by step name, so the
 renamed step starts from scratch and the removed one is never finished. The runner then exits 2
 `definition-changed`, naming the missing steps and both image digests, and changes nothing.
 Restart on the image that ran it, abandon the execution and run a new identity, or set
 `adhar.batch.restart.definition-check=warn` to log and restart anyway. A job whose steps cannot all
-be listed (a custom `Job`) is not checked.
+be listed (a custom `Job`, a flow step or partitioned step that cannot be read) is not checked.
 
 ### Ops commands
 
@@ -424,9 +428,14 @@ adhar.batch:
 - **Triggers.** `cron` (Quartz syntax), `interval` (on the grid `start + n × every`) and `daily`
   (a window on days of the week; it runs in the JVM's zone). The `adhar.batch.scheduler.jobs`
   Spring cron schedules still work: each is converted, and the two parsers' next 400 fire times,
-  in UTC and three daylight-saving zones, must agree or the start fails naming the slot. A time
-  in the hour a clock change repeats (01:30 in New York or London) is such a disagreement: write
-  it as a Quartz `cron` trigger.
+  in UTC, three daylight-saving zones and the service's own `adhar.batch.scheduler.time-zone`,
+  must agree or the start fails naming the slot. One kind of difference only WARNS (decided
+  2026-11-22): a time a clock change repeats or skips, such as a nightly 01:30 in New York or
+  London, where Spring fires at the earlier offset (and again at the later) and Quartz once at
+  the later. The service starts; one WARN names each zone, the date and both fire times, says
+  whether the service's own zone is affected, and gives the remedies (move it out of 01:00-02:59,
+  or write it as a Quartz `cron` trigger); `adhar.batch.scheduler.cron.dst.differences` (job)
+  counts one per zone.
 - **Calendars.** D5's rule: a date is a business day when it is in `businessDays`, or is neither a
   `weekendDays` day nor in `holidays`. An excluded day never fires. A trigger and its calendar
   share one zone or the start fails; a calendar file is re-read every `refresh-interval`, and an
@@ -451,8 +460,9 @@ adhar.batch:
 - **Meters** (both engines): `adhar.batch.scheduler.next.fire` (gauge, epoch seconds; job,
   trigger), `adhar.batch.scheduler.fires` (job, trigger, outcome: `ran`, `skipped-complete`,
   `skipped-duplicate`, `misfire-skipped`, `recovered`, `failed-to-start`),
-  `adhar.batch.scheduler.instances`, `adhar.batch.scheduler.report.failures` and
-  `adhar.batch.scheduler.calendar.failures`. One INFO line per fire names the trigger, the slot,
+  `adhar.batch.scheduler.instances`, `adhar.batch.scheduler.report.failures`,
+  `adhar.batch.scheduler.calendar.failures` and, on `quartz`, `adhar.batch.scheduler.cron.dst.differences`
+  (job: zones in which a converted Spring cron fires elsewhere at a clock change). One INFO line per fire names the trigger, the slot,
   the run and the outcome; `BatchRunEvent.Skipped` (`already-complete`, `duplicate`, `misfire`) and
   `Recovered` carry the run's name (`getRunName()`).
 - **The schedule report.** In Kubernetes the service writes `ConfigMap <scheduler-name>-batch-schedules`

@@ -15,6 +15,9 @@ import java.time.Instant;
  *   <tr><td>{@value #INSTANCES}</td><td>gauge</td><td>— ({@code quartz}: replicas checked in to the cluster)</td></tr>
  *   <tr><td>{@value #REPORT_FAILURES}</td><td>counter</td><td>— (schedule report writes that failed)</td></tr>
  *   <tr><td>{@value #CALENDAR_FAILURES}</td><td>counter</td><td>calendar ({@code quartz}: a refresh kept the previous version)</td></tr>
+ *   <tr><td>{@value #CRON_DST_DIFFERENCES}</td><td>counter</td><td>job ({@code quartz}: an
+ *       {@code adhar.batch.scheduler.jobs} cron whose Quartz conversion fires elsewhere at a clock
+ *       change, one per agreement zone, counted at each conversion)</td></tr>
  * </table>
  *
  * <p>Without Micrometer on the classpath, or without a {@code MeterRegistry}, the engines record
@@ -39,6 +42,9 @@ public interface SchedulerMetrics {
 
     /** Counter: calendar refreshes that kept the previous version. */
     String CALENDAR_FAILURES = "adhar.batch.scheduler.calendar.failures";
+
+    /** Counter: zones in which a converted Spring cron fires elsewhere at a clock change (R12). */
+    String CRON_DST_DIFFERENCES = "adhar.batch.scheduler.cron.dst.differences";
 
     /**
      * @param job     the job's schedule name
@@ -68,6 +74,16 @@ public interface SchedulerMetrics {
      * @param calendar a calendar whose refresh kept its previous version
      */
     void calendarFailed(String calendar);
+
+    /**
+     * Counts one zone in which a job's {@code adhar.batch.scheduler.jobs} cron and its Quartz
+     * conversion fire at different instants only because a clock change repeats or skips that local
+     * time (design 0025 §5.20.6, R12). Records nothing unless implemented.
+     *
+     * @param job the job's schedule name
+     */
+    default void cronDstDifference(String job) {
+    }
 
     /**
      * @param outcome what a fire did

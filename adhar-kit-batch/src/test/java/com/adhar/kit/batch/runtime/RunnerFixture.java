@@ -112,6 +112,18 @@ abstract class RunnerFixture {
         for (String table : RunnerJobs.tables()) {
             jdbc.update("DELETE FROM " + table);
         }
+        // Spring Batch's own metadata too. The Spring test context — and its database — is shared by every
+        // runner test CLASS, so a JobInstance one class ran (reportJob for 2026-11-04, say) was still there
+        // when another class counted that identity's executions. The class order is the filesystem's: on
+        // macOS and GitHub's runner it happened to hide this; in the cluster's release pod it did not, and
+        // RunnerGuardsTest.unusableCalendar and AdharBatchRunnerTest.sameBusinessDateTwice failed there
+        // (2026-11-24). Deleted through the JobRepository, so the table prefix does not matter.
+        for (String jobName : jobRepository.getJobNames()) {
+            for (List<org.springframework.batch.core.job.JobInstance> page;
+                    !(page = jobRepository.getJobInstances(jobName, 0, 100)).isEmpty(); ) {
+                page.forEach(jobRepository::deleteJobInstance);
+            }
+        }
         env.clear();
         env.putAll(Map.of("ADHAR_BATCH_NAME", "reporter", "POD_NAME", "reporter-abc12", "POD_UID", "uid-self",
                 "NODE_NAME", "worker-1"));

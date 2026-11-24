@@ -86,4 +86,14 @@ public class MicrometerSchedulerMetrics implements SchedulerMetrics {
                 .register(registry)
                 .increment();
     }
+
+    @Override
+    public void cronDstDifference(String job) {
+        Counter.builder(CRON_DST_DIFFERENCES)
+                .description("Zones in which a converted Spring cron fires elsewhere at a clock change (it started, "
+                        + "with a warning)")
+                .tags("job", job)
+                .register(registry)
+                .increment();
+    }
 }

@@ -161,9 +161,17 @@ class BatchSchedulerFiringTest {
                 && expected.equals(parameters.getString(BatchScheduler.SCHEDULED_TIME_PARAMETER)));
     }
 
-    /** The slot's JobInstance does not exist before the start, and does once the run is on. */
+    /**
+     * The slot's JobInstance does not exist before the start, and does once the run is on. Decided by
+     * whether {@code jobOperator.start} has been CALLED, not by how many lookups came first: with a 1 ms
+     * renewal interval the lost-lock renewer can make the first lookup before {@code runSlot}'s own
+     * pre-check, which then saw the instance, read it as completed and answered ALREADY_RAN (GitHub
+     * Actions, 2026-11-22; never on a fast laptop).
+     */
     private void instanceExistsOnceStarted() {
-        when(jobRepository.getJobInstance(eq("job"), any(JobParameters.class))).thenReturn(null).thenReturn(instance);
+        when(jobRepository.getJobInstance(eq("job"), any(JobParameters.class))).thenAnswer(call ->
+                org.mockito.Mockito.mockingDetails(jobOperator).getInvocations().stream()
+                        .anyMatch(i -> "start".equals(i.getMethod().getName())) ? instance : null);
     }
 
     private void awaitNextFire(Instant expected) {

@@ -35,7 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runner) registered as `AdharBusinessCalendar` (fixed `serialVersionUID`), re-read every
   `adhar.batch.quartz.calendars.refresh-interval` and held to their triggers' zone;
   `BatchTriggers` (`fireNow`, `fireAt`, `cancel`, `list`), idempotent by run name; the 400-slot
-  agreement check of converted Spring cron schedules; a start that finds another application's
+  agreement check of converted Spring cron schedules (a difference only at a clock change, such
+  as a nightly 01:30 in New York, warns once and counts `adhar.batch.scheduler.cron.dst.differences`
+  instead of failing the start — R12, 2026-11-22); a start that finds another application's
   jobs under its `scheduler-name` fails (FQ4); `SchedulerMetrics` (`adhar.batch.scheduler.*`, both
   engines), the schedule report ConfigMap (`ScheduleReportWriter`, report v1), `batch.run` and
   `batch.trigger` in the MDC, and the run name on every `BatchRunEvent`. `RUN_PARAMETER` and
@@ -128,7 +130,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commit); a mismatch is `ControlTotalsException`, exit 3, reason `control-totals`. The
   version-safe restart guard (`runtime.RestartGuard`): a restart, or a recovery, of an identity
   whose executions ran a step the job no longer has exits 2 `definition-changed` and changes
-  nothing (`adhar.batch.restart.definition-check=warn` restarts anyway).
+  nothing (`adhar.batch.restart.definition-check=warn` restarts anyway); a partition
+  (`<worker>:<partition>`) is judged by its worker step, so a renamed worker is caught too. A
+  remote partition's control-totals mismatch reaches its manager from the recorded exit
+  description (`ControlTotalsException.recorded`), so the run exits 3 `control-totals` there too.
 - **adhar-kit-parent** — manages `adhar-kit-maven-plugin` with `openapi-lint` (validate) and
   `openapi` (generate-sources) executions: a service declares the plugin and nothing else.
   JaCoCo no longer counts generated models (`**/api/v*/model/**`, `**/client/v*/model/**`).

@@ -56,6 +56,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.time.zone.ZoneOffsetTransition;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -344,7 +345,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
         Map<String, String> crons = new LinkedHashMap<>(properties.getScheduler().getJobs());
         crons.putAll(pendingSchedules);
         crons.forEach((bean, cron) -> {
-            Trigger built = configTrigger(bean, springCronTrigger(cron), now);
+            Trigger built = configTrigger(bean, springCronTrigger(bean, cron), now);
             desired.put(built.getKey(), built);
         });
         int kept = 0;
@@ -592,7 +593,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
     @Override
     public void scheduleJob(String jobName, String cronExpression) {
         String bean = beanNameOf(jobName);
-        TriggerSettings settings = springCronTrigger(cronExpression);
+        TriggerSettings settings = springCronTrigger(bean, cronExpression);
         synchronized (lifecycleMonitor) {
             Trigger trigger;
             try {
@@ -1165,12 +1166,54 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
     // Names and the Spring cron of adhar.batch.scheduler.jobs
     // ------------------------------------------------------------------
 
-    private static TriggerSettings springCronTrigger(String springCron) {
+    private TriggerSettings springCronTrigger(String bean, String springCron) {
+        ZoneId serviceZone = properties.getScheduler().getTimeZone();
+        SpringCron.Conversion conversion = SpringCron.convert(springCron, serviceZone);
+        if (!conversion.clockChanges().isEmpty()) {
+            warnClockChanges(bean, springCron, serviceZone, conversion.clockChanges());
+        }
         TriggerSettings settings = new TriggerSettings();
         settings.setName(SCHEDULE_TRIGGER);
         settings.setKind(TriggerSettings.Kind.CRON);
-        settings.setExpression(SpringCron.toQuartz(springCron));
+        settings.setExpression(conversion.quartz());
         return settings;
+    }
+
+    /**
+     * R12 (design 0025 §5.20.6, decided 2026-11-22): a Spring cron whose fire times differ from its
+     * Quartz conversion only at a clock change starts, with ONE warning naming every agreement zone
+     * where it moves and one {@value SchedulerMetrics#CRON_DST_DIFFERENCES} count per zone. It is not a
+     * wrong conversion: in a repeated hour Spring fires at the earlier offset (and again at the later
+     * one), Quartz once at the later, so a service that switches engine sees that fire move.
+     */
+    private void warnClockChanges(String bean, String springCron, ZoneId serviceZone,
+                                  List<SpringCron.ClockChange> changes) {
+        String job = scheduleNames.getOrDefault(bean, bean);
+        StringJoiner where = new StringJoiner("; ");
+        boolean serviceZoneMoves = false;
+        for (SpringCron.ClockChange change : changes) {
+            where.add("in " + change.zone() + " on " + change.date() + " Spring fires at "
+                    + SpringCron.local(change.spring(), change.zone()) + ", Quartz at "
+                    + SpringCron.local(change.quartz(), change.zone()));
+            serviceZoneMoves |= change.zone().getRules().equals(serviceZone.getRules());
+            metrics.cronDstDifference(job);
+        }
+        String service;
+        if (serviceZone.getRules().nextTransition(clock.instant()) == null) {
+            service = "This service schedules in " + serviceZone + ", which has no clock changes, so its own fires are "
+                    + "unaffected: only an engine switch in a daylight-saving zone would see that hour move.";
+        } else if (serviceZoneMoves) {
+            service = "This service schedules in " + serviceZone + ": the quartz engine fires it at Quartz's time "
+                    + "there, and switching adhar.batch.scheduler.engine to simple moves that fire to Spring's.";
+        } else {
+            service = "This service schedules in " + serviceZone + ", where the two agree, so its own fires are "
+                    + "unaffected: only an engine switch in one of the zones above would see that hour move.";
+        }
+        log.warn("Cron expression '{}' of job [{}] (adhar.batch.scheduler.jobs) fires at a local time a daylight-saving "
+                        + "change repeats or skips, where Spring's and Quartz's fire times differ: {}. {} To make it "
+                        + "unambiguous, move it out of 01:00-02:59, or write it as an adhar.batch.quartz.triggers cron "
+                        + "trigger in Quartz syntax, whose fire times are Quartz's own.",
+                springCron, bean, where, service);
     }
 
     /**
@@ -1192,6 +1235,9 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
         static final List<ZoneId> AGREEMENT_ZONES = List.of(ZoneOffset.UTC, ZoneId.of("America/New_York"),
                 ZoneId.of("Europe/London"), ZoneId.of("Australia/Sydney"));
 
+        /** How far from a transition its search looks: more than any clock change has ever moved. */
+        private static final Duration TRANSITION_SEARCH = Duration.ofHours(3);
+
         private static final Map<String, String> MACROS = Map.of(
                 "@yearly", "0 0 0 1 1 *", "@annually", "0 0 0 1 1 *", "@monthly", "0 0 0 1 * *",
                 "@weekly", "0 0 0 * * 0", "@daily", "0 0 0 * * *", "@midnight", "0 0 0 * * *",
@@ -1200,7 +1246,52 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
         private SpringCron() {
         }
 
+        /**
+         * An expression converted to Quartz syntax.
+         *
+         * @param quartz       the Quartz expression
+         * @param clockChanges the agreement zones where its fire times differ from Spring's only at a
+         *                     clock change, the first such difference of each; empty for none
+         */
+        record Conversion(String quartz, List<ClockChange> clockChanges) {
+        }
+
+        /**
+         * The first slot of one zone at which Spring and Quartz fire at different instants only because
+         * a clock change repeats or skips that local time.
+         *
+         * @param zone   the zone
+         * @param slot   the slot of the agreement check
+         * @param spring Spring's fire time
+         * @param quartz Quartz's fire time
+         */
+        record ClockChange(ZoneId zone, int slot, Instant spring, Instant quartz) {
+
+            /** @return the local date of Spring's fire, the date the clock change moves */
+            LocalDate date() {
+                return spring.atZone(zone).toLocalDate();
+            }
+        }
+
+        /**
+         * @param spring a Spring cron expression
+         * @return its Quartz conversion
+         * @throws IllegalArgumentException when it cannot be converted, or the conversion disagrees
+         *                                  with Spring other than at a clock change
+         */
         static String toQuartz(String spring) {
+            return convert(spring, null).quartz();
+        }
+
+        /**
+         * @param spring      a Spring cron expression
+         * @param serviceZone the service's {@code adhar.batch.scheduler.time-zone}, checked with the
+         *                    agreement zones; {@code null} for the agreement zones alone
+         * @return its Quartz conversion and where its fire times move at a clock change
+         * @throws IllegalArgumentException when it cannot be converted, or the conversion disagrees
+         *                                  with Spring other than at a clock change
+         */
+        static Conversion convert(String spring, ZoneId serviceZone) {
             if (spring == null || spring.isBlank()) {
                 throw new IllegalArgumentException("A cron expression is required");
             }
@@ -1229,23 +1320,54 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                 throw new IllegalArgumentException("Cron expression '" + spring + "' converts to '" + quartz
                         + "', which Quartz does not accept: write it as an adhar.batch.quartz.triggers cron trigger");
             }
-            verify(spring, expanded, quartz);
-            return quartz;
+            return new Conversion(quartz, verify(spring, expanded, quartz, AGREEMENT_FROM, zones(serviceZone)));
+        }
+
+        /**
+         * @return the agreement zones, and the service's own zone when none of them has its rules
+         */
+        static List<ZoneId> zones(ZoneId serviceZone) {
+            if (serviceZone == null || AGREEMENT_ZONES.stream()
+                    .anyMatch(zone -> zone.getRules().equals(serviceZone.getRules()))) {
+                return AGREEMENT_ZONES;
+            }
+            List<ZoneId> zones = new ArrayList<>(AGREEMENT_ZONES);
+            zones.add(serviceZone);
+            return List.copyOf(zones);
+        }
+
+        /**
+         * The agreement check in the agreement zones, from {@link #AGREEMENT_FROM}.
+         *
+         * @see #verify(String, String, String, Instant, List)
+         */
+        static List<ClockChange> verify(String spring, String expanded, String quartz) {
+            return verify(spring, expanded, quartz, AGREEMENT_FROM, AGREEMENT_ZONES);
         }
 
         /**
          * The agreement check (design 0025 §5.20.6, R12): both parsers' next {@value #AGREEMENT_SLOTS}
-         * fire times from {@link #AGREEMENT_FROM}, in UTC and in three daylight-saving zones, must be
-         * equal. A wrong conversion still parses; this is what catches it. Spring's and Quartz's
-         * handling of a local time that a clock change makes ambiguous differs too (Spring takes the
-         * earlier offset, Quartz the later), so an expression firing in that hour fails here as
-         * well: a run that switched engine would otherwise move by an hour twice a year, silently.
+         * fire times from {@code from}, in each zone, are compared slot by slot. A wrong conversion
+         * still parses; this is what catches it, and any such difference fails.
          *
-         * @throws IllegalArgumentException naming the first slot where they differ
+         * <p>One kind of difference does not (decided 2026-11-22, replacing "fail"): both fire times
+         * within one clock change's shift of that change, where the local time is repeated (fall-back)
+         * or skipped (spring-forward). Spring takes the earlier offset of a repeated time and fires
+         * again at the later one, Quartz fires once at the later; that is the two parsers' reading of
+         * an ambiguous time, not a wrong conversion, and it moves a fire only for a service that
+         * switches engine. It is returned, one per zone (the first), and the iterators are
+         * resynchronised past the later of the two instants: a doubled or skipped fire would otherwise
+         * leave one parser a slot behind for the rest of the check, and every later slot would read as
+         * a disagreement that is not one.</p>
+         *
+         * @return the zones where the fire times differ only at a clock change, the first slot of each
+         * @throws IllegalArgumentException naming the first slot where they differ otherwise
          */
-        static void verify(String spring, String expanded, String quartz) {
+        static List<ClockChange> verify(String spring, String expanded, String quartz, Instant from,
+                                        List<ZoneId> zones) {
             var springCron = org.springframework.scheduling.support.CronExpression.parse(expanded);
-            for (ZoneId zone : AGREEMENT_ZONES) {
+            List<ClockChange> clockChanges = new ArrayList<>();
+            for (ZoneId zone : zones) {
                 CronExpression quartzCron;
                 try {
                     quartzCron = new CronExpression(quartz);
@@ -1254,8 +1376,9 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                             + "', which Quartz does not accept: " + ex.getMessage(), ex);
                 }
                 quartzCron.setTimeZone(TimeZone.getTimeZone(zone));
-                ZonedDateTime springAfter = AGREEMENT_FROM.atZone(zone);
-                Date quartzAfter = Date.from(AGREEMENT_FROM);
+                ZonedDateTime springAfter = from.atZone(zone);
+                Date quartzAfter = Date.from(from);
+                ClockChange first = null;
                 for (int slot = 1; slot <= AGREEMENT_SLOTS; slot++) {
                     ZonedDateTime springNext = springCron.next(springAfter);
                     Date quartzNext = quartzCron.getNextValidTimeAfter(quartzAfter);
@@ -1267,11 +1390,20 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                         break;
                     }
                     if (!java.util.Objects.equals(expected, actual)) {
-                        throw new IllegalArgumentException("Cron expression '" + spring + "' converts to Quartz '"
-                                + quartz + "', but the two disagree at slot " + slot + " after " + AGREEMENT_FROM
-                                + " in " + zone + ": Spring fires at " + local(expected, zone) + ", Quartz at "
-                                + local(actual, zone) + ". Write it as an adhar.batch.quartz.triggers cron trigger in "
-                                + "Quartz syntax, whose fire times are Quartz's own");
+                        if (!atClockChange(expected, actual, zone)) {
+                            throw new IllegalArgumentException("Cron expression '" + spring + "' converts to Quartz '"
+                                    + quartz + "', but the two disagree at slot " + slot + " after " + from
+                                    + " in " + zone + ": Spring fires at " + local(expected, zone) + ", Quartz at "
+                                    + local(actual, zone) + ". Write it as an adhar.batch.quartz.triggers cron "
+                                    + "trigger in Quartz syntax, whose fire times are Quartz's own");
+                        }
+                        if (first == null) {
+                            first = new ClockChange(zone, slot, expected, actual);
+                        }
+                        Instant later = expected.isAfter(actual) ? expected : actual;
+                        springAfter = later.atZone(zone);
+                        quartzAfter = Date.from(later);
+                        continue;
                     }
                     if (springNext == null) {
                         break;
@@ -1279,10 +1411,36 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                     springAfter = springNext;
                     quartzAfter = quartzNext;
                 }
+                if (first != null) {
+                    clockChanges.add(first);
+                }
             }
+            return List.copyOf(clockChanges);
         }
 
-        private static String local(Instant instant, ZoneId zone) {
+        /**
+         * @return whether two different fire times both lie within one of the zone's transitions'
+         *         shift of that transition: the local times it repeats or skips, and nothing else
+         */
+        static boolean atClockChange(Instant expected, Instant actual, ZoneId zone) {
+            if (expected == null || actual == null) {
+                return false;
+            }
+            Instant early = expected.isBefore(actual) ? expected : actual;
+            Instant late = expected.isBefore(actual) ? actual : expected;
+            ZoneOffsetTransition transition = zone.getRules().nextTransition(late.minus(TRANSITION_SEARCH));
+            while (transition != null && !transition.getInstant().isAfter(early.plus(TRANSITION_SEARCH))) {
+                Duration shift = transition.getDuration().abs();
+                Instant at = transition.getInstant();
+                if (!early.isBefore(at.minus(shift)) && !late.isAfter(at.plus(shift))) {
+                    return true;
+                }
+                transition = zone.getRules().nextTransition(at);
+            }
+            return false;
+        }
+
+        static String local(Instant instant, ZoneId zone) {
             return instant == null ? "never" : instant.atZone(zone).toOffsetDateTime().toString();
         }
 

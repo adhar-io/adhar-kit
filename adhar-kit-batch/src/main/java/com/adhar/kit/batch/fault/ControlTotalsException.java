@@ -2,7 +2,11 @@ package com.adhar.kit.batch.fault;
 
 import org.springframework.batch.core.job.JobExecution;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * A step's control totals did not balance (design 0025 §5.4, §5.7): an item it read is not
@@ -15,6 +19,9 @@ import java.util.List;
  * @since 0.1.0
  */
 public class ControlTotalsException extends NonRetryableBatchException {
+
+    /** The message, as {@link #recorded(String)} reads it back from a step's exit description. */
+    private static final Pattern MESSAGE = Pattern.compile("Control totals of step \\[(.+?)] do not balance: (.+)");
 
     private final String stepName;
     private final List<String> mismatches;
@@ -41,6 +48,25 @@ public class ControlTotalsException extends NonRetryableBatchException {
      */
     public List<String> getMismatches() {
         return mismatches;
+    }
+
+    /**
+     * The mismatch a step recorded in another process: a remote partition's manager has only the
+     * partition's exit description, the stack trace of its failure.
+     *
+     * @param exitDescription a failed step's exit description
+     * @return the mismatch it records, empty when it records none
+     */
+    public static Optional<ControlTotalsException> recorded(String exitDescription) {
+        if (exitDescription == null) {
+            return Optional.empty();
+        }
+        Matcher matcher = MESSAGE.matcher(exitDescription);
+        if (!matcher.find()) {
+            return Optional.empty();
+        }
+        return Optional.of(new ControlTotalsException(matcher.group(1),
+                Arrays.stream(matcher.group(2).strip().split("; ")).toList()));
     }
 
     /**
