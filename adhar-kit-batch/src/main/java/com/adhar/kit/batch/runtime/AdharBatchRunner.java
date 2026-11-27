@@ -36,6 +36,7 @@ import org.springframework.beans.BeansException;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.Ordered;
+import org.springframework.util.StringUtils;
 import org.springframework.util.function.SingletonSupplier;
 
 import java.math.BigDecimal;
@@ -68,7 +69,9 @@ import java.util.function.Supplier;
  * job     the job named by ADHAR_BATCH_JOB                   else exit 2 (unknown-job, incrementer)
  * ops     ADHAR_BATCH_COMMAND set: BatchCommandRunner runs THAT on ADHAR_BATCH_EXECUTION_ID instead of the
  *         job (a worker exits 0 skipped worker); no parameters are resolved
- *         a reserved distribution or transport, or a worker without remote partitioning: exit 2 (unsupported)
+ *         adhar.batch.distribution=chunked (remote chunking, not in this kit), on every role: exit 2
+ *         (unsupported-distribution); a reserved transport, or a worker without remote partitioning: exit 2
+ *         (unsupported)
  * params  ADHAR_BATCH_PARAMS &gt; schedule &gt; defaults, validated  else exit 2 (parameters, business-date)
  * calendar adhar.batch.calendar (ADHAR_BATCH_CALENDAR) on a schedule, dependency or backfill run: a business
  *         date that is not a business day exits 0 skipped calendar; a missing or invalid file exit 2 calendar-file
@@ -115,6 +118,13 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
     static final Set<RunTrigger> CALENDAR_TRIGGERS = Set.of(RunTrigger.SCHEDULE, RunTrigger.DEPENDENCY,
             RunTrigger.BACKFILL);
 
+    /**
+     * The OpenLineage client's variables the platform sets on a job with {@code lineage.enabled}
+     * (design 0025 D11). This kit emits no lineage: they are announced once and otherwise ignored.
+     */
+    static final List<String> LINEAGE_VARIABLES = List.of("OPENLINEAGE_URL", "OPENLINEAGE_ENDPOINT",
+            "OPENLINEAGE_NAMESPACE", "OPENLINEAGE_API_KEY");
+
     /** How often a run waiting for a terminating owner looks again. */
     static final Duration WAIT_POLL = Duration.ofSeconds(5);
 
@@ -157,6 +167,7 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
     public void run(ApplicationArguments args) {
         Instant start = clock.instant();
         with().stop().runStarted();
+        announceIgnoredLineage();
         RunOutcome outcome;
         Optional<LocalDate> businessDate = Optional.empty();
         try {
@@ -184,6 +195,19 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
             with().summary().write(outcome, currentContext, businessDate, start, clock.instant());
         } finally {
             with().stop().runFinished();
+        }
+    }
+
+    /**
+     * Lineage emission is not in this kit (design 0025, deferred). A job whose BatchJob enables
+     * lineage still runs: the variables are named once, never their values (one is a token), and
+     * nothing else reads them.
+     */
+    private void announceIgnoredLineage() {
+        List<String> set = LINEAGE_VARIABLES.stream().filter(name -> StringUtils.hasText(env.apply(name))).toList();
+        if (!set.isEmpty()) {
+            log.info("{} set, but OpenLineage emission is not in this kit (design 0025, deferred): the run emits no "
+                    + "lineage events and is otherwise unaffected", String.join(", ", set));
         }
     }
 
@@ -325,9 +349,12 @@ public class AdharBatchRunner implements ApplicationRunner, BatchRunObserver, Or
      */
     private RunOutcome unsupported(RunContext context) {
         if (properties.getDistribution() == BatchProperties.Distribution.CHUNKED) {
-            return RunOutcome.invalid(RunOutcome.UNSUPPORTED, "adhar.batch.distribution=chunked (remote chunking, "
-                    + "ADHAR_BATCH_DISTRIBUTION) is reserved for Phase 4 and not available in this kit: run the job "
-                    + "partitioned");
+            // Before the role is looked at: a manager, a worker and an indexed pod all refuse, so no
+            // pod of a chunked run does the job's work alone.
+            return RunOutcome.invalid(RunOutcome.UNSUPPORTED_DISTRIBUTION, "adhar.batch.distribution=chunked "
+                    + "(ADHAR_BATCH_DISTRIBUTION, the BatchJob's mode: chunked) asks for remote chunking, which is "
+                    + "not in this kit (design 0025, deferred). Nothing ran: set the BatchJob's mode to partitioned "
+                    + "or single");
         }
         boolean partitioned = context.role() == BatchRole.MANAGER || context.role() == BatchRole.WORKER;
         BatchProperties.Partition.Transport transport = properties.getPartition().getTransport();

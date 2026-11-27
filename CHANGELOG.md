@@ -52,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the manager fences partitions still running when it stops waiting; `WorkerStopHandler` stops only
   a terminating worker's own partition, which the manager turns into a retryable failure;
   `adhar.batch.partition.{transport,grid-size,poll-interval,timeout}` and
-  `adhar.batch.distribution` (`chunked` reserved, exit 2 `unsupported`). The runner now recovers
+  `adhar.batch.distribution` (`chunked` reserved, exit 2 `unsupported-distribution`). The runner now recovers
   an execution recorded FAILED or STOPPED whose steps are still running (a pod killed before its
   step stopped) instead of skipping every later run as a duplicate, at once when nobody holds its
   lease. A role, distribution or partition setting that does not bind (`ADHAR_BATCH_ROLE=leader`,
@@ -154,6 +154,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **adhar-kit-batch** — remote chunking and OpenLineage emission are not in this kit (design 0025,
+  deferred), and the runner is explicit about both. A run with `ADHAR_BATCH_DISTRIBUTION=chunked`
+  exits 2 on every pod (manager, worker, indexed) before a step runs, now with the reason
+  `unsupported-distribution` (was `unsupported`). A pod that carries `ADHAR_BATCH_DISTRIBUTION` is
+  in Kubernetes mode whatever `ADHAR_BATCH_MODE` / `adhar.batch.mode` says, so a variable injected
+  through the job's `env` or an un-prefixed `envFrom` Secret cannot hand the pod to Spring Boot's
+  job runner. With any `OPENLINEAGE_*` variable set the runner logs one INFO line naming the
+  variables (not their values) and ignores them; the run is unaffected.
 - **adhar-kit-batch** — `adhar-kit-starter` carries it as optional: a service without jobs gets
   no batch beans and no batch tables. Properties renamed directly, without aliases (the kit
   deprecates nothing): `table-prefix` → `repository.table-prefix`, `default-chunk-size` →
@@ -188,6 +196,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   item's transaction rollback-only, which rolled the dead letter back with it.
   `DeadLetterSkipListener` (which now takes the steps' transaction manager) writes write-phase
   dead letters in a transaction of their own.
+- **adhar-kit-batch** — `dlq-replay` wrote an item twice when a restart had dead-lettered it a
+  second time: a write-phase dead letter commits on its own during the scan, so a step that failed
+  before the chunk committed kept it, and the restart scanned the chunk again under a new
+  execution. `ops.DeadLetterReplayer` now writes once per item across the executions of one
+  JobInstance (same step name, same item type and JSON value, member order and whitespace aside,
+  compared by SHA-256): the twins are
+  claimed in the write's transaction, marked replayed with `REPLAY_EXECUTION_ID` set to the
+  replaying execution, and counted as `duplicates` in the summary (`DeadLetterReplayer.Result`
+  gains `duplicates`). Rows of different steps or instances, different items with the same key,
+  and equal rows of one execution are never merged. No schema change.
+- **adhar-kit-batch** — with the engine `quartz`, two services without `spring.application.name`
+  that shared one `adhar.batch.quartz.scheduler-name` and database deleted each other's Quartz jobs
+  and triggers: the owner recorded on a job fell back to the scheduler's name, so each start read
+  the other's jobs as its own retired ones. `QuartzConfiguration` now refuses the start when
+  `spring.application.name` is unset or blank, naming the property; a service that sets it behaves
+  as before. A service that already ran unnamed must take its `scheduler-name` as its
+  `spring.application.name`: that is the owner its stored jobs carry, and the refusal says so.
 - **adhar-kit-batch** — a configured Quartz trigger's `parameters`
   (`adhar.batch.quartz.triggers.<job>[n].parameters.*`) no longer fail the start with
   "`<name>` is not a parameter of this job; it accepts []". The engine validates its triggers in

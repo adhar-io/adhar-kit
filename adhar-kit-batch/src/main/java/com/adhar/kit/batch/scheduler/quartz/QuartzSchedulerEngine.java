@@ -371,7 +371,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                 scheduler.getSchedulerName(), jobs.size(), desired.size(), kept);
     }
 
-    private JobDetail jobDetail(String bean) {
+    JobDetail jobDetail(String bean) {
         return JobBuilder.newJob(BatchLaunchJob.class)
                 .withIdentity(scheduleNames.get(bean), JOB_GROUP)
                 .storeDurably()
@@ -1211,7 +1211,8 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
         }
         log.warn("Cron expression '{}' of job [{}] (adhar.batch.scheduler.jobs) fires at a local time a daylight-saving "
                         + "change repeats or skips, where Spring's and Quartz's fire times differ: {}. {} To make it "
-                        + "unambiguous, move it out of 01:00-02:59, or write it as an adhar.batch.quartz.triggers cron "
+                        + "unambiguous, move it out of the local hours those changes repeat or skip (01:00-02:59 in New "
+                        + "York, London and Sydney), or write it as an adhar.batch.quartz.triggers cron "
                         + "trigger in Quartz syntax, whose fire times are Quartz's own.",
                 springCron, bean, where, service);
     }
@@ -1350,12 +1351,12 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
          * fire times from {@code from}, in each zone, are compared slot by slot. A wrong conversion
          * still parses; this is what catches it, and any such difference fails.
          *
-         * <p>One kind of difference does not (decided 2026-11-22, replacing "fail"): both fire times
-         * within one clock change's shift of that change, where the local time is repeated (fall-back)
-         * or skipped (spring-forward). Spring takes the earlier offset of a repeated time and fires
-         * again at the later one, Quartz fires once at the later; that is the two parsers' reading of
-         * an ambiguous time, not a wrong conversion, and it moves a fire only for a service that
-         * switches engine. It is returned, one per zone (the first), and the iterators are
+         * <p>One kind of difference does not (decided 2026-11-22, replacing "fail"): one caused only by
+         * a clock change, where the zone changes offset between the last agreeing fire and the two
+         * that differ, and the parsers agree at both of its offsets (see {@link #atClockChange}).
+         * Mostly a repeated local time: Spring takes its earlier offset and fires again at the later
+         * one, Quartz fires once at the later; that is the two parsers' reading of an ambiguous time,
+         * not a wrong conversion, and it moves a fire only for a service that switches engine. It is returned, one per zone (the first), and the iterators are
          * resynchronised past the later of the two instants: a doubled or skipped fire would otherwise
          * leave one parser a slot behind for the rest of the check, and every later slot would read as
          * a disagreement that is not one.</p>
@@ -1390,7 +1391,7 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
                         break;
                     }
                     if (!java.util.Objects.equals(expected, actual)) {
-                        if (!atClockChange(expected, actual, zone)) {
+                        if (!atClockChange(springCron, quartz, springAfter.toInstant(), expected, actual, zone)) {
                             throw new IllegalArgumentException("Cron expression '" + spring + "' converts to Quartz '"
                                     + quartz + "', but the two disagree at slot " + slot + " after " + from
                                     + " in " + zone + ": Spring fires at " + local(expected, zone) + ", Quartz at "
@@ -1419,25 +1420,59 @@ public class QuartzSchedulerEngine implements SchedulerEngine, SmartInitializing
         }
 
         /**
-         * @return whether two different fire times both lie within one of the zone's transitions'
-         *         shift of that transition: the local times it repeats or skips, and nothing else
+         * Whether two different next fire times, both computed from {@code after}, differ only
+         * because the zone's clock changes between {@code after} and the later of them: the zone has
+         * a transition there, and in a zone without clock changes at either of its offsets the two
+         * parsers' next fire from {@code after} is the same instant. A wrong conversion fires
+         * elsewhere in a fixed offset too, so it is never one, however close to a change it lands.
+         *
+         * <p>Two fire times a transition's shift apart are the common case (a repeated hour, Spring at
+         * the earlier offset, Quartz at the later), but not the only one: around a change at 23:00 or
+         * of 30 minutes or two hours (America/Nuuk, Australia/Lord_Howe, Antarctica/Troll) one parser
+         * drops a fire the other keeps and lands a day later, which a distance bound would fail.</p>
+         *
+         * @param springCron the Spring expression
+         * @param quartz     its Quartz conversion
+         * @param after      the instant both next fire times were computed from
+         * @param expected   Spring's next fire time
+         * @param actual     Quartz's next fire time
+         * @param zone       the zone they were computed in
          */
-        static boolean atClockChange(Instant expected, Instant actual, ZoneId zone) {
+        static boolean atClockChange(org.springframework.scheduling.support.CronExpression springCron, String quartz,
+                                     Instant after, Instant expected, Instant actual, ZoneId zone) {
             if (expected == null || actual == null) {
                 return false;
             }
-            Instant early = expected.isBefore(actual) ? expected : actual;
             Instant late = expected.isBefore(actual) ? actual : expected;
-            ZoneOffsetTransition transition = zone.getRules().nextTransition(late.minus(TRANSITION_SEARCH));
-            while (transition != null && !transition.getInstant().isAfter(early.plus(TRANSITION_SEARCH))) {
-                Duration shift = transition.getDuration().abs();
-                Instant at = transition.getInstant();
-                if (!early.isBefore(at.minus(shift)) && !late.isAfter(at.plus(shift))) {
-                    return true;
+            boolean changes = false;
+            ZoneOffsetTransition transition = zone.getRules().nextTransition(after.minus(TRANSITION_SEARCH));
+            while (transition != null && !transition.getInstant().isAfter(late.plus(TRANSITION_SEARCH))) {
+                for (ZoneOffset offset : List.of(transition.getOffsetBefore(), transition.getOffsetAfter())) {
+                    if (!java.util.Objects.equals(springNext(springCron, after, offset), quartzNext(quartz, after, offset))) {
+                        return false;
+                    }
                 }
-                transition = zone.getRules().nextTransition(at);
+                changes = true;
+                transition = zone.getRules().nextTransition(transition.getInstant());
             }
-            return false;
+            return changes;
+        }
+
+        private static Instant springNext(org.springframework.scheduling.support.CronExpression springCron,
+                                          Instant after, ZoneOffset offset) {
+            ZonedDateTime next = springCron.next(after.atZone(offset));
+            return next == null ? null : next.toInstant();
+        }
+
+        private static Instant quartzNext(String quartz, Instant after, ZoneOffset offset) {
+            try {
+                CronExpression cron = new CronExpression(quartz);
+                cron.setTimeZone(TimeZone.getTimeZone(offset));
+                Date next = cron.getNextValidTimeAfter(Date.from(after));
+                return next == null ? null : next.toInstant();
+            } catch (ParseException ex) {
+                return null;
+            }
         }
 
         static String local(Instant instant, ZoneId zone) {

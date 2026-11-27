@@ -37,6 +37,8 @@ public final class QuartzContexts {
         properties.put("adhar.batch.scheduler.enabled", "true");
         properties.put("adhar.batch.scheduler.engine", "quartz");
         properties.put("adhar.batch.quartz.scheduler-name", SCHEDULER_NAME);
+        // The owner recorded on every Quartz job: the engine refuses a start without it.
+        properties.put("spring.application.name", SCHEDULER_NAME);
         properties.put("adhar.batch.quartz.cluster-checkin-interval", "1s");
         properties.put("adhar.batch.scheduler.misfire-threshold", "2s");
         properties.put("adhar.batch.shutdown.timeout", "20s");

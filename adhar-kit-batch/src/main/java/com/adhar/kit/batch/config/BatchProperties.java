@@ -63,7 +63,7 @@ import java.util.regex.Pattern;
  *       poll-interval: 5s           # how often the manager and idle workers look at the repository
  *       timeout:                    # how long the manager waits for every partition; unset waits until
  *                                   # the pod's deadline (ADHAR_BATCH_PARTITION_TIMEOUT)
- *     distribution: partitioned     # partitioned | chunked (Phase 4, refused until then) (ADHAR_BATCH_DISTRIBUTION)
+ *     distribution: partitioned     # partitioned | chunked (not in this kit: refused) (ADHAR_BATCH_DISTRIBUTION)
  *     scheduler:                    # embedded mode - not the platform path
  *       enabled: false
  *       engine: simple              # simple | quartz (design 0025 §5.20)
@@ -171,9 +171,10 @@ public class BatchProperties {
 
     /**
      * Which manager and worker beans a partitioned run's role selects: {@code partitioned}
-     * (remote partitioning) or {@code chunked} (remote chunking, Phase 4: reserved, and refused
-     * until then). The platform sets it through {@code ADHAR_BATCH_DISTRIBUTION}, only on a
-     * chunked run.
+     * (remote partitioning) or {@code chunked} (remote chunking, which this kit does not implement:
+     * every pod of such a run exits 2, {@code unsupported-distribution}). The platform sets it
+     * through {@code ADHAR_BATCH_DISTRIBUTION}, only on a chunked run, and the mode
+     * ({@code ADHAR_BATCH_MODE}) is ignored on a pod that carries that variable.
      */
     private Distribution distribution = Distribution.PARTITIONED;
 
@@ -722,7 +723,7 @@ public class BatchProperties {
     public enum Distribution {
         /** Remote partitioning: a manager hands partitions to workers through the partition channel. */
         PARTITIONED,
-        /** Remote chunking over a durable queue (Phase 4). Reserved: a run that names it is refused. */
+        /** Remote chunking over a durable queue. Not in this kit (design 0025, deferred): a run that names it is refused. */
         CHUNKED
     }
 
@@ -982,7 +983,8 @@ public class BatchProperties {
         /**
          * The cluster's identity, Quartz's {@code instanceName} (the {@code SCHED_NAME} column):
          * equal across one service's replicas and distinct per service. Unset, the application's
-         * {@code spring.application.name}; one of the two is required.
+         * {@code spring.application.name}, which the engine {@code quartz} requires in any case: it
+         * is the owner recorded on every Quartz job.
          */
         private String schedulerName;
 

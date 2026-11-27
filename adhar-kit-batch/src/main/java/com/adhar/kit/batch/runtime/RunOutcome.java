@@ -64,10 +64,17 @@ public record RunOutcome(Kind kind, String reason, int exitCode, JobExecution ex
     public static final String RESOURCELESS_REPOSITORY = "resourceless-repository";
 
     /**
-     * Invalid: the run names a value reserved for a later phase ({@code adhar.batch.distribution=chunked},
-     * a partition transport other than {@code jdbc}), or a role this application cannot play.
+     * Invalid: the run names a reserved partition transport (one other than {@code jdbc}), or a role
+     * this application cannot play.
      */
     public static final String UNSUPPORTED = "unsupported";
+
+    /**
+     * Invalid: the run is distributed in a way this kit does not implement
+     * ({@code adhar.batch.distribution=chunked}, remote chunking). Every pod of the run says so; none
+     * runs the job as a single run instead.
+     */
+    public static final String UNSUPPORTED_DISTRIBUTION = "unsupported-distribution";
 
     /** The process status of a JVM ended by SIGTERM (128 + 15). */
     public static final int SIGTERM_STATUS = 143;

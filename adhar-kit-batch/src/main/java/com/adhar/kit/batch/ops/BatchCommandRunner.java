@@ -42,8 +42,8 @@ import java.util.function.BooleanSupplier;
  * stop          running -&gt; STOPPED, steps stop at a chunk; waits shutdown.timeout   exit 0 stopped | stop-requested | not-running
  * status        the execution (or the job's latest), unchanged                        exit 0 &lt;status&gt;
  * housekeeping  D4 retention of the job's metadata                                     exit 0 housekept
- * dlq-replay    the execution's rejected items through their step again               exit 0 replayed | nothing-to-replay
- *                                                                                     exit 3 rejected (some remain)
+ * dlq-replay    the execution's rejected items through their step again, one write    exit 0 replayed | nothing-to-replay
+ *               per item a restart dead-lettered twice (counted as duplicates)        exit 3 rejected (some remain)
  * refused       exit 2 invalid: execution-id, unknown-execution, other-job, completed, running, owner-alive, retention
  * </pre>
  *
@@ -394,18 +394,29 @@ public class BatchCommandRunner {
             }
         }
         if (replayer.pending(executionId) == 0) {
-            return done(target.counting(counts("replayed", 0, "rejected", 0)), "nothing-to-replay",
+            return done(target.counting(replayCounts(0, 0, 0)), "nothing-to-replay",
                     "execution " + executionId + " has no rejected item left");
         }
         DeadLetterReplayer.Result result = replayer.replay(job.getName(), executionId);
-        Command counted = target.counting(counts("replayed", result.replayed(), "rejected",
-                result.rejected()));
+        Command counted = target.counting(replayCounts(result.replayed(), result.rejected(), result.duplicates()));
+        // A duplicate is a second dead letter of one item, which a restart of the same instance
+        // left; it is marked replayed with the one write, never written again.
+        String duplicates = result.duplicates() == 0 ? "" : ", " + result.duplicates() + " duplicate dead letter(s) "
+                + "of an item written once";
         if (result.rejected() > 0) {
             return RunOutcome.command(Kind.FAILED, REJECTED, ExitCodes.FAILED_NOT_RETRYABLE, counted, result.rejected()
                     + " item(s) of execution " + executionId + " are still rejected (" + result.replayed()
-                    + " replayed): fix them and ask again");
+                    + " replayed" + duplicates + "): fix them and ask again");
         }
-        return done(counted, "replayed", result.replayed() + " item(s) of execution " + executionId + " replayed");
+        return done(counted, "replayed", result.replayed() + " item(s) of execution " + executionId + " replayed"
+                + duplicates);
+    }
+
+    /** A dlq-replay's counts, in this order. */
+    private static Map<String, Long> replayCounts(long replayed, long rejected, long duplicates) {
+        Map<String, Long> counts = counts("replayed", replayed, "rejected", rejected);
+        counts.put("duplicates", duplicates);
+        return counts;
     }
 
     // ---------------------------------------------------------------------------------------

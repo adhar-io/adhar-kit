@@ -2,8 +2,11 @@ package com.adhar.kit.batch.runtime;
 
 import com.adhar.kit.batch.config.BatchProperties;
 import com.adhar.kit.batch.event.BatchRunEvent;
+import com.adhar.kit.batch.support.DebugLogCapture;
 import com.adhar.kit.batch.support.RunnerJobs;
 import com.adhar.kit.batch.support.TestJobs;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -203,8 +206,9 @@ class AdharBatchRunnerTest extends RunnerFixture {
         properties.setDistribution(com.adhar.kit.batch.config.BatchProperties.Distribution.CHUNKED);
         RunOutcome chunked = run();
         assertThat(chunked.exitCode()).isEqualTo(2);
-        assertThat(chunked.reason()).isEqualTo(RunOutcome.UNSUPPORTED);
-        assertThat(chunked.message()).contains("adhar.batch.distribution=chunked", "Phase 4");
+        assertThat(chunked.reason()).isEqualTo("unsupported-distribution");
+        assertThat(chunked.message()).contains("adhar.batch.distribution=chunked", "remote chunking",
+                "not in this kit (design 0025, deferred)");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM SLOT_RUNS", Integer.class)).isZero();
 
         properties.setDistribution(com.adhar.kit.batch.config.BatchProperties.Distribution.PARTITIONED);
@@ -218,6 +222,65 @@ class AdharBatchRunnerTest extends RunnerFixture {
         // A single run ignores the transport: only partitioned roles use it.
         properties.setRole(BatchRole.SINGLE);
         assertThat(run().exitCode()).isZero();
+    }
+
+    @Test
+    @DisplayName("a chunked run is refused on EVERY pod, exit 2 unsupported-distribution: manager, worker and indexed "
+            + "pods alike, and none runs the job as a single run")
+    void chunkedIsRefusedInEveryRole() throws Exception {
+        properties.setDistribution(BatchProperties.Distribution.CHUNKED);
+        record Pod(BatchRole role, String index) { }
+        for (Pod pod : List.of(new Pod(BatchRole.SINGLE, null), new Pod(BatchRole.MANAGER, null),
+                new Pod(BatchRole.WORKER, null), new Pod(BatchRole.INDEXED, "0"), new Pod(BatchRole.INDEXED, "3"))) {
+            manual(RunnerJobs.REPORT_JOB, "{\"businessDate\":\"2026-09-18\"}");
+            env.remove("JOB_COMPLETION_INDEX");
+            if (pod.index() != null) {
+                env.put("JOB_COMPLETION_INDEX", pod.index());
+            }
+            properties.setRole(pod.role());
+
+            RunOutcome outcome = run();
+
+            assertThat(outcome.kind()).as("%s", pod).isEqualTo(RunOutcome.Kind.INVALID);
+            assertThat(outcome.exitCode()).as("%s", pod).isEqualTo(2);
+            assertThat(outcome.reason()).as("%s", pod).isEqualTo("unsupported-distribution");
+            assertThat(outcome.execution()).as("%s", pod).isNull();
+            JsonNode summary = summaryJson();
+            assertThat(summary.get("outcome").asText()).as("%s", pod).isEqualTo("invalid");
+            assertThat(summary.get("reason").asText()).as("%s", pod).isEqualTo("unsupported-distribution");
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM SLOT_RUNS", Integer.class)).as("no step ran").isZero();
+        assertThat(jobRepository.getJobInstances(RunnerJobs.REPORT_JOB, 0, 10)).as("nothing was started").isEmpty();
+    }
+
+    @Test
+    @DisplayName("OPENLINEAGE_* set: one INFO line names the variables, never their values, and the run is unaffected")
+    void lineageVariablesAreAnnouncedAndIgnored() {
+        manual(RunnerJobs.REPORT_JOB, "{\"businessDate\":\"2026-09-19\"}");
+        try (DebugLogCapture log = new DebugLogCapture(AdharBatchRunner.class)) {
+            assertThat(run().exitCode()).isZero();
+            assertThat(log.events()).as("nothing to say without the variables")
+                    .noneMatch(event -> event.getFormattedMessage().contains("OpenLineage"));
+        }
+
+        manual(RunnerJobs.REPORT_JOB, "{\"businessDate\":\"2026-09-20\"}");
+        env.putAll(Map.of("OPENLINEAGE_URL", "http://openmetadata.example:8585", "OPENLINEAGE_ENDPOINT", " ",
+                "OPENLINEAGE_API_KEY", "bot-token-value"));
+        try (DebugLogCapture log = new DebugLogCapture(AdharBatchRunner.class)) {
+            RunOutcome outcome = run();
+
+            assertThat(outcome.exitCode()).as("lineage never fails a run").isZero();
+            assertThat(outcome.kind()).isEqualTo(RunOutcome.Kind.COMPLETED);
+            List<ILoggingEvent> lines = log.events().stream()
+                    .filter(event -> event.getFormattedMessage().contains("OpenLineage")).toList();
+            assertThat(lines).as("once per run").hasSize(1);
+            assertThat(lines.get(0).getLevel()).isEqualTo(Level.INFO);
+            assertThat(lines.get(0).getFormattedMessage())
+                    .startsWith("OPENLINEAGE_URL, OPENLINEAGE_API_KEY set, but OpenLineage emission is not in this kit")
+                    .contains("design 0025, deferred")
+                    .doesNotContain("OPENLINEAGE_ENDPOINT", "OPENLINEAGE_NAMESPACE", "bot-token-value", "openmetadata.example");
+            assertThat(log.events().indexOf(lines.get(0))).as("at the start, before anything else is logged").isZero();
+        }
     }
 
     @Test

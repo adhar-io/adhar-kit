@@ -100,6 +100,57 @@ class RunnerExitCodeIT {
         assertThat(result.exitCode()).as(result.stdout()).isEqualTo(2);
     }
 
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"ADHAR_BATCH_ROLE=manager", "ADHAR_BATCH_ROLE=worker",
+            "ADHAR_BATCH_ROLE=indexed,JOB_COMPLETION_INDEX=3", "ADHAR_BATCH_ROLE=manager,ADHAR_BATCH_MODE=partitioned",
+            "ADHAR_BATCH_ROLE=indexed,JOB_COMPLETION_INDEX=0,ADHAR_BATCH_MODE=embedded,SPRING_BATCH_JOB_ENABLED=true"})
+    @DisplayName("2 unsupported-distribution: every pod of a chunked run, in any role and whatever ADHAR_BATCH_MODE "
+            + "says, and no job is started")
+    void chunkedIsRefusedOnEveryPod(String settings) throws Exception {
+        Map<String, String> env = new HashMap<>(Map.of("ADHAR_BATCH_PARAMS", "{\"businessDate\":\"2026-11-03\"}",
+                "ADHAR_BATCH_DISTRIBUTION", "chunked"));
+        for (String setting : settings.split(",")) {
+            String[] pair = setting.split("=", 2);
+            env.put(pair[0], pair[1]);
+        }
+        Result result = run(env);
+
+        assertThat(result.exitCode()).as(result.stdout()).isEqualTo(2);
+        assertThat(result.summary()).as(result.stdout()).isNotNull();
+        assertThat(result.summary().get("outcome").asText()).isEqualTo("invalid");
+        assertThat(result.summary().get("reason").asText()).isEqualTo("unsupported-distribution");
+        assertThat(result.summary().has("executionId")).as("nothing was started").isFalse();
+        assertThat(result.stdout()).as("no job ran, the named one or any other, as a single run")
+                .doesNotContain("] starting").doesNotContain("Executing step").doesNotContain("launched with");
+    }
+
+    @Test
+    @DisplayName("0: OPENLINEAGE_* on a run changes nothing but one line that names the variables, never a value")
+    void lineageVariablesChangeNothing() throws Exception {
+        Result result = run(Map.of("ADHAR_BATCH_PARAMS", "{\"businessDate\":\"2026-11-03\"}",
+                "OPENLINEAGE_URL", "http://127.0.0.1:1/unreachable", "OPENLINEAGE_NAMESPACE", "adhar/org/team/dev",
+                "OPENLINEAGE_API_KEY", "bot-token-value"));
+
+        assertThat(result.exitCode()).as(result.stdout()).isZero();
+        assertThat(result.summary().get("outcome").asText()).isEqualTo("completed");
+        assertThat(result.stdout().lines().filter(line -> line.contains("OpenLineage")).toList())
+                .as(result.stdout()).singleElement().asString()
+                .contains("OPENLINEAGE_URL, OPENLINEAGE_NAMESPACE, OPENLINEAGE_API_KEY set")
+                .doesNotContain("OPENLINEAGE_ENDPOINT");
+        assertThat(result.stdout()).doesNotContain("bot-token-value", "127.0.0.1:1", "adhar/org/team/dev");
+    }
+
+    @Test
+    @DisplayName("0: a run pod of a service configured for the engine quartz runs without spring.application.name; "
+            + "only the embedded scheduler needs the name")
+    void theQuartzEnginesNameIsNotARunPodsConcern() throws Exception {
+        Result result = run(Map.of("ADHAR_BATCH_PARAMS", "{\"businessDate\":\"2026-11-03\"}",
+                "ADHAR_BATCH_SCHEDULER_ENABLED", "true", "ADHAR_BATCH_SCHEDULER_ENGINE", "quartz"));
+
+        assertThat(result.exitCode()).as(result.stdout()).isZero();
+        assertThat(result.summary().get("outcome").asText()).isEqualTo("completed");
+    }
+
     @Test
     @DisplayName("3: failed, not retryable")
     void notRetryable() throws Exception {

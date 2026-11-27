@@ -227,20 +227,105 @@ class SpringCronTest {
     }
 
     @Test
-    @DisplayName("a clock-change difference is two fire times within one transition's shift of it, and nothing wider")
+    @DisplayName("a clock-change difference: the zone changes offset there, and at both its offsets the parsers agree")
     void whatCountsAsAClockChange() {
-        assertThat(SpringCron.atClockChange(Instant.parse("2026-11-01T05:00:00Z"), Instant.parse("2026-11-01T06:00:00Z"),
-                NEW_YORK)).as("the repeated hour's two 01:00").isTrue();
-        assertThat(SpringCron.atClockChange(Instant.parse("2026-11-01T05:30:00Z"), Instant.parse("2026-11-01T06:30:00Z"),
-                NEW_YORK)).isTrue();
-        assertThat(SpringCron.atClockChange(Instant.parse("2026-11-01T05:30:00Z"), Instant.parse("2026-11-01T07:30:00Z"),
-                NEW_YORK)).as("two hours apart").isFalse();
-        assertThat(SpringCron.atClockChange(Instant.parse("2026-11-01T05:30:00Z"), Instant.parse("2026-11-02T06:30:00Z"),
-                NEW_YORK)).as("a day apart").isFalse();
-        assertThat(SpringCron.atClockChange(Instant.parse("2026-11-01T05:30:00Z"), Instant.parse("2026-11-01T06:30:00Z"),
-                ZoneOffset.UTC)).as("a zone without that change").isFalse();
-        assertThat(SpringCron.atClockChange(Instant.parse("2026-11-01T05:30:00Z"), null, NEW_YORK))
-                .as("one parser never fires").isFalse();
+        var daily0130 = org.springframework.scheduling.support.CronExpression.parse("0 30 1 * * *");
+        Instant saturday = Instant.parse("2026-10-31T05:30:00Z");
+
+        assertThat(SpringCron.atClockChange(daily0130, "0 30 1 * * ?", saturday, Instant.parse("2026-11-01T05:30:00Z"),
+                Instant.parse("2026-11-01T06:30:00Z"), NEW_YORK)).as("the repeated hour's two 01:30").isTrue();
+        assertThat(SpringCron.atClockChange(daily0130, "0 30 2 * * ?", saturday, Instant.parse("2026-11-01T05:30:00Z"),
+                Instant.parse("2026-11-01T07:30:00Z"), NEW_YORK)).as("an hour off at every offset").isFalse();
+        assertThat(SpringCron.atClockChange(daily0130, "0 30 1 ? * 1-6", saturday.minusSeconds(86_400),
+                saturday, Instant.parse("2026-11-01T06:30:00Z"), NEW_YORK))
+                .as("a day apart beside the change, and a day apart without it").isFalse();
+        assertThat(SpringCron.atClockChange(daily0130, "0 30 1 * * ?", saturday, Instant.parse("2026-11-01T05:30:00Z"),
+                Instant.parse("2026-11-01T06:30:00Z"), ZoneOffset.UTC)).as("a zone without that change").isFalse();
+        assertThat(SpringCron.atClockChange(daily0130, "0 30 1 * * ?", Instant.parse("2026-06-01T00:00:00Z"),
+                Instant.parse("2026-06-01T05:30:00Z"), Instant.parse("2026-06-01T06:30:00Z"), NEW_YORK))
+                .as("far from any change").isFalse();
+        assertThat(SpringCron.atClockChange(daily0130, "0 30 1 * * ?", saturday, Instant.parse("2026-11-01T05:30:00Z"),
+                null, NEW_YORK)).as("one parser never fires").isFalse();
+    }
+
+    // ------------------------------------------------------------------
+    // Clock changes of other shapes, and wrong conversions beside them (verifier, 2026-11-25)
+    // ------------------------------------------------------------------
+
+    private static final ZoneId NUUK = ZoneId.of("America/Nuuk");
+    private static final ZoneId LORD_HOWE = ZoneId.of("Australia/Lord_Howe");
+    private static final ZoneId TROLL = ZoneId.of("Antarctica/Troll");
+
+    @Test
+    @DisplayName("a change at 23:00 makes one parser fire a day away from the other: that warns, it does not fail")
+    void aClockChangeThatMovesAFireByADayWarns() {
+        // Nuuk springs forward 23:00 -> 00:00 on 28 March 2026: Spring drops that evening's 22:00, Quartz the next one.
+        SpringCron.Conversion conversion = SpringCron.convert("0 0 22 * * *", NUUK);
+
+        assertThat(conversion.quartz()).isEqualTo("0 0 22 * * ?");
+        assertThat(conversion.clockChanges()).singleElement().satisfies(change -> {
+            assertThat(change.zone()).isEqualTo(NUUK);
+            assertThat(change.spring()).isEqualTo(Instant.parse("2026-03-29T23:00:00Z"));
+            assertThat(change.quartz()).isEqualTo(Instant.parse("2026-03-29T00:00:00Z"));
+        });
+        // Lord Howe's half-hour change (Quartz skips the 01:00 before it) and Troll's two-hour one.
+        assertThat(SpringCron.verify("@hourly", "0 0 * * * *", "0 0 * * * ?", Instant.parse("2026-04-04T11:00:00Z"),
+                List.of(LORD_HOWE))).singleElement().satisfies(change -> assertThat(change.spring())
+                .isEqualTo(Instant.parse("2026-04-04T14:00:00Z")));
+        assertThat(SpringCron.verify("0 30 1-3 * * *", "0 30 1-3 * * *", "0 30 1-3 * * ?",
+                Instant.parse("2026-03-28T21:00:00Z"), List.of(TROLL))).extracting(SpringCron.ClockChange::zone)
+                .containsExactly(TROLL);
+    }
+
+    @Test
+    @DisplayName("a wrong day of the week that lands on the day of a clock change still fails, at that very slot")
+    void aWrongDayOnTheDayOfAClockChangeStillFails() {
+        // 1 November 2026 is New York's fall-back Sunday: Saturday and Monday are a day from it.
+        for (String wrong : List.of("0 30 1 ? * SAT", "0 30 1 ? * MON")) {
+            assertThatThrownBy(() -> SpringCron.verify("0 30 1 * * SUN", "0 30 1 * * SUN", wrong,
+                    Instant.parse("2026-10-30T00:00:00Z"), List.of(NEW_YORK)))
+                    .as(wrong).isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("disagree at slot 1 after 2026-10-30T00:00:00Z in America/New_York");
+        }
+        // The same in Nuuk, where a correct 22:00 is a day apart at the change: a 21:00 whose Quartz 1-6 drops
+        // Saturday lands a day from it too, across the change, and is still refused there.
+        assertThatThrownBy(() -> SpringCron.verify("0 0 21 * * *", "0 0 21 * * *", "0 0 21 ? * 1-6",
+                Instant.parse("2026-03-27T12:00:00Z"), List.of(NUUK)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("disagree at slot 2 after 2026-03-27T12:00:00Z in America/Nuuk");
+    }
+
+    @Test
+    @DisplayName("every 15 minutes and @hourly across both of New York's changes: the gap agrees, the overlap differs once")
+    void subHourlyExpressionsAcrossBothChanges() {
+        Instant beforeTheGap = Instant.parse("2026-03-07T12:00:00Z");
+        Instant beforeTheOverlap = Instant.parse("2026-10-31T12:00:00Z");
+
+        assertThat(SpringCron.verify("0 */15 * * * *", "0 */15 * * * *", "0 */15 * * * ?", beforeTheGap,
+                List.of(NEW_YORK))).isEmpty();
+        assertThat(SpringCron.verify("@hourly", "0 0 * * * *", "0 0 * * * ?", beforeTheGap, List.of(NEW_YORK))).isEmpty();
+        assertThat(SpringCron.verify("0 */15 * * * *", "0 */15 * * * *", "0 */15 * * * ?", beforeTheOverlap,
+                List.of(NEW_YORK))).singleElement().satisfies(change -> {
+            assertThat(change.spring()).isEqualTo(Instant.parse("2026-11-01T05:00:00Z"));
+            assertThat(change.quartz()).isEqualTo(Instant.parse("2026-11-01T06:00:00Z"));
+        });
+        assertThat(SpringCron.verify("@hourly", "0 0 * * * *", "0 0 * * * ?", beforeTheOverlap, List.of(NEW_YORK)))
+                .singleElement().satisfies(change -> assertThat(change.date()).isEqualTo(LocalDate.of(2026, 11, 1)));
+        // A quarter-hour off is wrong at every offset, beside the change or not.
+        assertThatThrownBy(() -> SpringCron.verify("0 */15 * * * *", "0 */15 * * * *", "0 5/15 * * * ?",
+                beforeTheOverlap, List.of(NEW_YORK))).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("disagree at slot 1");
+    }
+
+    @Test
+    @DisplayName("a service zone without clock changes is checked, and only the agreement zones' changes are named")
+    void aServiceZoneWithoutClockChanges() {
+        ZoneId singapore = ZoneId.of("Asia/Singapore");
+
+        assertThat(SpringCron.zones(singapore)).endsWith(singapore).hasSize(5);
+        assertThat(SpringCron.convert("0 30 1 * * *", singapore).clockChanges()).extracting(SpringCron.ClockChange::zone)
+                .containsExactly(NEW_YORK, LONDON);
+        assertThat(SpringCron.convert("@hourly", singapore).quartz()).isEqualTo("0 0 * * * ?");
     }
 
     @Test

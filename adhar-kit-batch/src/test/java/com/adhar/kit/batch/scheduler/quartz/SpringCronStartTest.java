@@ -87,7 +87,7 @@ class SpringCronStartTest extends QuartzEngineFixture {
                         + "Quartz at 2026-10-25T01:30Z")
                 .doesNotContain("Australia/Sydney")
                 .contains("This service schedules in Z, which has no clock changes, so its own fires are unaffected")
-                .contains("move it out of 01:00-02:59")
+                .contains("move it out of the local hours those changes repeat or skip (01:00-02:59 in New York, London and Sydney)")
                 .contains("adhar.batch.quartz.triggers cron trigger in Quartz syntax"));
         assertThat(differences(SCHEDULE_NAME)).as("one per zone it moves in").isEqualTo(2.0);
     }
@@ -141,6 +141,22 @@ class SpringCronStartTest extends QuartzEngineFixture {
 
         assertThat(warnings()).singleElement().satisfies(warning -> assertThat(warning)
                 .contains("This service schedules in Asia/Singapore, which has no clock changes"));
+    }
+
+    @Test
+    @DisplayName("a service in Nuuk, whose 23:00 change moves a 22:00 fire by a day, starts with a warning")
+    void aServiceWhoseChangeMovesAFireByADay() throws Exception {
+        properties.getScheduler().setTimeZone(ZoneId.of("America/Nuuk"));
+        properties.getScheduler().getJobs().put("cronLatest", "0 0 22 * * *");
+
+        reconciledWithMeters();
+
+        assertThat(storedExpression(SCHEDULE_NAME)).isEqualTo("0 0 22 * * ?");
+        assertThat(warnings()).singleElement().satisfies(warning -> assertThat(warning)
+                .contains("in America/Nuuk on 2026-03-29 Spring fires at 2026-03-29T22:00-01:00, "
+                        + "Quartz at 2026-03-28T22:00-02:00")
+                .contains("This service schedules in America/Nuuk: the quartz engine fires it at Quartz's time"));
+        assertThat(differences(SCHEDULE_NAME)).isEqualTo(1.0);
     }
 
     @Test

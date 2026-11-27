@@ -121,8 +121,34 @@ public class QuartzConfiguration {
      */
     public QuartzConfiguration(Environment environment, BatchProperties properties) {
         String schedulerName = schedulerName(properties, environment);
+        requireApplicationName(environment, schedulerName);
         this.owned = ownedQuartzProperties(properties, schedulerName);
         verify(environment, properties, schedulerName, owned);
+    }
+
+    /**
+     * FQ4 rests on every JobDetail naming its application. Without {@code spring.application.name}
+     * the name would be the scheduler's, so two unnamed services that share one
+     * {@code scheduler-name} and database would each read the other's jobs as its own retired ones
+     * and delete them, triggers and all, instead of failing the start. The message names the
+     * scheduler name as the application name to choose for a service that already ran unnamed: that
+     * is the owner its stored jobs carry, and {@code refuseForeignJobs} refuses any other.
+     *
+     * @param environment   the environment, for {@code spring.application.name}
+     * @param schedulerName the cluster's identity, for the message
+     * @throws IllegalStateException when the application has no name
+     */
+    static void requireApplicationName(Environment environment, String schedulerName) {
+        if (!StringUtils.hasText(environment.getProperty("spring.application.name"))) {
+            throw new IllegalStateException("spring.application.name is required with "
+                    + "adhar.batch.scheduler.engine=quartz: every Quartz job records the application that owns it, "
+                    + "and a start removes the jobs its own application no longer defines. Without a name, another "
+                    + "unnamed service on adhar.batch.quartz.scheduler-name '" + schedulerName + "' and this "
+                    + "database would have its jobs and triggers deleted as retired instead of the start being "
+                    + "refused (design 0025 FQ4). Set spring.application.name, distinct per service. A service that "
+                    + "already ran here without one recorded '" + schedulerName + "' as the owner of its jobs: name "
+                    + "it that, or its next start is refused as another application's.");
+        }
     }
 
     /**
@@ -319,7 +345,8 @@ public class QuartzConfiguration {
                                                 Environment environment) {
         Map<String, Job> jobs = beanFactory.getBeansOfType(Job.class);
         String schedulerName = schedulerName(properties, environment);
-        String application = environment.getProperty("spring.application.name", schedulerName);
+        // Never the scheduler's name: the constructor refused a start without spring.application.name.
+        String application = environment.getRequiredProperty("spring.application.name");
         CalendarRegistry calendars = new CalendarRegistry(CalendarRegistry.bind(environment),
                 properties.getScheduler().getTimeZone());
         Clock clock = Clock.systemUTC();

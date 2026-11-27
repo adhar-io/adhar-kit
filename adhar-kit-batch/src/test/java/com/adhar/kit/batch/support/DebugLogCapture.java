@@ -32,6 +32,13 @@ public final class DebugLogCapture implements AutoCloseable {
         return appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
     }
 
+    /**
+     * @return every event logged so far, in order
+     */
+    public List<ILoggingEvent> events() {
+        return List.copyOf(appender.list);
+    }
+
     @Override
     public void close() {
         logger.detachAppender(appender);

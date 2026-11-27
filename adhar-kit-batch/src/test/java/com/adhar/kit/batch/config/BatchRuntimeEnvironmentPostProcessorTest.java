@@ -2,8 +2,11 @@ package com.adhar.kit.batch.config;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.config.ConfigDataEnvironmentPostProcessor;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Configuration;
@@ -151,6 +154,48 @@ class BatchRuntimeEnvironmentPostProcessorTest {
         assertThat(environment.getProperty("adhar.batch.scheduler.enabled")).isEqualTo("false");
         assertThat(environment.getProperty("adhar.batch.job")).as("relaxed binding of ADHAR_BATCH_JOB")
                 .isEqualTo("importJob");
+    }
+
+    private static MockEnvironment withVariables(Map<String, Object> variables) {
+        MockEnvironment environment = new MockEnvironment();
+        environment.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, variables));
+        return environment;
+    }
+
+    @ParameterizedTest(name = "ADHAR_BATCH_MODE={0}")
+    @ValueSource(strings = {"embedded", "auto", "chunked", "kubernetes"})
+    @DisplayName("ADHAR_BATCH_DISTRIBUTION makes the pod a run pod: ADHAR_BATCH_MODE is ignored, valid or not")
+    void distributionIgnoresTheMode(String mode) {
+        MockEnvironment environment = withVariables(Map.of("ADHAR_BATCH_DISTRIBUTION", "chunked",
+                "ADHAR_BATCH_MODE", mode)).withProperty(JOB_ENABLED, "true");
+
+        process(environment);
+
+        assertThat(environment.getProperty("adhar.batch.mode")).isEqualTo("kubernetes");
+        assertThat(Binder.get(environment).bind("adhar.batch", BatchProperties.class).get().getMode())
+                .as("what the runner's beans key on").isEqualTo(BatchProperties.Mode.KUBERNETES);
+        assertThat(environment.getProperty(JOB_ENABLED)).as("Spring Boot's job runner would start every job as a "
+                + "single run on each pod").isEqualTo("false");
+        assertThat(environment.getProperty("spring.main.web-application-type")).isEqualTo("none");
+    }
+
+    @Test
+    @DisplayName("without ADHAR_BATCH_DISTRIBUTION the mode decides as before: the variable, not the property, is the mark")
+    void theModeDecidesWithoutTheDistributionVariable() {
+        MockEnvironment embedded = withVariables(Map.of("ADHAR_BATCH_JOB", "importJob", "ADHAR_BATCH_MODE", "embedded",
+                "ADHAR_BATCH_DISTRIBUTION", " "));
+        process(embedded);
+        assertThat(embedded.getProperty("adhar.batch.mode")).isEqualTo("embedded");
+        assertThat(embedded.getPropertySources().contains(BatchRuntimeEnvironmentPostProcessor.KUBERNETES_SOURCE_NAME)).isFalse();
+
+        // A service that spells the default out in its application.yaml is no run pod.
+        MockEnvironment service = new MockEnvironment().withProperty("adhar.batch.distribution", "partitioned");
+        process(service);
+        assertThat(service.getPropertySources().contains(BatchRuntimeEnvironmentPostProcessor.KUBERNETES_SOURCE_NAME)).isFalse();
+
+        assertThatThrownBy(() -> process(withVariables(Map.of("ADHAR_BATCH_MODE", "chunked"))))
+                .hasMessageContaining("adhar.batch.mode must be auto, kubernetes or embedded, was 'chunked'");
     }
 
     @Test

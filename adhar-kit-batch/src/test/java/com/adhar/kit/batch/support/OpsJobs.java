@@ -27,7 +27,8 @@ import java.util.stream.LongStream;
  * processor that rejects the ids in {@link #REJECT_PROCESS} and a STEP-SCOPED writer that rejects
  * the ids in {@link #REJECT_WRITE} and records the rest with the run's {@code run} parameter in
  * {@code OPS_LEDGER}. Rejected entries are skipped and dead-lettered, so a dlq-replay has
- * something to send through the same processor and writer, under the original step scope.
+ * something to send through the same processor and writer, under the original step scope. An id in
+ * {@link #FAIL_WRITE} fails the write with an error that is not skipped, which fails the step.
  */
 @Configuration(proxyBeanMethods = false)
 public class OpsJobs {
@@ -44,6 +45,9 @@ public class OpsJobs {
     /** Ids the writer rejects (skipped in write). */
     public static final Set<Long> REJECT_WRITE = ConcurrentHashMap.newKeySet();
 
+    /** Ids the writer fails on with an error the step does not skip, so the step fails. */
+    public static final Set<Long> FAIL_WRITE = ConcurrentHashMap.newKeySet();
+
     /** Ids the processor was called with, in order. */
     public static final List<Long> PROCESSED = new CopyOnWriteArrayList<>();
 
@@ -55,6 +59,7 @@ public class OpsJobs {
     public static void reset() {
         REJECT_PROCESS.clear();
         REJECT_WRITE.clear();
+        FAIL_WRITE.clear();
         PROCESSED.clear();
     }
 
@@ -92,6 +97,9 @@ public class OpsJobs {
             for (Entry entry : chunk) {
                 if (REJECT_WRITE.contains(entry.id())) {
                     throw new IllegalArgumentException("entry " + entry.id() + " is refused by the ledger");
+                }
+                if (FAIL_WRITE.contains(entry.id())) {
+                    throw new IllegalStateException("the ledger is unavailable at entry " + entry.id());
                 }
                 jdbc.update("INSERT INTO OPS_LEDGER (ID, RUN) VALUES (?, ?)", entry.id(), run);
             }

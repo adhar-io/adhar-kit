@@ -102,8 +102,13 @@ class QuartzConfigurationTest {
         return properties;
     }
 
+    /** A service's environment: the engine quartz refuses one without {@code spring.application.name}. */
+    private static MockEnvironment named() {
+        return new MockEnvironment().withProperty("spring.application.name", "orders-service");
+    }
+
     private static void assertRefused(String property, String value, String... message) {
-        assertThatThrownBy(() -> new QuartzConfiguration(new MockEnvironment().withProperty(property, value), orders()))
+        assertThatThrownBy(() -> new QuartzConfiguration(named().withProperty(property, value), orders()))
                 .as(property + "=" + value).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(property + " is '" + value + "'").hasMessageContaining("Remove the property")
                 .hasMessageContainingAll(message);
@@ -117,7 +122,7 @@ class QuartzConfigurationTest {
         assertRefused("spring.quartz.overwrite-existing-jobs", "false", "needs 'true'", "follow the properties at every start");
         assertRefused("spring.quartz.wait-for-jobs-to-complete-on-shutdown", "true", "needs 'false'",
                 "the kit's own lifecycle stops the runs first");
-        assertThatThrownBy(() -> new QuartzConfiguration(new MockEnvironment()
+        assertThatThrownBy(() -> new QuartzConfiguration(named()
                 .withProperty("spring.quartz.scheduler-name", "payments"), orders()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("spring.quartz.scheduler-name is 'payments'")
@@ -146,7 +151,7 @@ class QuartzConfigurationTest {
     @Test
     @DisplayName("the same values, however an application spells them, and settings the kit does not own are accepted")
     void agreeingSettingsAreAccepted() {
-        MockEnvironment environment = new MockEnvironment()
+        MockEnvironment environment = named()
                 .withProperty("spring.quartz.job-store-type", " JDBC ")
                 .withProperty("spring.quartz.jdbc.initialize-schema", "never")
                 .withProperty("spring.quartz.overwrite-existing-jobs", "true")
@@ -168,6 +173,61 @@ class QuartzConfigurationTest {
     void theConfigurationNeedsASchedulerName() {
         assertThatThrownBy(() -> new QuartzConfiguration(new MockEnvironment(), new BatchProperties()))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("it is the cluster's identity");
+    }
+
+    @Test
+    @DisplayName("without spring.application.name the start is refused, naming the property: two unnamed services on "
+            + "one scheduler name would delete each other's jobs as retired")
+    void theConfigurationNeedsAnApplicationName() {
+        for (MockEnvironment unnamed : new MockEnvironment[] {new MockEnvironment(),
+                new MockEnvironment().withProperty("spring.application.name", "  ")}) {
+            assertThatThrownBy(() -> new QuartzConfiguration(unnamed, orders()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageStartingWith("spring.application.name is required with adhar.batch.scheduler.engine=quartz")
+                    .hasMessageContaining("adhar.batch.quartz.scheduler-name 'orders'")
+                    .hasMessageContaining("deleted as retired").hasMessageContaining("FQ4")
+                    .as("the name that keeps the jobs of a service that already ran unnamed")
+                    .hasMessageContaining("recorded 'orders' as the owner of its jobs: name it that");
+        }
+        // The scheduler's name may still come from the application's: one property then names both.
+        assertThatCode(() -> new QuartzConfiguration(named(), new BatchProperties())).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("the owner recorded on every Quartz job is spring.application.name, never the scheduler name two services may share")
+    void theOwnerIsTheApplicationNotTheScheduler() throws Exception {
+        assertThat(storedOwner(named())).isEqualTo("orders-service");
+        assertThatThrownBy(() -> storedOwner(new MockEnvironment())).as("no fallback to the scheduler name 'orders'")
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("spring.application.name");
+    }
+
+    /** The application the engine bean writes on a JobDetail, built as the configuration builds it. */
+    private static String storedOwner(MockEnvironment environment) throws Exception {
+        EmbeddedDatabase h2 = new EmbeddedDatabaseBuilder().setType(EmbeddedDatabaseType.H2)
+                .setName("quartz-owner-" + System.nanoTime()).addScript("classpath:adhar-batch-test/h2-schema.sql").build();
+        try {
+            BatchProperties properties = orders();
+            // The bean method alone: the constructor's refusal is theConfigurationNeedsAnApplicationName's.
+            QuartzConfiguration configuration = new QuartzConfiguration(named(), properties);
+            StaticListableBeanFactory none = new StaticListableBeanFactory();
+            Job job = mock(Job.class);
+            when(job.getName()).thenReturn("importJob");
+            StaticListableBeanFactory beans = new StaticListableBeanFactory();
+            beans.addBean("importJob", job);
+            Scheduler scheduler = mock(Scheduler.class);
+            when(scheduler.getSchedulerInstanceId()).thenReturn("replica-a");
+            QuartzSchedulerEngine engine = configuration.quartzSchedulerEngine(scheduler, mock(BatchOperator.class),
+                    mock(JobRepository.class), beans, none.getBeanProvider(JobParameterSpecRegistry.class),
+                    mock(JobParametersResolver.class), configuration.quartzRunOwnership(h2,
+                            none.getBeanProvider(DataSource.class), new BatchRepositoryLayout(false, "H2", "", "BATCH_")),
+                    h2, none.getBeanProvider(DataSource.class),
+                    new BatchRepositoryLayout(true, "PostgreSQL", "batch", "batch.BATCH_"), properties,
+                    none.getBeanProvider(SchedulerMetrics.class), none.getBeanProvider(BatchRunEventPublisher.class),
+                    environment);
+            return engine.jobDetail("importJob").getJobDataMap().getString(QuartzSchedulerEngine.APPLICATION);
+        } finally {
+            h2.shutdown();
+        }
     }
 
     @Test
@@ -193,7 +253,7 @@ class QuartzConfigurationTest {
     @Test
     @DisplayName("the customizer points Spring Boot's scheduler at the batch DataSource and lays the owned settings over the application's")
     void theCustomizer() {
-        MockEnvironment environment = new MockEnvironment();
+        MockEnvironment environment = named();
         BatchProperties properties = orders();
         QuartzConfiguration configuration = new QuartzConfiguration(environment, properties);
         DataSource primary = mock(DataSource.class);
@@ -231,7 +291,7 @@ class QuartzConfigurationTest {
         EmbeddedDatabase h2 = new EmbeddedDatabaseBuilder().setType(EmbeddedDatabaseType.H2)
                 .setName("quartz-beans-" + System.nanoTime()).addScript("classpath:adhar-batch-test/h2-schema.sql").build();
         try {
-            MockEnvironment environment = new MockEnvironment().withProperty("spring.application.version", "1.4.0");
+            MockEnvironment environment = named().withProperty("spring.application.version", "1.4.0");
             BatchProperties properties = orders();
             QuartzConfiguration configuration = new QuartzConfiguration(environment, properties);
             BatchRepositoryLayout layout = new BatchRepositoryLayout(false, "H2", "", "BATCH_");
@@ -284,6 +344,7 @@ class QuartzConfigurationTest {
         properties.put("adhar.batch.scheduler.enabled", "true");
         properties.put("adhar.batch.scheduler.engine", "quartz");
         properties.put("adhar.batch.quartz.scheduler-name", "orders");
+        properties.put("spring.application.name", "orders-service");
 
         assertThatThrownBy(() -> BatchTestApplication.builder(TestJobs.class).properties(properties).run().close())
                 .hasRootCauseInstanceOf(BatchSchemaMigrationException.class)

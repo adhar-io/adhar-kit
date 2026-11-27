@@ -823,6 +823,264 @@ class OpsCommandsTest extends RunnerFixture {
         assertThat(racing.jobsOf(executionId)).containsExactly(OpsJobs.LEDGER_JOB);
     }
 
+    // -------------------------------------------------------------------------------------------
+    // dlq-replay: one write per item a restart dead-lettered twice
+    // -------------------------------------------------------------------------------------------
+
+    private long ledgerCount(String run, long id) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM OPS_LEDGER WHERE RUN = ? AND ID = ?", Long.class, run, id);
+    }
+
+    private List<Long> replayedBy(long executionId) {
+        return jdbc.queryForList("SELECT REPLAY_EXECUTION_ID FROM ADHAR_BATCH_DEAD_LETTER WHERE JOB_EXECUTION_ID = ? "
+                + "ORDER BY ID", Long.class, executionId);
+    }
+
+    /** A FAILED, ended execution of the instance, as a run that failed leaves it. */
+    private JobExecution ended(JobInstance instance) {
+        JobParameters identity = new JobParametersBuilder().addString("run", "direct").toJobParameters();
+        JobExecution execution = jobRepository.createJobExecution(instance, identity, new ExecutionContext());
+        execution.setStatus(BatchStatus.FAILED);
+        execution.setStartTime(LocalDateTime.now());
+        execution.setEndTime(LocalDateTime.now());
+        jobRepository.update(execution);
+        return execution;
+    }
+
+    private JobInstance instance(String run) {
+        return jobRepository.createJobInstance(OpsJobs.LEDGER_JOB, new JobParametersBuilder().addString("run", run)
+                .toJobParameters());
+    }
+
+    private void deadLetter(JobExecution execution, String step, String item) {
+        jdbc.update("INSERT INTO ADHAR_BATCH_DEAD_LETTER (JOB_EXECUTION_ID, JOB_NAME, STEP_NAME, PHASE, ITEM_TYPE, ITEM, "
+                + "ERROR_CLASS) VALUES (?, ?, ?, 'write', ?, ?, 'java.lang.IllegalArgumentException')",
+                execution.getId(), OpsJobs.LEDGER_JOB, step, OpsJobs.Entry.class.getName(), item);
+    }
+
+    /** Two dead-lettering steps whose writer records {@code step:id:note}, failing while {@code failing} is set. */
+    private DeadLetterReplayer twoSteps(List<String> written, java.util.concurrent.atomic.AtomicBoolean failing) {
+        return twoSteps(written, id -> failing.get());
+    }
+
+    /** Two dead-lettering steps whose writer records {@code step:id:note} and refuses the ids {@code refuses} names. */
+    private DeadLetterReplayer twoSteps(List<String> written, java.util.function.LongPredicate refuses) {
+        com.adhar.kit.batch.fault.DeadLetterReplayRegistry routes = new com.adhar.kit.batch.fault.DeadLetterReplayRegistry();
+        for (String step : List.of("ledgerStep", "auditStep")) {
+            routes.register(step, null, (org.springframework.batch.infrastructure.item.ItemWriter<OpsJobs.Entry>) chunk -> {
+                for (OpsJobs.Entry entry : chunk) {
+                    if (refuses.test(entry.id())) {
+                        throw new IllegalArgumentException("still refused");
+                    }
+                    written.add(step + ":" + entry.id() + ":" + entry.note());
+                }
+            });
+        }
+        return new DeadLetterReplayer(jdbc, "ADHAR_BATCH_DEAD_LETTER", routes, transactionManager, jobRepository,
+                DeadLetterReplayer.Deserializer.standard(), Clock.systemUTC());
+    }
+
+    @Test
+    @DisplayName("a restart that dead-letters an item again: dlq-replay writes it ONCE and counts the other as a duplicate")
+    void aRestartsSecondDeadLetterOfAnItemIsADuplicate() throws Exception {
+        OpsJobs.REJECT_WRITE.add(8L);
+        // Entry 8 is dead-lettered while the step scans its chunk item by item, then entry 9 fails the
+        // step before that chunk commits: the dead letter stays, and the restart scans the chunk again.
+        OpsJobs.FAIL_WRITE.add(9L);
+        RunOutcome failed = ledger("a");
+        assertThat(failed.execution().getStatus()).isEqualTo(BatchStatus.FAILED);
+        OpsJobs.FAIL_WRITE.clear();
+        RunOutcome restart = ledger("a");
+        assertThat(restart.execution().getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(restart.execution().getJobInstance().getInstanceId())
+                .isEqualTo(failed.execution().getJobInstance().getInstanceId());
+        long first = failed.execution().getId();
+        long second = restart.execution().getId();
+        assertThat(pending(first)).as("the failed run's dead letter of entry 8").isEqualTo(1);
+        assertThat(pending(second)).as("the restart's dead letter of the same entry").isEqualTo(1);
+        OpsJobs.reset();
+
+        RunOutcome replay = ops(OpsJobs.LEDGER_JOB, "dlq-replay", first);
+
+        assertThat(replay.exitCode()).isZero();
+        assertThat(replay.reason()).isEqualTo("replayed");
+        assertThat(ledgerCount("a", 8)).as("one write for the one item").isEqualTo(1);
+        JsonNode summary = summaryJson();
+        assertThat(summary.get("replayed").asLong()).isEqualTo(1);
+        assertThat(summary.get("rejected").asLong()).isZero();
+        assertThat(summary.get("duplicates").asLong()).isEqualTo(1);
+        assertThat(summaryFields()).contains("command,replayed,rejected,duplicates");
+        assertThat(pending(second)).as("claimed in the same transaction as the write").isZero();
+        assertThat(replayedBy(first)).as("written by its own replay").containsExactly(first);
+        assertThat(replayedBy(second)).as("marked with the execution whose replay wrote it").containsExactly(first);
+
+        RunOutcome again = ops(OpsJobs.LEDGER_JOB, "dlq-replay", second);
+        assertThat(again.reason()).isEqualTo("nothing-to-replay");
+        assertThat(summaryJson().get("duplicates").asLong()).isZero();
+        assertThat(ledgerCount("a", 8)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("a dead letter recorded after its item's replay is marked a duplicate of that write, not written again")
+    void aDeadLetterRecordedAfterTheReplayIsADuplicate() {
+        JobInstance instance = instance("late");
+        JobExecution first = ended(instance);
+        deadLetter(first, "ledgerStep", "{\"id\":8,\"note\":\"entry-8\"}");
+        List<String> written = new java.util.concurrent.CopyOnWriteArrayList<>();
+        DeadLetterReplayer replayer = twoSteps(written, new java.util.concurrent.atomic.AtomicBoolean());
+        assertThat(replayer.replay(OpsJobs.LEDGER_JOB, first.getId())).isEqualTo(new DeadLetterReplayer.Result(1, 0, 0));
+        JobExecution second = ended(instance);
+        deadLetter(second, "ledgerStep", "{\"id\":8,\"note\":\"entry-8\"}");
+
+        DeadLetterReplayer.Result result = replayer.replay(OpsJobs.LEDGER_JOB, second.getId());
+
+        assertThat(result).isEqualTo(new DeadLetterReplayer.Result(0, 0, 1));
+        assertThat(written).containsExactly("ledgerStep:8:entry-8");
+        assertThat(replayedBy(second.getId())).containsExactly(first.getId());
+    }
+
+    @Test
+    @DisplayName("never twins: the same item in another step, another instance, or a different item with the same key")
+    void onlyTheSameItemOfTheSameStepAndInstanceIsATwin() {
+        JobInstance instance = instance("twins");
+        JobExecution first = ended(instance);
+        JobExecution second = ended(instance);
+        deadLetter(first, "ledgerStep", "{\"id\":8,\"note\":\"entry-8\"}");
+        deadLetter(second, "auditStep", "{\"id\":8,\"note\":\"entry-8\"}");
+        deadLetter(first, "ledgerStep", "{\"id\":5,\"note\":\"entry-5\"}");
+        deadLetter(second, "ledgerStep", "{\"id\":5,\"note\":\"entry-5, corrected\"}");
+        JobExecution other = ended(instance("other"));
+        deadLetter(other, "ledgerStep", "{\"id\":8,\"note\":\"entry-8\"}");
+        List<String> written = new java.util.concurrent.CopyOnWriteArrayList<>();
+        DeadLetterReplayer replayer = twoSteps(written, new java.util.concurrent.atomic.AtomicBoolean());
+
+        assertThat(replayer.replay(OpsJobs.LEDGER_JOB, first.getId())).isEqualTo(new DeadLetterReplayer.Result(2, 0, 0));
+        assertThat(replayer.replay(OpsJobs.LEDGER_JOB, second.getId())).isEqualTo(new DeadLetterReplayer.Result(2, 0, 0));
+        assertThat(replayer.replay(OpsJobs.LEDGER_JOB, other.getId())).isEqualTo(new DeadLetterReplayer.Result(1, 0, 0));
+
+        assertThat(written).containsExactlyInAnyOrder("ledgerStep:8:entry-8", "auditStep:8:entry-8",
+                "ledgerStep:5:entry-5", "ledgerStep:5:entry-5, corrected", "ledgerStep:8:entry-8");
+    }
+
+    @Test
+    @DisplayName("an item one execution itself dead-lettered twice (its input held it twice) is written twice, "
+            + "whichever execution is replayed first")
+    void anItemOneExecutionHeldTwiceIsWrittenTwice() {
+        String item = "{\"id\":3,\"note\":\"entry-3\"}";
+        for (boolean twiceFirst : List.of(true, false)) {
+            jdbc.update("DELETE FROM ADHAR_BATCH_DEAD_LETTER");
+            JobInstance instance = instance("held-twice-" + twiceFirst);
+            JobExecution twice = ended(instance);
+            deadLetter(twice, "ledgerStep", item);
+            deadLetter(twice, "ledgerStep", item);
+            JobExecution once = ended(instance);
+            deadLetter(once, "ledgerStep", item);
+            List<String> written = new java.util.concurrent.CopyOnWriteArrayList<>();
+            DeadLetterReplayer replayer = twoSteps(written, new java.util.concurrent.atomic.AtomicBoolean());
+
+            List<DeadLetterReplayer.Result> results = twiceFirst
+                    ? List.of(replayer.replay(OpsJobs.LEDGER_JOB, twice.getId()),
+                    replayer.replay(OpsJobs.LEDGER_JOB, once.getId()))
+                    : List.of(replayer.replay(OpsJobs.LEDGER_JOB, once.getId()),
+                    replayer.replay(OpsJobs.LEDGER_JOB, twice.getId()));
+
+            assertThat(written).as("replaying %s first", twiceFirst ? "the execution holding it twice" : "the other")
+                    .hasSize(2);
+            assertThat(results.stream().mapToLong(DeadLetterReplayer.Result::duplicates).sum()).isEqualTo(1);
+            assertThat(pending(twice.getId()) + pending(once.getId())).isZero();
+        }
+    }
+
+    @Test
+    @DisplayName("an item that fails again rolls its duplicates' claims back with its own")
+    void aFailedReplayRollsBackTheDuplicatesClaims() {
+        JobInstance instance = instance("rollback");
+        JobExecution first = ended(instance);
+        JobExecution second = ended(instance);
+        deadLetter(first, "ledgerStep", "{\"id\":4,\"note\":\"entry-4\"}");
+        deadLetter(second, "ledgerStep", "{\"id\":4,\"note\":\"entry-4\"}");
+        List<String> written = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean failing = new java.util.concurrent.atomic.AtomicBoolean(true);
+        DeadLetterReplayer replayer = twoSteps(written, failing);
+
+        assertThat(replayer.replay(OpsJobs.LEDGER_JOB, first.getId())).isEqualTo(new DeadLetterReplayer.Result(0, 1, 0));
+        assertThat(pending(second.getId())).as("its twin's claim rolled back too").isEqualTo(1);
+        assertThat(replayedBy(second.getId())).containsOnlyNulls();
+
+        failing.set(false);
+        assertThat(replayer.replay(OpsJobs.LEDGER_JOB, second.getId())).isEqualTo(new DeadLetterReplayer.Result(1, 0, 1));
+        assertThat(written).containsExactly("ledgerStep:4:entry-4");
+        assertThat(pending(first.getId())).isZero();
+        assertThat(replayedBy(first.getId())).containsExactly(second.getId());
+    }
+
+    @Test
+    @DisplayName("a replay that fails midway keeps each write it made with its twin's claim; the restart's replay "
+            + "then writes only the item that failed, once")
+    void aReplayThatFailsMidwayWritesEveryItemOnce() {
+        JobInstance instance = instance("midway");
+        JobExecution first = ended(instance);
+        JobExecution second = ended(instance);
+        for (long id = 1; id <= 3; id++) {
+            deadLetter(first, "ledgerStep", "{\"id\":" + id + ",\"note\":\"entry-" + id + "\"}");
+            deadLetter(second, "ledgerStep", "{\"id\":" + id + ",\"note\":\"entry-" + id + "\"}");
+        }
+        java.util.Set<Long> refused = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        refused.add(2L);
+        List<String> written = new java.util.concurrent.CopyOnWriteArrayList<>();
+        DeadLetterReplayer replayer = twoSteps(written, refused::contains);
+
+        assertThat(replayer.replay(OpsJobs.LEDGER_JOB, first.getId())).isEqualTo(new DeadLetterReplayer.Result(2, 1, 2));
+        assertThat(pending(second.getId())).as("only the twin of the item that failed again").isEqualTo(1);
+
+        refused.clear();
+        assertThat(replayer.replay(OpsJobs.LEDGER_JOB, second.getId())).isEqualTo(new DeadLetterReplayer.Result(1, 0, 1));
+        assertThat(written).containsExactly("ledgerStep:1:entry-1", "ledgerStep:3:entry-3", "ledgerStep:2:entry-2");
+        assertThat(pending(first.getId()) + pending(second.getId())).isZero();
+        assertThat(replayedBy(first.getId())).containsExactly(first.getId(), second.getId(), first.getId());
+        assertThat(replayedBy(second.getId())).containsExactly(first.getId(), second.getId(), first.getId());
+    }
+
+    @Test
+    @DisplayName("a dead letter replayed before replays named their writer (REPLAY_EXECUTION_ID empty) still is its "
+            + "item's write: a later twin is only marked")
+    void aRowReplayedWithoutAWriterCountsAsTheWrite() {
+        JobInstance instance = instance("legacy");
+        JobExecution first = ended(instance);
+        deadLetter(first, "ledgerStep", "{\"id\":8,\"note\":\"entry-8\"}");
+        jdbc.update("UPDATE ADHAR_BATCH_DEAD_LETTER SET REPLAYED_AT = CURRENT_TIMESTAMP WHERE JOB_EXECUTION_ID = ?",
+                first.getId());
+        JobExecution second = ended(instance);
+        deadLetter(second, "ledgerStep", "{\"id\":8,\"note\":\"entry-8\"}");
+        List<String> written = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        DeadLetterReplayer.Result result = twoSteps(written, new java.util.concurrent.atomic.AtomicBoolean())
+                .replay(OpsJobs.LEDGER_JOB, second.getId());
+
+        assertThat(result).isEqualTo(new DeadLetterReplayer.Result(0, 0, 1));
+        assertThat(written).isEmpty();
+        assertThat(replayedBy(second.getId())).containsExactly(first.getId());
+    }
+
+    @Test
+    @DisplayName("a twin whose JSON lists the members in another order (a release reordered the item's fields) is "
+            + "the same item: written once")
+    void aTwinWithReorderedMembersIsTheSameItem() {
+        JobInstance instance = instance("reordered");
+        JobExecution first = ended(instance);
+        JobExecution second = ended(instance);
+        deadLetter(first, "ledgerStep", "{\"id\":8,\"note\":\"entry-8\"}");
+        deadLetter(second, "ledgerStep", "{\"note\": \"entry-8\", \"id\": 8}");
+        List<String> written = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        DeadLetterReplayer.Result result = twoSteps(written, new java.util.concurrent.atomic.AtomicBoolean())
+                .replay(OpsJobs.LEDGER_JOB, first.getId());
+
+        assertThat(result).isEqualTo(new DeadLetterReplayer.Result(1, 0, 1));
+        assertThat(written).containsExactly("ledgerStep:8:entry-8");
+        assertThat(pending(second.getId())).isZero();
+    }
+
     /** A clock a test moves. */
     static final class MutableClock extends Clock {
 

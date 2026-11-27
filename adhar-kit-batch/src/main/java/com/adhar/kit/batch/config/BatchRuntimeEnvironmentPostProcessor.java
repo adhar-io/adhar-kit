@@ -35,7 +35,10 @@ import java.util.Map;
  * by {@code adhar.batch.job} / {@code ADHAR_BATCH_JOB}, which the platform always sets), the pod
  * runs one job and exits, so these are SET, at the highest precedence, not defaulted (design 0025
  * §5.5): an application.yaml written for local runs must not turn a run pod into a web server, or
- * make Spring Boot start every job besides the one named.</p>
+ * make Spring Boot start every job besides the one named. A pod that carries
+ * {@code ADHAR_BATCH_DISTRIBUTION}, which only the platform's run template sets, is in Kubernetes
+ * mode whatever {@code adhar.batch.mode} / {@code ADHAR_BATCH_MODE} says: the mode is ignored there,
+ * valid or not.</p>
  * <ul>
  *   <li>{@code adhar.batch.mode=kubernetes}, the resolved mode the runner's beans key on;</li>
  *   <li>{@code spring.batch.job.enabled=false}: the kit's runner replaces Boot's job runner;</li>
@@ -63,6 +66,12 @@ public class BatchRuntimeEnvironmentPostProcessor implements EnvironmentPostProc
 
     /** The environment variable naming the job of a Kubernetes run. */
     static final String JOB_VARIABLE = "ADHAR_BATCH_JOB";
+
+    /**
+     * The environment variable only the platform's run template sets, on a chunked run (design
+     * 0025 D11). A pod that carries it is a run pod whatever else its environment says.
+     */
+    static final String DISTRIBUTION_VARIABLE = "ADHAR_BATCH_DISTRIBUTION";
 
     /** Loggers that print job parameters at INFO. */
     static final List<String> PARAMETER_LOGGERS = List.of(
@@ -115,9 +124,17 @@ public class BatchRuntimeEnvironmentPostProcessor implements EnvironmentPostProc
     /**
      * @param environment the application's environment
      * @return whether {@code adhar.batch.mode} is {@code kubernetes}, or {@code auto} (the
-     *         default) with a job named
+     *         default) with a job named; always with {@code ADHAR_BATCH_DISTRIBUTION} set, where the
+     *         mode is not read at all
      */
     static boolean isKubernetesMode(ConfigurableEnvironment environment) {
+        if (StringUtils.hasText(environment.getProperty(DISTRIBUTION_VARIABLE))) {
+            // ADHAR_BATCH_MODE is not a variable the platform sets, so on a run pod it can only have
+            // arrived through the job's own env or an un-prefixed envFrom Secret. "embedded" would hand
+            // the pod to Spring Boot's job runner, which starts every job as a single run on each pod
+            // of the gang and never reaches the runner's refusal of the distribution.
+            return true;
+        }
         String mode = environment.getProperty(MODE_PROPERTY, "auto").strip().toLowerCase(Locale.ROOT);
         return switch (mode) {
             case "kubernetes" -> true;

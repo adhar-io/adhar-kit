@@ -124,7 +124,7 @@ timeout, starts the named job once and exits.
 |---|---|
 | 0 | Completed, or skipped: already complete, a duplicate run still alive, not a business day (`calendar`) |
 | 1 | The JVM or context failed before the run (retried) |
-| 2 | Invalid request: parameters, unknown job, incrementer, in-memory repository, migration, business date, unsupported, a role, distribution or partition setting that does not bind, a missing or invalid calendar (`calendar-file`), a restart of a job that lost a step (`definition-changed`) (not retried) |
+| 2 | Invalid request: parameters, unknown job, incrementer, in-memory repository, migration, business date, unsupported, remote chunking (`unsupported-distribution`), a role, distribution or partition setting that does not bind, a missing or invalid calendar (`calendar-file`), a restart of a job that lost a step (`definition-changed`) (not retried) |
 | 3 | Failed, not retryable: `NonRetryableBatchException`, skip limit exceeded, control totals (`control-totals`) (not retried) |
 | 4 | Stopped on request |
 | 5 | Failed, retryable |
@@ -197,7 +197,7 @@ pod acts; a worker exits 0 (`skipped`, reason `worker`).
 | `stop` | asks a running execution to stop at its next chunk boundary; waits `shutdown.timeout` for its owner to let go | 0 `stopped` \| `stop-requested` \| `not-running` |
 | `status` | reports the execution (default: the job's latest), changing nothing | 0, the status in lower case |
 | `housekeeping` | the retention above, on demand | 0 `housekept`; 5 `housekeeping` when it fails |
-| `dlq-replay` | sends ONLY that execution's unreplayed dead letters through their step's processor and writer again, each in its own transaction that marks it `REPLAYED_AT` | 0 `replayed` \| `nothing-to-replay`; **3 `rejected`** while any remain |
+| `dlq-replay` | sends ONLY that execution's unreplayed dead letters through their step's processor and writer again, each in its own transaction that marks it `REPLAYED_AT`; an item a restart dead-lettered again is written once (below) | 0 `replayed` \| `nothing-to-replay`; **3 `rejected`** while any remain |
 
 An execution whose owner pod may still hold it is refused (exit 2 `owner-alive`; a terminating
 owner is waited for, as a run waits). That includes an execution the repository already says is
@@ -212,8 +212,26 @@ never runs again. Items stay rejected when they fail again, were skipped in `rea
 belong to a step whose writer is an `ItemStream`, was set through `customize(...)`, or whose name
 two steps share. Step-scoped processors and writers see the original execution's parameters. Every
 ops run's summary carries `command`, the execution's `executionId` and `status` (absent, as D13
-says, when no such execution exists), a `reason`, and what it counted (`replayed`/`rejected`,
-`deleted`/`kept`, `runningSteps`), never item counts.
+says, when no such execution exists), a `reason`, and what it counted
+(`replayed`/`rejected`/`duplicates`, `deleted`/`kept`, `runningSteps`), never item counts.
+
+**One write per item across a restart.** A write-phase dead letter commits on its own while
+Spring Batch scans the failed chunk item by item, so a step that fails before that chunk commits
+keeps it, and the restart reads the chunk again and dead-letters the same item a second time,
+under the new execution. The replay therefore treats a dead letter of ANOTHER execution of the
+same JobInstance, with the same step name and the same item (its type and its JSON value,
+compared by SHA-256), as a twin: replaying one claims the first unreplayed twin of every other execution in
+the same transaction, marks it replayed with `REPLAY_EXECUTION_ID` set to the replaying execution
+and counts it in `duplicates` instead of writing it. A dead letter whose twin was already written
+(recorded after that replay) is only marked, and an item that fails again rolls its twins' claims
+back with its own. Never twins: rows of different steps or instances, different items that share a
+key, and two equal rows of ONE execution (its input held the item twice; each is written). The
+same JSON value is the same item: member order and whitespace do not count (a release that
+reorders an item's fields between the failed run and its restart, or an application's own table
+that keeps `ITEM` as text rather than JSONB), every digit of a decimal, an array's order and the
+type do. Once housekeeping has deleted the execution its instance is unknown and nothing is
+deduplicated.
+`REPLAY_EXECUTION_ID` names the execution whose replay wrote the item. No schema change.
 
 ## Partitioning inside one pod
 
@@ -297,8 +315,27 @@ run's identity from its declared parameters exactly as the manager does.
 - **Role `single`** (a local run, a test, a service) plays every part: `manager(…)` runs the same
   partitions in the one process.
 
-`adhar.batch.distribution=chunked` (remote chunking) and the transports `kafka` and `amqp` are
-reserved names: a run that names one exits 2 (`unsupported`).
+The transports `kafka` and `amqp` are reserved names: a partitioned run that names one exits 2
+(`unsupported`).
+
+### Not in this kit: remote chunking and lineage
+
+The platform's `BatchJob` accepts `mode: chunked` and `lineage.enabled`; this kit implements
+neither (design 0025, deferred), and says so instead of doing something else:
+
+- **`ADHAR_BATCH_DISTRIBUTION=chunked`** (`adhar.batch.distribution`): every pod of the run, the
+  manager, each worker and each indexed pod, exits 2 with the reason `unsupported-distribution`
+  before parameters are resolved or a step runs. No pod runs the job as a single run. The ops
+  commands (`ADHAR_BATCH_COMMAND`) still work on such a template. Use `mode: partitioned` or
+  `single`.
+- **`ADHAR_BATCH_MODE` is ignored on a pod that carries `ADHAR_BATCH_DISTRIBUTION`.** Only the
+  platform's run template sets that variable, so the pod is a run pod (`kubernetes` mode) whatever
+  a job's own `env` or an un-prefixed `envFrom` Secret says: `embedded` there would hand the pod to
+  Spring Boot's job runner, which starts every job on every pod.
+- **`OPENLINEAGE_URL`, `OPENLINEAGE_ENDPOINT`, `OPENLINEAGE_NAMESPACE`, `OPENLINEAGE_API_KEY`**: the
+  runner logs one INFO line at the start naming the variables that are set (never their values)
+  and ignores them. No lineage event is emitted, there is no `adhar.batch.lineage.events` meter, and
+  the run's outcome and exit code are unaffected.
 
 ## S3 and RustFS
 
@@ -375,11 +412,11 @@ build when the `BatchJob` manifest's parameters differ from `@AdharBatchJob`, it
 | `adhar.batch.partition.grid-size` | env `ADHAR_BATCH_PARTITION_GRIDSIZE` (4) | Partitions per run; the platform passes 4 × workers |
 | `adhar.batch.partition.poll-interval` | `5s` | How often the manager and idle workers read the repository |
 | `adhar.batch.partition.timeout` | env `ADHAR_BATCH_PARTITION_TIMEOUT` (none) | How long the manager waits for every partition; the platform passes the deadline less 5 minutes |
-| `adhar.batch.distribution` | env `ADHAR_BATCH_DISTRIBUTION` (`partitioned`) | `partitioned` \| `chunked` (Phase 4, refused until then) |
+| `adhar.batch.distribution` | env `ADHAR_BATCH_DISTRIBUTION` (`partitioned`) | `partitioned` \| `chunked` (not in this kit: exit 2 `unsupported-distribution`). Set, the variable also makes `adhar.batch.mode` ignored |
 | `adhar.batch.scheduler.enabled` / `.time-zone` / `.misfire-threshold` / `.lock` | `false` / `UTC` / `10m` / `jdbc` | Embedded mode |
 | `adhar.batch.scheduler.lock-lease` / `.lock-renew-interval` / `.pool-size` / `.jobs.<job>` | `2m` / `30s` / `2` / — | Embedded mode |
 | `adhar.batch.scheduler.engine` | `simple` | `simple` \| `quartz` (needs `spring-boot-starter-quartz`) |
-| `adhar.batch.quartz.scheduler-name` | `${spring.application.name}` | The Quartz cluster's identity: one per service |
+| `adhar.batch.quartz.scheduler-name` | `${spring.application.name}` | The Quartz cluster's identity: one per service. `spring.application.name` itself is required with the engine `quartz` |
 | `adhar.batch.quartz.cluster-checkin-interval` / `.misfire` / `.max-catch-up` | `15s` / `latest` / `24` | Failover speed; default misfire policy (`skip` \| `latest` \| `all`); most slots `all` runs |
 | `adhar.batch.quartz.jobs.<job>.name` | the bean name as a DNS label | The schedule name, naming v1's `<batchjob>` |
 | `adhar.batch.quartz.triggers.<job>[n].*` | — | `name`, `kind` (`cron` \| `interval` \| `daily`), `expression` \| `every`/`start` \| `from`/`to`/`every`/`days`, `time-zone`, `calendar`, `misfire`, `priority`, `parameters` |
@@ -432,10 +469,14 @@ adhar.batch:
   must agree or the start fails naming the slot. One kind of difference only WARNS (decided
   2026-11-22): a time a clock change repeats or skips, such as a nightly 01:30 in New York or
   London, where Spring fires at the earlier offset (and again at the later) and Quartz once at
-  the later. The service starts; one WARN names each zone, the date and both fire times, says
-  whether the service's own zone is affected, and gives the remedies (move it out of 01:00-02:59,
-  or write it as a Quartz `cron` trigger); `adhar.batch.scheduler.cron.dst.differences` (job)
-  counts one per zone.
+  the later; or, around a change at 23:00 or of half an hour or two hours (Nuuk, Lord Howe,
+  Troll), a fire one parser drops and the other keeps. A difference counts only when the zone
+  changes offset there and the parsers agree at both offsets, so a wrong conversion still fails
+  however close to a change it lands. The service starts; one WARN names each zone, the date
+  and both fire times, says whether the service's own zone is affected, and gives the remedies
+  (move it out of the hours those changes repeat or skip, 01:00-02:59 in New York, London and
+  Sydney, or write it as a Quartz `cron` trigger); `adhar.batch.scheduler.cron.dst.differences`
+  (job) counts one per zone.
 - **Calendars.** D5's rule: a date is a business day when it is in `businessDays`, or is neither a
   `weekendDays` day nor in `holidays`. An excluded day never fires. A trigger and its calendar
   share one zone or the start fails; a calendar file is re-read every `refresh-interval`, and an
@@ -456,7 +497,12 @@ adhar.batch:
   instant). Invalid parameters throw `ParameterValidationException` before anything is stored.
 - **One service per scheduler name.** Each JobDetail records its application; a start that finds
   another application's jobs under its `scheduler-name` fails. A job the application stopped
-  defining is removed with its triggers, so a rolling update's newest start wins.
+  defining is removed with its triggers, so a rolling update's newest start wins. The application
+  is `spring.application.name`, and the engine `quartz` refuses to start without it: were the
+  scheduler's name used instead, two unnamed services sharing a `scheduler-name` and database
+  would each take the other's jobs for its own retired ones and delete them. A service that already
+  ran without a name recorded its `scheduler-name` as the owner: give it that as its
+  `spring.application.name`, or its next start is refused as another application's.
 - **Meters** (both engines): `adhar.batch.scheduler.next.fire` (gauge, epoch seconds; job,
   trigger), `adhar.batch.scheduler.fires` (job, trigger, outcome: `ran`, `skipped-complete`,
   `skipped-duplicate`, `misfire-skipped`, `recovered`, `failed-to-start`),

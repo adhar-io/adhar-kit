@@ -90,11 +90,38 @@ class OpsCommandsTestContainerTest {
 
         DeadLetterReplayer.Result result = replayer.replay(OpsJobs.LEDGER_JOB, execution.getId());
 
-        assertThat(result).isEqualTo(new DeadLetterReplayer.Result(2, 0));
+        assertThat(result).isEqualTo(new DeadLetterReplayer.Result(2, 0, 0));
         assertThat(jdbc.queryForList("SELECT ID FROM OPS_LEDGER WHERE RUN = 'pg-a' ORDER BY ID", Long.class))
                 .containsExactly(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM batch.ADHAR_BATCH_DEAD_LETTER WHERE JOB_EXECUTION_ID = ? "
                 + "AND REPLAYED_AT IS NOT NULL", Long.class, execution.getId())).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("on PostgreSQL: an item a restart dead-lettered again (JSONB twins) is written once, the other a duplicate")
+    void replayWritesARestartsTwinOnce() throws Exception {
+        OpsJobs.REJECT_WRITE.add(8L);
+        // Entry 9 fails the step after entry 8's write-phase dead letter committed during the scan.
+        OpsJobs.FAIL_WRITE.add(9L);
+        JobExecution failed = ledger("pg-d");
+        assertThat(failed.getStatus()).isEqualTo(BatchStatus.FAILED);
+        OpsJobs.FAIL_WRITE.clear();
+        JobExecution restart = jobOperator.restart(failed);
+        assertThat(restart.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM batch.ADHAR_BATCH_DEAD_LETTER WHERE JOB_EXECUTION_ID IN "
+                + "(?, ?)", Long.class, failed.getId(), restart.getId())).isEqualTo(2);
+        OpsJobs.reset();
+        DeadLetterReplayer replayer = new DeadLetterReplayer(jdbc, "batch.ADHAR_BATCH_DEAD_LETTER", replays,
+                transactionManager, jobRepository, DeadLetterReplayer.Deserializer.standard(), Clock.systemUTC());
+
+        assertThat(replayer.replay(OpsJobs.LEDGER_JOB, restart.getId())).isEqualTo(new DeadLetterReplayer.Result(1, 0, 1));
+        assertThat(replayer.replay(OpsJobs.LEDGER_JOB, failed.getId())).isEqualTo(new DeadLetterReplayer.Result(0, 0, 0));
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM OPS_LEDGER WHERE RUN = 'pg-d' AND ID = 8", Long.class))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForList("SELECT REPLAY_EXECUTION_ID FROM batch.ADHAR_BATCH_DEAD_LETTER WHERE "
+                + "JOB_EXECUTION_ID IN (?, ?)", Long.class, failed.getId(), restart.getId()))
+                .containsOnly(restart.getId());
     }
 
     @Test

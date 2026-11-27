@@ -97,6 +97,7 @@ class QuartzSettingsTestContainerTest {
     void theSchedulerNameIsRequired() {
         Map<String, Object> properties = QuartzContexts.properties(url, "unnamed");
         properties.remove("adhar.batch.quartz.scheduler-name");
+        properties.remove("spring.application.name");
 
         assertThatThrownBy(() -> start(properties))
                 .satisfies(failure -> assertThat(NestedExceptionUtils.getMostSpecificCause(failure).getMessage())
